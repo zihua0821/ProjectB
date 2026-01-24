@@ -4,3 +4,6 @@
 #include "Modules/ModuleManager.h"
 
 IMPLEMENT_PRIMARY_GAME_MODULE( FDefaultGameModuleImpl, ProjectB, "ProjectB" );
+
+DEFINE_LOG_CATEGORY(LogServer);
+DEFINE_LOG_CATEGORY(LogClient);
