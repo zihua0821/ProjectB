@@ -7,6 +7,8 @@
 #include "Components/ActorComponent.h"
 #include "TimeSyncComponent.generated.h"
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnSyncedTimeUpdated, FDateTime, SyncedUTCTime, FDateTime, SyncedLocalTime);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRttUpdated, float, Rtt);
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class PROJECTB_API UTimeSyncComponent : public UActorComponent, public ITimeSyncInterface
@@ -23,7 +25,11 @@ public:
 	// 获取同步的UTC时间
 	virtual FDateTime GetSyncedUTCTime_Implementation() const override;
 	// 获取同步的UTC时间戳（毫秒）
-	virtual int64 GetSyncedUTCTimestamp_Implementation() const override;
+	virtual double GetSyncedUTCTimestamp_Implementation() const override;
+	// 获取同步的本地时间
+	virtual FDateTime GetSyncedLocalTime_Implementation() const override;
+	// 获取同步的本地时间戳（毫秒）
+	virtual double GetSyncedLocalTimestamp_Implementation() const override;
 	// 获取当前RTT（毫秒）
 	virtual float GetCurrentRTT_Implementation() const override
 	{
@@ -44,6 +50,13 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Time Sync")
 	float RttDeltaThreshold = 20.f;
 
+	// =================== 事件 ====================
+	// 时间同步更新事件
+	UPROPERTY(BlueprintAssignable, Category = "Time Sync")
+	FOnSyncedTimeUpdated OnSyncedTimeUpdated;
+	// RTT更新事件
+	UPROPERTY(BlueprintAssignable, Category = "Time Sync")
+	FOnRttUpdated OnRttUpdated;
 private:
 	// RPC：客户端请求时间同步
 	UFUNCTION(Server, Reliable)

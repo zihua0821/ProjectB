@@ -30,8 +30,15 @@ public:
     
 	// 获取同步的UTC时间戳（毫秒）
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Time Sync")
-	int64 GetSyncedUTCTimestamp() const;
+	double GetSyncedUTCTimestamp() const;
+
+	// 获取同步的本地时间
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Time Sync")
+	FDateTime GetSyncedLocalTime() const;
 	
+	// 获取同步的本地时间戳（毫秒）
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Time Sync")
+	double GetSyncedLocalTimestamp() const;
 	// ==================== 网络状态接口 ====================
     
 	// 获取当前RTT（毫秒）

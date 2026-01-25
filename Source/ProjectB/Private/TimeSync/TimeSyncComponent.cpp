@@ -53,9 +53,29 @@ FDateTime UTimeSyncComponent::GetSyncedUTCTime_Implementation() const
 	return FDateTime::UtcNow() + TimeOffset;
 }
 
-int64 UTimeSyncComponent::GetSyncedUTCTimestamp_Implementation() const
+double UTimeSyncComponent::GetSyncedUTCTimestamp_Implementation() const
 {
-	return ITimeSyncInterface::GetSyncedUTCTimestamp_Implementation();
+	return GetSyncedUTCTime_Implementation().ToUnixTimestampDecimal();
+}
+
+FDateTime UTimeSyncComponent::GetSyncedLocalTime_Implementation() const
+{
+	// 获取同步的UTC时间
+	const FDateTime SyncedUtcTime = GetSyncedUTCTime_Implementation();
+	
+	// 将UTC时间转换为本地时间
+	// 在Unreal Engine中，可以通过FDateTime::UtcNow()和FDateTime::Now()的差值来计算本地时区偏移
+	const FDateTime CurrentUtc = FDateTime::UtcNow();
+	const FDateTime CurrentLocal = FDateTime::Now();
+	const FTimespan TimeZoneOffset = CurrentLocal - CurrentUtc;
+	
+	// 应用时区偏移到同步的UTC时间上得到同步的本地时间
+	return SyncedUtcTime + TimeZoneOffset;
+}
+
+double UTimeSyncComponent::GetSyncedLocalTimestamp_Implementation() const
+{
+	return GetSyncedLocalTime_Implementation().ToUnixTimestampDecimal();
 }
 
 void UTimeSyncComponent::RequestTimeSync()
@@ -106,6 +126,7 @@ void UTimeSyncComponent::ProcessTimeSyncResponse(const FDateTime ServerUtcTime, 
 	{
 		const FTimespan RttTimespan = ClientReceiveTime - LastClientSyncTime;
 		CurrentRtt = RttTimespan.GetTotalMilliseconds();
+		OnRttUpdated.Broadcast(CurrentRtt);
 	}
 
 	// 估算服务器当前时间偏移（在客户端接收时刻）
@@ -119,20 +140,17 @@ void UTimeSyncComponent::ProcessTimeSyncResponse(const FDateTime ServerUtcTime, 
 		// 服务器当前时间 = 服务器发送时的UTC时间 + 单向延迟
 		const FDateTime EstimatedServerNow = ServerUtcTime + FTimespan::FromMilliseconds(OneWayDelay);
 		TimeOffset = EstimatedServerNow - ClientReceiveTime;
-		UE_LOG(LogTemp, Log, TEXT("对称"));
 	}
 	else
 	{
 		// 非对称取最小延迟
 		const float MinDelay = FMath::Min(ClientToServerTime, ServerToClientTime);
 		TimeOffset = FTimespan::FromMilliseconds(MinDelay);
-		UE_LOG(LogTemp, Log, TEXT("非对称"));
 	}
-	const FDateTime SyncedLocalUtc = GetSyncedUTCTime_Implementation();
-    UE_LOG(LogTemp, Log, TEXT("[%s] TimeOffset: [%f] ms"), *PlayerName, TimeOffset.GetTotalMilliseconds());
-    UE_LOG(LogTemp, Log, TEXT("LocalUTC:%d年%d月%d日%d时%d分%d秒%d毫秒"), ClientReceiveTime.GetYear(), ClientReceiveTime.GetMonth(), ClientReceiveTime.GetDay(), ClientReceiveTime.GetHour(), ClientReceiveTime.GetMinute(), ClientReceiveTime.GetSecond(), ClientReceiveTime.GetMillisecond());
-	UE_LOG(LogTemp, Log, TEXT("SyncedLocalUTC:%d年%d月%d日%d时%d分%d秒%d毫秒"), SyncedLocalUtc.GetYear(), SyncedLocalUtc.GetMonth(), SyncedLocalUtc.GetDay(), SyncedLocalUtc.GetHour(), SyncedLocalUtc.GetMinute(), SyncedLocalUtc.GetSecond(), SyncedLocalUtc.GetMillisecond());
+	const FDateTime SyncedUtc = GetSyncedUTCTime_Implementation();
+	const FDateTime SyncedLocalUtc = GetSyncedLocalTime_Implementation();
 
+	OnSyncedTimeUpdated.Broadcast(SyncedUtc, SyncedLocalUtc);
 	// 标记已初始化
 	bInitialized = true;
 
