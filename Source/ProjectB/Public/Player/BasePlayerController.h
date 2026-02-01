@@ -6,6 +6,7 @@
 #include "GameFramework/PlayerController.h"
 #include "BasePlayerController.generated.h"
 
+class AFarmlandActor;
 class UTimeSyncComponent;
 /**
  * 
@@ -18,7 +19,15 @@ class PROJECTB_API ABasePlayerController : public APlayerController
 public:
 	ABasePlayerController();
 protected:
+	virtual void BeginPlay() override;
 	// 时间同步组件
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Time Sync")
 	TObjectPtr<UTimeSyncComponent> TimeSyncComponent;
+
+private:
+	UFUNCTION(BlueprintCallable)
+	void OnLeftMouseClick();
+
+	// 射线检测获取点击的农场和单元格
+	bool TraceForFarmlandAndCell(FVector& OutHitLocation, AFarmlandActor*& OutFarmland, FIntPoint& OutCellCoords);
 };
