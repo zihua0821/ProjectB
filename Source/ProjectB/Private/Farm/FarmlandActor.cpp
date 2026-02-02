@@ -201,8 +201,22 @@ FFarmLandPlotInfo AFarmlandActor::GetPlotInfo(const FIntPoint& PlotCoords) const
 	return FarmlandComponent->GetPlotInfo(PlotCoords);
 }
 
+void AFarmlandActor::PlowLand(const FIntPoint PlowCoords) const
+{
+	if (!FarmlandComponent)
+	{
+		return ;
+	}
+	FarmlandComponent->PlowLand(PlowCoords);
+}
+
 void AFarmlandActor::InitializeComponents()
 {
+	if (bComponentsInitialized && GetWorld()->WorldType != EWorldType::Editor)
+	{
+		return;
+	}
+	bComponentsInitialized = true;
 	// 设置地面网格
 	if (GroundMesh)
 	{
@@ -254,17 +268,18 @@ void AFarmlandActor::InitializeComponents()
 			FTransform CellTransform;
 			CellTransform.SetLocation(FVector(PosX, PosY, PosZ));
 			CellTransform.SetScale3D(InstanceScale);
-            
+			FFarmLandPlotInfo PlotInfo;
+			PlotInfo.Transform = CellTransform;
 			// 添加到渲染器
 			if (bInitAllLandCells)
 			{
+				PlotInfo.StateData.AddState(EPlotState::Plowed);
 				int32 InstanceIndex = LandCellRenderer->AddInstance(CellTransform);
 				PlotToLandInstanceIndex.Add(PlotIndex, InstanceIndex);
 			}
             
 			// 记录映射
-			FFarmLandPlotInfo PlotInfo;
-			PlotInfo.Transform = CellTransform;
+			
 			PlotInfoIndex.Add(FIntPoint(X, Y), PlotInfo);
 		}
 	}
@@ -280,7 +295,7 @@ void AFarmlandActor::InitializeComponents()
 	
 }
 
-void AFarmlandActor::UpdateGroundMeshSize()
+void AFarmlandActor::UpdateGroundMeshSize() const
 {
 	if (!GroundMeshComponent || !GroundMesh) return;
 

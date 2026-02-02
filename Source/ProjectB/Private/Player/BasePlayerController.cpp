@@ -26,12 +26,21 @@ void ABasePlayerController::OnLeftMouseClick()
 	FIntPoint CellCoords;
 	if (TraceForFarmlandAndCell(HitLocation, HitFarmland, CellCoords))
 	{
-		FFarmLandPlotInfo PlotInfo = HitFarmland->GetPlotInfo(CellCoords);
 		DrawDebugSphere(GetWorld(), HitLocation, 10.f, 12, FColor::Red, false, 3.f);
-		GEngine->AddOnScreenDebugMessage(-1,
-			3.f,
-			FColor::Red,
-			FString::Printf(TEXT("Hit Farmland: %s (%d,%d) %s"), *HitFarmland->GetName(), CellCoords.X, CellCoords.Y, *PlotInfo.StateData.ToString()));
+		
+		FFarmLandPlotInfo PlotInfo = HitFarmland->GetPlotInfo(CellCoords);
+		if (PlotInfo.StateData.IsEmpty())
+		{
+			HitFarmland->PlowLand(CellCoords);
+		}
+		else
+		{
+			GEngine->AddOnScreenDebugMessage(-1,
+				3.f,
+				FColor::Red,
+				FString::Printf(TEXT("Hit Farmland: %s (%d,%d) %s"), *HitFarmland->GetName(), CellCoords.X, CellCoords.Y, *PlotInfo.StateData.ToString()));
+		}
+		
 	}
 }
 

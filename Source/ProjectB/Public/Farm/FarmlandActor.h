@@ -138,6 +138,11 @@ public:
 	// 获取地块信息
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
 	FFarmLandPlotInfo GetPlotInfo(const FIntPoint& PlotCoords) const;
+
+	// ====================  农田交互 ====================
+	// 耕地
+	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
+	void PlowLand(FIntPoint PlowCoords) const;
 private:
 	// ==================== 私有方法 ====================
     
@@ -145,7 +150,7 @@ private:
 	void InitializeComponents();
     
 	// 更新地面网格大小
-	void UpdateGroundMeshSize();
+	void UpdateGroundMeshSize() const;
     
 	// 调试绘制
 	void DrawDebugGrid() const;
@@ -157,8 +162,10 @@ private:
     
 	// ==================== 私有属性 ====================
 	// 实例索引
+	UPROPERTY()
 	TMap<int32, int32> PlotToLandInstanceIndex;
 	// 地块信息索引
+	UPROPERTY()
 	TMap<FIntPoint, FFarmLandPlotInfo> PlotInfoIndex;
 	// 实例化渲染组件数组（每个单元格一个土地模型）
 	UPROPERTY()
@@ -169,6 +176,7 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Farmland|Config", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UInstancedStaticMeshComponent> LandCellRenderer;
 	
+	bool bComponentsInitialized = false;
 };
 
 

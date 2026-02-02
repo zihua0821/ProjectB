@@ -3,6 +3,7 @@
 
 #include "Farm/FarmlandComponent.h"
 
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Farm/FarmlandActor.h"
 
@@ -21,6 +22,34 @@ UFarmlandComponent::UFarmlandComponent()
 void UFarmlandComponent::SetFarmLandData(const FFarmLandData& InFarmLandData)
 {
 	FarmLandData = InFarmLandData;
+}
+
+void UFarmlandComponent::PlowLand(FIntPoint PlowCoords)
+{
+	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
+	if (!PlotInfo.StateData.IsEmpty())
+	{
+		return;
+	}
+	PlotInfo.StateData.AddState(EPlotState::Plowed);
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> PlowedLandRenderer = nullptr;
+	if (LandRendererMap.Contains(EPlotState::Plowed))
+	{
+		PlowedLandRenderer = LandRendererMap.FindChecked(EPlotState::Plowed);
+	}
+	else
+	{
+		PlowedLandRenderer = NewObject<UHierarchicalInstancedStaticMeshComponent>(GetOwner());
+		PlowedLandRenderer->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
+		PlowedLandRenderer->RegisterComponent();
+		PlowedLandRenderer->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		PlowedLandRenderer->SetCollisionResponseToAllChannels(ECR_Block);
+		check(FarmLandData.LandCellMesh);
+		PlowedLandRenderer->SetStaticMesh(FarmLandData.LandCellMesh);
+		LandRendererMap.Add(EPlotState::Plowed, PlowedLandRenderer);
+	}
+	PlotInfo.InstanceIndex = PlowedLandRenderer->AddInstance(PlotInfo.Transform);
+	PlowedLandRenderer->MarkRenderStateDirty();
 }
 
 bool UFarmlandComponent::PlantCrop(int32 PlotX, int32 PlotY, FName CropID)

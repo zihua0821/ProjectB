@@ -34,6 +34,25 @@ struct FPlotStateData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlotState")
     EPlotState StateFlags = EPlotState::Empty;
 
+    bool IsEmpty() const
+    {
+        return StateFlags == EPlotState::Empty;
+    }
+    
+    bool IsValidSingleState()
+    {
+        // 空状态不算单一状态（如果需要允许空状态，可以移除这个检查）
+        if (StateFlags == EPlotState::Empty)
+        {
+            return false;
+        }
+
+        // 使用位运算技巧：如果一个数是2的幂（只有一个位为1），
+        // 那么 (n & (n - 1)) == 0
+        const uint8 Value = static_cast<uint8>(StateFlags);
+        return (Value & (Value - 1)) == 0;
+    }
+    
     bool HasState(const EPlotState& State) const
     {
         return (StateFlags & State) != EPlotState::Empty;
@@ -94,6 +113,9 @@ struct FFarmLandPlotInfo
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLandPlotInfo")
     FPlotStateData StateData;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLandPlotInfo")
+    int32 InstanceIndex;
 };
 
 /**

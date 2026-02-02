@@ -26,6 +26,9 @@ public:
 	void SetPlotInfoIndex(const TMap<FIntPoint, FFarmLandPlotInfo>& InPlotInfoIndex){ PlotInfoIndex = InPlotInfoIndex;}
 	
 	// =================== 种植接口 ====================
+	// 耕地
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void PlowLand(FIntPoint PlowCoords);
 	// 种植作物
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	bool PlantCrop(int32 PlotX, int32 PlotY, FName CropID);
@@ -60,12 +63,20 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void OnComponentCreated() override;
 	virtual void OnRegister() override;
+
+private:
 	// 地块网格配置
+	UPROPERTY()
 	FFarmLandData FarmLandData;
 
 	// 地块信息索引
+	UPROPERTY()
 	TMap<FIntPoint, FFarmLandPlotInfo> PlotInfoIndex;
-private:
+
+	// 地块渲染组件
+	UPROPERTY()
+	TMap<EPlotState, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>> LandRendererMap;
+	
 	// 作物数据映射 [X + Y * GridWidth] -> CropBase
 	UPROPERTY()
 	TMap<int32, UCropBase*> Crops;
