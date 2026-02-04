@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "FarmlandConfigDataAsset.h"
 #include "Components/SceneComponent.h"
 #include "Crops/CropData.h"
 #include "FarmlandComponent.generated.h"
@@ -21,7 +22,7 @@ public:
 	UFarmlandComponent();
 	// ==================== 配置接口 ====================
 	// 设置地块配置数据
-	void SetFarmLandData(const FFarmLandData& InFarmLandData);
+	void SetFarmlandConfig(const TObjectPtr<UFarmlandConfigDataAsset>& InFarmlandConfig){FarmlandConfig = InFarmlandConfig;}
 
 	void SetPlotInfoIndex(const TMap<FIntPoint, FFarmLandPlotInfo>& InPlotInfoIndex){ PlotInfoIndex = InPlotInfoIndex;}
 	
@@ -67,7 +68,7 @@ protected:
 private:
 	// 地块网格配置
 	UPROPERTY()
-	FFarmLandData FarmLandData;
+	TObjectPtr<UFarmlandConfigDataAsset> FarmlandConfig;
 
 	// 地块信息索引
 	UPROPERTY()

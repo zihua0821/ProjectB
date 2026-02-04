@@ -19,11 +19,6 @@ UFarmlandComponent::UFarmlandComponent()
 	// InitializeLandCells();
 }
 
-void UFarmlandComponent::SetFarmLandData(const FFarmLandData& InFarmLandData)
-{
-	FarmLandData = InFarmLandData;
-}
-
 void UFarmlandComponent::PlowLand(FIntPoint PlowCoords)
 {
 	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
@@ -44,8 +39,8 @@ void UFarmlandComponent::PlowLand(FIntPoint PlowCoords)
 		PlowedLandRenderer->RegisterComponent();
 		PlowedLandRenderer->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 		PlowedLandRenderer->SetCollisionResponseToAllChannels(ECR_Block);
-		check(FarmLandData.LandCellMesh);
-		PlowedLandRenderer->SetStaticMesh(FarmLandData.LandCellMesh);
+		check(FarmlandConfig->LandCellMesh);
+		PlowedLandRenderer->SetStaticMesh(FarmlandConfig->LandCellMesh);
 		LandRendererMap.Add(EPlotState::Plowed, PlowedLandRenderer);
 	}
 	PlotInfo.InstanceIndex = PlowedLandRenderer->AddInstance(PlotInfo.Transform);
@@ -78,8 +73,8 @@ FIntPoint UFarmlandComponent::WorldToCellCoordinates(const FVector& WorldPositio
 	FVector LocalPosition = GetComponentTransform().InverseTransformPosition(WorldPosition);
     
 	// 计算农场总大小（考虑间距+拓展）
-	float TotalWidth = FarmLandData.GridSizeX * FarmLandData.CellSize.X + (FarmLandData.GridSizeX - 1) * FarmLandData.CellSpacing + FarmLandData.GroundExtension * 2.f;
-	float TotalHeight = FarmLandData.GridSizeY * FarmLandData.CellSize.Y + (FarmLandData.GridSizeY - 1) * FarmLandData.CellSpacing + FarmLandData.GroundExtension * 2.f;
+	float TotalWidth = FarmlandConfig->GridSizeX * FarmlandConfig->CellSize.X + (FarmlandConfig->GridSizeX - 1) * FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension * 2.f;
+	float TotalHeight = FarmlandConfig->GridSizeY * FarmlandConfig->CellSize.Y + (FarmlandConfig->GridSizeY - 1) * FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension * 2.f;
     
 	// 计算本地坐标相对于农场边界的偏移
 	float HalfWidth = TotalWidth * 0.5f;
@@ -90,11 +85,11 @@ FIntPoint UFarmlandComponent::WorldToCellCoordinates(const FVector& WorldPositio
 	float NormY = (LocalPosition.Y + HalfHeight) / TotalHeight;
     
 	// 转换为网格坐标
-	int32 CellX = FMath::FloorToInt(NormX * FarmLandData.GridSizeX);
-	int32 CellY = FMath::FloorToInt(NormY * FarmLandData.GridSizeY);
+	int32 CellX = FMath::FloorToInt(NormX * FarmlandConfig->GridSizeX);
+	int32 CellY = FMath::FloorToInt(NormY * FarmlandConfig->GridSizeY);
     
 	// 边界检查
-	if (CellX >= 0 && CellX < FarmLandData.GridSizeX && CellY >= 0 && CellY < FarmLandData.GridSizeY)
+	if (CellX >= 0 && CellX < FarmlandConfig->GridSizeX && CellY >= 0 && CellY < FarmlandConfig->GridSizeY)
 	{
 		return FIntPoint(CellX, CellY);
 	}
@@ -106,16 +101,16 @@ FIntPoint UFarmlandComponent::WorldToCellCoordinates(const FVector& WorldPositio
 FVector UFarmlandComponent::CellToWorldCoordinates(int32 CellX, int32 CellY) const
 {
 	// 计算农场总大小
-	float TotalWidth = FarmLandData.GridSizeX * FarmLandData.CellSize.X + (FarmLandData.GridSizeX - 1) * FarmLandData.CellSpacing + FarmLandData.GroundExtension * 2.f;
-	float TotalHeight = FarmLandData.GridSizeY * FarmLandData.CellSize.Y + (FarmLandData.GridSizeY - 1) * FarmLandData.CellSpacing + FarmLandData.GroundExtension * 2.f;
+	float TotalWidth = FarmlandConfig->GridSizeX * FarmlandConfig->CellSize.X + (FarmlandConfig->GridSizeX - 1) * FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension * 2.f;
+	float TotalHeight = FarmlandConfig->GridSizeY * FarmlandConfig->CellSize.Y + (FarmlandConfig->GridSizeY - 1) * FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension * 2.f;
     
 	// 计算从中心开始的偏移
-	float StartX = -TotalWidth * 0.5f + FarmLandData.CellSize.X * 0.5f;
-	float StartY = -TotalHeight * 0.5f + FarmLandData.CellSize.Y * 0.5f;
+	float StartX = -TotalWidth * 0.5f + FarmlandConfig->CellSize.X * 0.5f;
+	float StartY = -TotalHeight * 0.5f + FarmlandConfig->CellSize.Y * 0.5f;
     
 	// 计算本地位置
-	float LocalX = StartX + CellX * (FarmLandData.CellSize.X + FarmLandData.CellSpacing + FarmLandData.GroundExtension);
-	float LocalY = StartY + CellY * (FarmLandData.CellSize.Y + FarmLandData.CellSpacing + FarmLandData.GroundExtension);
+	float LocalX = StartX + CellX * (FarmlandConfig->CellSize.X + FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension);
+	float LocalY = StartY + CellY * (FarmlandConfig->CellSize.Y + FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension);
     
 	FVector LocalPosition(LocalX, LocalY, 0);
     
@@ -128,8 +123,8 @@ bool UFarmlandComponent::GetClickedCellCoordinates(const FVector& ClickLocation,
 	OutCellCoords = WorldToCellCoordinates(ClickLocation);
     
 	// 检查坐标是否有效
-	if (OutCellCoords.X >= 0 && OutCellCoords.X < FarmLandData.GridSizeX && 
-		OutCellCoords.Y >= 0 && OutCellCoords.Y < FarmLandData.GridSizeY)
+	if (OutCellCoords.X >= 0 && OutCellCoords.X < FarmlandConfig->GridSizeX && 
+		OutCellCoords.Y >= 0 && OutCellCoords.Y < FarmlandConfig->GridSizeY)
 	{
 		return true;
 	}
@@ -177,11 +172,11 @@ void UFarmlandComponent::InitializeLandCells()
 
 int32 UFarmlandComponent::GetPlotIndex(int32 X, int32 Y) const
 {
-	if (X < 0 || X >= FarmLandData.GridSizeX || Y < 0 || Y >= FarmLandData.GridSizeY)
+	if (X < 0 || X >= FarmlandConfig->GridSizeX || Y < 0 || Y >= FarmlandConfig->GridSizeY)
 	{
 		return INDEX_NONE;
 	}
-	return Y * FarmLandData.GridSizeX + X;
+	return Y * FarmlandConfig->GridSizeX + X;
 }
 
 FVector UFarmlandComponent::GetPlotWorldPosition(int32 X, int32 Y) const

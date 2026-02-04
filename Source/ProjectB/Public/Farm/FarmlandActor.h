@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "FarmlandConfigDataAsset.h"
 #include "Crops/CropData.h"
 #include "GameFramework/Actor.h"
 #include "FarmlandActor.generated.h"
@@ -32,66 +33,9 @@ protected:
 	TObjectPtr<UStaticMeshComponent> GroundMeshComponent;
 
 	// ==================== 配置属性 ====================
-    
-	// 单元格网格模型（每个单元格显示的土地）
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Farmland|Grid", 
-			  meta = (DisplayName = "土地网格模型"))
-	TObjectPtr<UStaticMesh> LandCellMesh;
-    
-	// 地面网格模型（整个农场的基础地面）
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Farmland|Grid",
-			  meta = (DisplayName = "地面网格模型"))
-	TObjectPtr<UStaticMesh> GroundMesh;
-    
-	// 单元格大小
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Farmland|Grid",
-			  meta = (DisplayName = "单元格大小", ClampMin = "10.0", ClampMax = "500.0", UIMin = "10.0", UIMax = "500.0"))
-	FVector2D CellSize = FVector2D(200.f, 200.f);
-    
-	// X方向单元格数量
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Farmland|Grid",
-			  meta = (DisplayName = "X方向数量", ClampMin = "1", ClampMax = "50", UIMin = "1", UIMax = "50"))
-	int32 GridSizeX = 10;
-    
-	// Y方向单元格数量
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Farmland|Grid",
-			  meta = (DisplayName = "Y方向数量", ClampMin = "1", ClampMax = "50", UIMin = "1", UIMax = "50"))
-	int32 GridSizeY = 10;
-    
-	// 单元格间距（单元格之间的空隙）
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Farmland|Grid",
-			  meta = (DisplayName = "单元格间距", ClampMin = "-100.0", ClampMax = "100.0", UIMin = "-100.0", UIMax = "100.0"))
-	float CellSpacing = 0.0f;
-    
-	// 土地网格高度偏移（相对于地面）
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Farmland|Grid",
-			  meta = (DisplayName = "土地高度", ClampMin = "-100.0", ClampMax = "100.0", UIMin = "-100.0", UIMax = "100.0"))
-	float LandHeightOffset = 30.0f;
-
-	// 地面扩展
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Farmland|Grid",
-			  meta = (DisplayName = "地面扩展", ClampMin = "-500.0", ClampMax = "500.0", UIMin = "-500.0", UIMax = "500.0"))
-	float GroundExtension = 100.0f;
-
-	// 是否初始化所有地块
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Farmland|Grid",meta = (DisplayName = "是否初始化所有地块"))
-	bool bInitAllLandCells = false;
-    
-	// 是否显示单元格调试信息
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Farmland|Debug",
-			  meta = (DisplayName = "显示调试信息"))
-	bool bShowDebugGrid = false;
-
-	// 调试信息持续时间
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Farmland|Debug",
-			  meta = (DisplayName = "调试信息持续时间"))
-	float DebugDuration = 1.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Farmland, meta = (DisplayName = "农田配置"))
+    TObjectPtr<UFarmlandConfigDataAsset> FarmlandConfig;
 	
-	// 是否自动更新地块组件配置
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Farmland|Debug",
-			  meta = (DisplayName = "自动更新配置"))
-	bool bAutoUpdateConfig = true;
-
 	virtual void BeginPlay() override;
 	
 	virtual void OnConstruction(const FTransform& Transform) override;
@@ -120,9 +64,7 @@ public:
 	// 获取指定单元格的世界位置
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Farmland")
 	FVector GetCellWorldLocation(int32 CellX, int32 CellY) const;
-
-	TObjectPtr<UStaticMesh> GetLandCellMesh() const { return LandCellMesh; }
-
+	
 	// 获取鼠标点击的单元格坐标（封装方法）
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
 	bool GetCellCoordinatesFromClick(const FVector& ClickLocation, FIntPoint& OutCellCoords) const;

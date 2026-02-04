@@ -295,38 +295,3 @@ struct FCropRuntimeData
         return 900.0f; // 15小时
     }
 };
-
-/**
- * 地块配置属性
- */
-USTRUCT(BlueprintType)
-struct FFarmLandData
-{
-    GENERATED_BODY()
-    
-    // 单元格网格模型（每个单元格显示的土地）
-    UPROPERTY()
-    TObjectPtr<UStaticMesh> LandCellMesh;
-    
-    // 地面网格模型（整个农场的基础地面）
-    UPROPERTY()
-    TObjectPtr<UStaticMesh> GroundMesh;
-    
-    // 单元格大小
-    FVector2D CellSize = FVector2D(200.f, 200.f);
-    
-    // X方向单元格数量
-    int32 GridSizeX = 10;
-    
-    // Y方向单元格数量
-    int32 GridSizeY = 10;
-    
-    // 单元格间距
-    float CellSpacing = 0.0f;
-    
-    // 土地网格高度偏移
-    float LandHeightOffset = 10.0f;
-
-    // 地面扩展
-    float GroundExtension = 0.0f;
-};

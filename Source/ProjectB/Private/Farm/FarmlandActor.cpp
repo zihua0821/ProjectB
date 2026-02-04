@@ -47,25 +47,10 @@ void AFarmlandActor::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
 
+	check(FarmlandConfig);
 	if (FarmlandComponent)
 	{
-		FFarmLandData FarmLandData;
-		if (GroundMesh)
-		{
-			FarmLandData.GroundMesh = GroundMesh;
-		}
-		if (LandCellMesh)
-		{
-			FarmLandData.LandCellMesh = LandCellMesh;
-		}
-		FarmLandData.GridSizeX = GridSizeX;
-		FarmLandData.GridSizeY = GridSizeY;
-		FarmLandData.CellSize = CellSize;
-		FarmLandData.CellSpacing = CellSpacing;
-		FarmLandData.LandHeightOffset = LandHeightOffset;
-		FarmLandData.GroundExtension = GroundExtension;
-
-		FarmlandComponent->SetFarmLandData(FarmLandData);
+		FarmlandComponent->SetFarmlandConfig(FarmlandConfig);
 		FarmlandComponent->SetPlotInfoIndex(PlotInfoIndex);
 	}
 }
@@ -145,12 +130,12 @@ FVector AFarmlandActor::GetCellWorldLocation(int32 CellX, int32 CellY) const
 	FVector ComponentLocation = FarmlandComponent->GetComponentLocation();
     
 	// 计算单元格在组件内的本地位置
-	float TotalWidth = GridSizeX * CellSize.X + (GridSizeX - 1) * CellSpacing;
-	float TotalHeight = GridSizeY * CellSize.Y + (GridSizeY - 1) * CellSpacing;
+	float TotalWidth = FarmlandConfig->GridSizeX * FarmlandConfig->CellSize.X + (FarmlandConfig->GridSizeX - 1) * FarmlandConfig->CellSpacing;
+	float TotalHeight = FarmlandConfig->GridSizeY * FarmlandConfig->CellSize.Y + (FarmlandConfig->GridSizeY - 1) * FarmlandConfig->CellSpacing;
     
 	// 从中心开始计算（0,0在中心）
-	float OffsetX = (CellX - (GridSizeX - 1) * 0.5f) * (CellSize.X + CellSpacing);
-	float OffsetY = (CellY - (GridSizeY - 1) * 0.5f) * (CellSize.Y + CellSpacing);
+	float OffsetX = (CellX - (FarmlandConfig->GridSizeX - 1) * 0.5f) * (FarmlandConfig->CellSize.X + FarmlandConfig->CellSpacing);
+	float OffsetY = (CellY - (FarmlandConfig->GridSizeY - 1) * 0.5f) * (FarmlandConfig->CellSize.Y + FarmlandConfig->CellSpacing);
     
 	// 应用组件的旋转
 	FRotator ComponentRotation = FarmlandComponent->GetComponentRotation();
@@ -177,8 +162,8 @@ bool AFarmlandActor::AreCellCoordinatesValid(int32 CellX, int32 CellY) const
 		return false;
 	}
     
-	return CellX >= 0 && CellX < GridSizeX && 
-		   CellY >= 0 && CellY < GridSizeY;
+	return CellX >= 0 && CellX < FarmlandConfig->GridSizeX && 
+		   CellY >= 0 && CellY < FarmlandConfig->GridSizeY;
 }
 
 FVector AFarmlandActor::GetCellCenterFromClick(const FVector& ClickLocation) const
@@ -218,18 +203,18 @@ void AFarmlandActor::InitializeComponents()
 	}
 	bComponentsInitialized = true;
 	// 设置地面网格
-	if (GroundMesh)
+	if (FarmlandConfig->GroundMesh)
 	{
-		GroundMeshComponent->SetStaticMesh(GroundMesh);
+		GroundMeshComponent->SetStaticMesh(FarmlandConfig->GroundMesh);
         
 		// 计算并设置地面缩放
 		UpdateGroundMeshSize();
 	}
 
-	ensure(LandCellMesh);
-	if (LandCellMesh)
+	ensure(FarmlandConfig->LandCellMesh);
+	if (FarmlandConfig->LandCellMesh)
 	{
-		LandCellRenderer->SetStaticMesh(LandCellMesh);
+		LandCellRenderer->SetStaticMesh(FarmlandConfig->LandCellMesh);
 	}
 	// 清除所有现有实例
 	LandCellRenderer->ClearInstances();
@@ -238,31 +223,31 @@ void AFarmlandActor::InitializeComponents()
 	
 	// 计算缩放因子
 	// 获取土地网格的原始边界
-	FBoxSphereBounds CellBounds = LandCellMesh->GetBounds();
+	FBoxSphereBounds CellBounds = FarmlandConfig->LandCellMesh->GetBounds();
 	FVector CellExtent = CellBounds.BoxExtent;
 	// 计算需要的缩放
-	float ScaleFactorX = CellSize.X / (CellExtent.X * 2.f);
-	float ScaleFactorY = CellSize.Y / (CellExtent.Y * 2.f);
-	float ScaleFactorZ = LandHeightOffset / (CellExtent.Z * 2.f);
+	float ScaleFactorX = FarmlandConfig->CellSize.X / (CellExtent.X * 2.f);
+	float ScaleFactorY = FarmlandConfig->CellSize.Y / (CellExtent.Y * 2.f);
+	float ScaleFactorZ = FarmlandConfig->LandHeightOffset / (CellExtent.Z * 2.f);
 	FVector InstanceScale(ScaleFactorX, ScaleFactorY, ScaleFactorZ);
     
 	// 计算总偏移（从中心开始）
-	float TotalWidth = GridSizeX * CellSize.X + (GridSizeX - 1) * CellSpacing;
-	float TotalHeight = GridSizeY * CellSize.Y + (GridSizeY - 1) * CellSpacing;
-	float StartX = -TotalWidth * 0.5f + CellSize.X * 0.5f;
-	float StartY = -TotalHeight * 0.5f + CellSize.Y * 0.5f;
+	float TotalWidth = FarmlandConfig->GridSizeX * FarmlandConfig->CellSize.X + (FarmlandConfig->GridSizeX - 1) * FarmlandConfig->CellSpacing;
+	float TotalHeight = FarmlandConfig->GridSizeY * FarmlandConfig->CellSize.Y + (FarmlandConfig->GridSizeY - 1) * FarmlandConfig->CellSpacing;
+	float StartX = -TotalWidth * 0.5f + FarmlandConfig->CellSize.X * 0.5f;
+	float StartY = -TotalHeight * 0.5f + FarmlandConfig->CellSize.Y * 0.5f;
     
 	// 创建所有土地单元格实例
-	for (int32 Y = 0; Y < GridSizeY; Y++)
+	for (int32 Y = 0; Y < FarmlandConfig->GridSizeY; Y++)
 	{
-		for (int32 X = 0; X < GridSizeX; X++)
+		for (int32 X = 0; X < FarmlandConfig->GridSizeX; X++)
 		{
 			int32 PlotIndex = GetPlotIndex(X, Y);
             
 			// 计算位置
-			float PosX = StartX + X * (CellSize.X + CellSpacing);
-			float PosY = StartY + Y * (CellSize.Y + CellSpacing);
-			float PosZ = LandHeightOffset / 2.0f;
+			float PosX = StartX + X * (FarmlandConfig->CellSize.X + FarmlandConfig->CellSpacing);
+			float PosY = StartY + Y * (FarmlandConfig->CellSize.Y + FarmlandConfig->CellSpacing);
+			float PosZ = FarmlandConfig->LandHeightOffset / 2.0f;
             
 			// 创建变换
 			FTransform CellTransform;
@@ -271,7 +256,7 @@ void AFarmlandActor::InitializeComponents()
 			FFarmLandPlotInfo PlotInfo;
 			PlotInfo.Transform = CellTransform;
 			// 添加到渲染器
-			if (bInitAllLandCells)
+			if (FarmlandConfig->bInitAllLandCells)
 			{
 				PlotInfo.StateData.AddState(EPlotState::Plowed);
 				int32 InstanceIndex = LandCellRenderer->AddInstance(CellTransform);
@@ -285,25 +270,25 @@ void AFarmlandActor::InitializeComponents()
 	}
     
 	// 标记渲染数据需要更新
-	if (bInitAllLandCells)
+	if (FarmlandConfig->bInitAllLandCells)
 	{
 		LandCellRenderer->MarkRenderStateDirty();
     
 		UE_LOG(LogTemp, Log, TEXT("Initialized %d land cells for %dx%d grid"), 
-			   LandCellRenderer->GetInstanceCount(), GridSizeX, GridSizeY);
+			   LandCellRenderer->GetInstanceCount(), FarmlandConfig->GridSizeX, FarmlandConfig->GridSizeY);
 	}
 	
 }
 
 void AFarmlandActor::UpdateGroundMeshSize() const
 {
-	if (!GroundMeshComponent || !GroundMesh) return;
+	if (!GroundMeshComponent || !FarmlandConfig->GroundMesh) return;
 
 	// 计算农场总大小
 	FVector2D FarmSize = CalculateFarmTotalSize();
     
 	// 获取地面网格的原始边界
-	FBoxSphereBounds GroundBounds = GroundMesh->GetBounds();
+	FBoxSphereBounds GroundBounds = FarmlandConfig->GroundMesh->GetBounds();
 	FVector GroundExtent = GroundBounds.BoxExtent;
     
 	if (GroundExtent.X > 0 && GroundExtent.Y > 0)
@@ -344,7 +329,7 @@ void AFarmlandActor::DrawDebugGrid() const
     for (int32 i = 0; i < 4; i++)
     {
         int32 Next = (i + 1) % 4;
-        DrawDebugLine(GetWorld(), Corners[i], Corners[Next], BoundaryColor, false, DebugDuration, 0, LineThickness);
+        DrawDebugLine(GetWorld(), Corners[i], Corners[Next], BoundaryColor, false, FarmlandConfig->DebugDuration, 0, LineThickness);
     }
     
     // 绘制单元格网格
@@ -354,33 +339,33 @@ void AFarmlandActor::DrawDebugGrid() const
         const float GridHeight = 100.0f;
         
         // 绘制所有单元格
-        for (int32 X = 0; X < GridSizeX; X++)
+        for (int32 X = 0; X < FarmlandConfig->GridSizeX; X++)
         {
-            for (int32 Y = 0; Y < GridSizeY; Y++)
+            for (int32 Y = 0; Y < FarmlandConfig->GridSizeY; Y++)
             {
                 FVector CellCenter = GetCellWorldLocation(X, Y);
-                FVector CellExtent = FVector(CellSize.X * 0.5f, CellSize.Y * 0.5f, GridHeight);
+                FVector CellExtent = FVector(FarmlandConfig->CellSize.X * 0.5f, FarmlandConfig->CellSize.Y * 0.5f, GridHeight);
                 
                 // 绘制单元格边界框
-                DrawDebugBox(GetWorld(), CellCenter, CellExtent, GridColor, false, DebugDuration, 0, LineThickness);
+                DrawDebugBox(GetWorld(), CellCenter, CellExtent, GridColor, false, FarmlandConfig->DebugDuration, 0, LineThickness);
                 
                 // 在单元格中心显示坐标
                 FString CoordText = FString::Printf(TEXT("(%d,%d)"), X, Y);
-                DrawDebugString(GetWorld(), CellCenter + FVector(0, 0, 20), CoordText, nullptr, FColor::White, DebugDuration, true);
+                DrawDebugString(GetWorld(), CellCenter + FVector(0, 0, 20), CoordText, nullptr, FColor::White, FarmlandConfig->DebugDuration, true);
             }
         }
     }
     
     // 绘制信息文本
     FString InfoText = FString::Printf(TEXT("Farmland: %dx%d cells\nSpacing: %.0f"), 
-        GridSizeX, GridSizeY, CellSpacing);
-    DrawDebugString(GetWorld(), ActorLocation + FVector(0, 0, 100), InfoText, nullptr, FColor::Yellow, DebugDuration, true);
+        FarmlandConfig->GridSizeX, FarmlandConfig->GridSizeY, FarmlandConfig->CellSpacing);
+    DrawDebugString(GetWorld(), ActorLocation + FVector(0, 0, 100), InfoText, nullptr, FColor::Yellow, FarmlandConfig->DebugDuration, true);
 }
 
 FVector2D AFarmlandActor::CalculateFarmTotalSize() const
 {
-	float Width = GridSizeX * CellSize.X + (GridSizeX - 1) * CellSpacing + GroundExtension * 2.f;
-	float Height = GridSizeY * CellSize.Y + (GridSizeY - 1) * CellSpacing + GroundExtension * 2.f;
+	float Width = FarmlandConfig->GridSizeX * FarmlandConfig->CellSize.X + (FarmlandConfig->GridSizeX - 1) * FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension * 2.f;
+	float Height = FarmlandConfig->GridSizeY * FarmlandConfig->CellSize.Y + (FarmlandConfig->GridSizeY - 1) * FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension * 2.f;
 	return FVector2D(Width, Height);
 }
 
@@ -390,7 +375,7 @@ void AFarmlandActor::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 
 	// 调试绘制
-	if (bShowDebugGrid)
+	if (FarmlandConfig->bShowDebugGrid)
 	{
 		DrawDebugGrid();
 	}
@@ -400,9 +385,9 @@ void AFarmlandActor::Tick(float DeltaTime)
 
 int32 AFarmlandActor::GetPlotIndex(int32 X, int32 Y) const
 {
-	if (X < 0 || X >= GridSizeX || Y < 0 || Y >= GridSizeY)
+	if (X < 0 || X >= FarmlandConfig->GridSizeX || Y < 0 || Y >= FarmlandConfig->GridSizeY)
 	{
 		return INDEX_NONE;
 	}
-	return Y * GridSizeX + X;
+	return Y * FarmlandConfig->GridSizeX + X;
 }
