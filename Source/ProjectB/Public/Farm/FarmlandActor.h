@@ -85,6 +85,10 @@ public:
 	// 耕地
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
 	void PlowLand(FIntPoint PlowCoords) const;
+
+	// 浇水
+	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
+	void WetLand(FIntPoint PlowCoords) const;
 private:
 	// ==================== 私有方法 ====================
     
@@ -101,24 +105,9 @@ private:
 	FVector2D CalculateFarmTotalSize() const;
 	
 	int32 GetPlotIndex(int32 X, int32 Y) const;
-    
-	// ==================== 私有属性 ====================
-	// 实例索引
-	UPROPERTY()
-	TMap<int32, int32> PlotToLandInstanceIndex;
-	// 地块信息索引
-	UPROPERTY()
-	TMap<FIntPoint, FFarmLandPlotInfo> PlotInfoIndex;
-	// 实例化渲染组件数组（每个单元格一个土地模型）
-	UPROPERTY()
-	TArray<UStaticMeshComponent*> LandCellComponents;
-
-	    
-	// 土地单元格渲染组件
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Farmland|Config", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UInstancedStaticMeshComponent> LandCellRenderer;
 	
 	bool bComponentsInitialized = false;
 };
+
 
 

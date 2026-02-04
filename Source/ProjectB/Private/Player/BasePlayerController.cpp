@@ -33,6 +33,10 @@ void ABasePlayerController::OnLeftMouseClick()
 		{
 			HitFarmland->PlowLand(CellCoords);
 		}
+		else if (PlotInfo.StateData.HasState(EPlotState::Plowed))
+		{
+			HitFarmland->WetLand(CellCoords);
+		}
 		else
 		{
 			GEngine->AddOnScreenDebugMessage(-1,

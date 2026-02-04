@@ -23,13 +23,16 @@ public:
 	// ==================== 配置接口 ====================
 	// 设置地块配置数据
 	void SetFarmlandConfig(const TObjectPtr<UFarmlandConfigDataAsset>& InFarmlandConfig){FarmlandConfig = InFarmlandConfig;}
-
-	void SetPlotInfoIndex(const TMap<FIntPoint, FFarmLandPlotInfo>& InPlotInfoIndex){ PlotInfoIndex = InPlotInfoIndex;}
 	
 	// =================== 种植接口 ====================
 	// 耕地
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	void PlowLand(FIntPoint PlowCoords);
+
+	// 浇水
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void WetLand(FIntPoint PlowCoords);
+	
 	// 种植作物
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	bool PlantCrop(int32 PlotX, int32 PlotY, FName CropID);
@@ -62,8 +65,6 @@ public:
 	FFarmLandPlotInfo GetPlotInfo(const FIntPoint& PlotCoords) const;
 protected:
 	virtual void BeginPlay() override;
-	virtual void OnComponentCreated() override;
-	virtual void OnRegister() override;
 
 private:
 	// 地块网格配置
@@ -75,8 +76,9 @@ private:
 	TMap<FIntPoint, FFarmLandPlotInfo> PlotInfoIndex;
 
 	// 地块渲染组件
+	// 土地单元格渲染组件
 	UPROPERTY()
-	TMap<EPlotState, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>> LandRendererMap;
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> LandCellRenderer;
 	
 	// 作物数据映射 [X + Y * GridWidth] -> CropBase
 	UPROPERTY()
@@ -85,16 +87,13 @@ private:
 	// 作物渲染组件（按作物类型分组）
 	UPROPERTY()
 	TMap<FName, UHierarchicalInstancedStaticMeshComponent*> CropRenderers;
-
-	// 地块索引到渲染实例索引的映射（土地）
-	TMap<int32, int32> PlotToLandInstanceIndex;
     
 	// 地块索引到作物实例索引的映射
 	TMap<int32, int32> PlotToCropInstanceIndex;
     
 	// 辅助方法
 	void InitializeLandCells();
-	int32 GetPlotIndex(int32 X, int32 Y) const;
+	int32 GetPlotIndex(const FIntPoint& PlotCoords) const;
 	FVector GetPlotWorldPosition(int32 X, int32 Y) const;
 	void UpdateCropVisual(int32 PlotIndex, UCropBase* Crop);
     

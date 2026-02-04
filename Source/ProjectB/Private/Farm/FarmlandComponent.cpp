@@ -24,27 +24,40 @@ void UFarmlandComponent::PlowLand(FIntPoint PlowCoords)
 	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
 	if (!PlotInfo.StateData.IsEmpty())
 	{
+		UE_LOG(LogTemp, Error, TEXT("Plot is not empty"))
+		return;
+	}
+	if (LandCellRenderer == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LandCellRenderer is nullptr"))
 		return;
 	}
 	PlotInfo.StateData.AddState(EPlotState::Plowed);
-	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> PlowedLandRenderer = nullptr;
-	if (LandRendererMap.Contains(EPlotState::Plowed))
+	const int32 PlotIndex = GetPlotIndex(PlowCoords);
+	LandCellRenderer->SetCustomDataValue(PlotIndex, 0, 1.f);
+}
+
+void UFarmlandComponent::WetLand(FIntPoint PlowCoords)
+{
+	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
+	if (PlotInfo.StateData.IsEmpty())
 	{
-		PlowedLandRenderer = LandRendererMap.FindChecked(EPlotState::Plowed);
+		UE_LOG(LogTemp, Error, TEXT("Plot is empty"))
+		return;
 	}
-	else
+	if (PlotInfo.StateData.HasState(EPlotState::Watered))
 	{
-		PlowedLandRenderer = NewObject<UHierarchicalInstancedStaticMeshComponent>(GetOwner());
-		PlowedLandRenderer->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
-		PlowedLandRenderer->RegisterComponent();
-		PlowedLandRenderer->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-		PlowedLandRenderer->SetCollisionResponseToAllChannels(ECR_Block);
-		check(FarmlandConfig->LandCellMesh);
-		PlowedLandRenderer->SetStaticMesh(FarmlandConfig->LandCellMesh);
-		LandRendererMap.Add(EPlotState::Plowed, PlowedLandRenderer);
+		UE_LOG(LogTemp, Error, TEXT("Plot is already watered"))
+		return;
 	}
-	PlotInfo.InstanceIndex = PlowedLandRenderer->AddInstance(PlotInfo.Transform);
-	PlowedLandRenderer->MarkRenderStateDirty();
+	if (LandCellRenderer == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LandCellRenderer is nullptr"))
+		return;
+	}
+	PlotInfo.StateData.AddState(EPlotState::Watered);
+	const int32 PlotIndex = GetPlotIndex(PlowCoords);
+	LandCellRenderer->SetCustomDataValue(PlotIndex, 1, 1.f);
 }
 
 bool UFarmlandComponent::PlantCrop(int32 PlotX, int32 PlotY, FName CropID)
@@ -145,38 +158,102 @@ void UFarmlandComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// 确保土地单元格已初始化
-	// InitializeLandCells();
+	InitializeLandCells();
 }
-
-void UFarmlandComponent::OnComponentCreated()
-{
-	Super::OnComponentCreated();
-
-	// InitializeLandCells();
-}
-
-void UFarmlandComponent::OnRegister()
-{
-	Super::OnRegister();
-	
-	// InitializeLandCells();
-}
-
 
 void UFarmlandComponent::InitializeLandCells()
 {
+	ensure(FarmlandConfig);
+	ensure(FarmlandConfig->LandCellMesh);
+
+	if (LandCellRenderer != nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LandCells have been Initialized"));
+		return;
+	}
+	LandCellRenderer = NewObject<UHierarchicalInstancedStaticMeshComponent>(GetOwner());
+	LandCellRenderer->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
+	LandCellRenderer->RegisterComponent();
+	LandCellRenderer->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	LandCellRenderer->SetCollisionResponseToAllChannels(ECR_Block);
+	check(FarmlandConfig->LandCellMesh);
+	LandCellRenderer->SetStaticMesh(FarmlandConfig->LandCellMesh);
+	// 设置自定义数据数量 你必须告诉 ISM 组件：“每个实例需要占用多少个浮点位？”
+	LandCellRenderer->SetNumCustomDataFloats(FarmlandConfig->NumCustomDataFloats);
 	
+	// 清除所有现有实例 
+	LandCellRenderer->ClearInstances();
+	PlotInfoIndex.Empty();
+	
+	// 计算缩放因子
+	// 获取土地网格的原始边界
+	FBoxSphereBounds CellBounds = FarmlandConfig->LandCellMesh->GetBounds();
+	FVector CellExtent = CellBounds.BoxExtent;
+	// 计算需要的缩放
+	float ScaleFactorX = FarmlandConfig->CellSize.X / (CellExtent.X * 2.f);
+	float ScaleFactorY = FarmlandConfig->CellSize.Y / (CellExtent.Y * 2.f);
+	float ScaleFactorZ = FarmlandConfig->LandHeightOffset / (CellExtent.Z * 2.f);
+	FVector InstanceScale(ScaleFactorX, ScaleFactorY, ScaleFactorZ);
+    
+	// 计算总偏移（从中心开始）
+	float TotalWidth = FarmlandConfig->GridSizeX * FarmlandConfig->CellSize.X + (FarmlandConfig->GridSizeX - 1) * FarmlandConfig->CellSpacing;
+	float TotalHeight = FarmlandConfig->GridSizeY * FarmlandConfig->CellSize.Y + (FarmlandConfig->GridSizeY - 1) * FarmlandConfig->CellSpacing;
+	float StartX = -TotalWidth * 0.5f + FarmlandConfig->CellSize.X * 0.5f;
+	float StartY = -TotalHeight * 0.5f + FarmlandConfig->CellSize.Y * 0.5f;
+    
+	// 创建所有土地单元格实例
+	for (int32 Y = 0; Y < FarmlandConfig->GridSizeY; Y++)
+	{
+		for (int32 X = 0; X < FarmlandConfig->GridSizeX; X++)
+		{
+			// 计算位置
+			float PosX = StartX + X * (FarmlandConfig->CellSize.X + FarmlandConfig->CellSpacing);
+			float PosY = StartY + Y * (FarmlandConfig->CellSize.Y + FarmlandConfig->CellSpacing);
+			float PosZ = FarmlandConfig->LandHeightOffset / 2.0f;
+            
+			// 创建变换
+			FTransform CellTransform;
+			CellTransform.SetLocation(FVector(PosX, PosY, PosZ));
+			CellTransform.SetScale3D(InstanceScale);
+
+			// 添加到渲染器
+			const int32 InstanceIndex = LandCellRenderer->AddInstance(CellTransform);
+			
+			// 创建信息
+			FFarmLandPlotInfo PlotInfo;
+			PlotInfo.Transform = CellTransform;
+			PlotInfo.InstanceIndex = InstanceIndex;
+			
+			// 记录映射
+			PlotInfoIndex.Add(FIntPoint(X, Y), PlotInfo);
+			
+			// 初始化隐藏所有地块
+			if (FarmlandConfig->bInitAllLandCells)
+			{
+				PlowLand(FIntPoint(X, Y));
+			}
+			else
+			{
+				LandCellRenderer->SetCustomDataValue(InstanceIndex, 0, 0.f);
+			}
+		}
+	}
+    
+	// 标记渲染数据需要更新
+	LandCellRenderer->MarkRenderStateDirty();
+    
+	UE_LOG(LogTemp, Log, TEXT("Initialized %d land cells for %dx%d grid"), 
+		   LandCellRenderer->GetInstanceCount(), FarmlandConfig->GridSizeX, FarmlandConfig->GridSizeY);
 	
 }
 
-int32 UFarmlandComponent::GetPlotIndex(int32 X, int32 Y) const
+int32 UFarmlandComponent::GetPlotIndex(const FIntPoint& PlotCoords) const
 {
-	if (X < 0 || X >= FarmlandConfig->GridSizeX || Y < 0 || Y >= FarmlandConfig->GridSizeY)
+	if (PlotCoords.X < 0 || PlotCoords.X >= FarmlandConfig->GridSizeX || PlotCoords.Y < 0 || PlotCoords.Y >= FarmlandConfig->GridSizeY)
 	{
 		return INDEX_NONE;
 	}
-	return Y * FarmlandConfig->GridSizeX + X;
+	return PlotCoords.Y * FarmlandConfig->GridSizeX + PlotCoords.X;
 }
 
 FVector UFarmlandComponent::GetPlotWorldPosition(int32 X, int32 Y) const

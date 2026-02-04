@@ -17,22 +17,6 @@ class PROJECTB_API UFarmlandConfigDataAsset : public UPrimaryDataAsset
 
 public:
 	// ==================== 网格配置 ====================
-    
-	// 单元格网格模型（每个单元格显示的土地）
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration", 
-			  meta = (DisplayName = "单元格网格模型"))
-	TObjectPtr<UStaticMesh> LandCellMesh;
-    
-	// 地面网格模型（整个农场的基础地面）
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration",
-			  meta = (DisplayName = "地面网格模型"))
-	TObjectPtr<UStaticMesh> GroundMesh;
-    
-	// 单元格大小
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration",
-			  meta = (DisplayName = "单元格大小", ClampMin = "10.0", ClampMax = "500.0", UIMin = "10.0", UIMax = "500.0"))
-	FVector2D CellSize = FVector2D(200.f, 200.f);
-    
 	// X方向单元格数量
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration",
 			  meta = (DisplayName = "X方向数量", ClampMin = "1", ClampMax = "50", UIMin = "1", UIMax = "50"))
@@ -62,6 +46,33 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration",
 			  meta = (DisplayName = "是否初始化所有地块"))
 	bool bInitAllLandCells = false;
+
+	// 自定义数据浮点数数量(材质中设置的PerInstanceCustomData数量)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration",
+			  meta = (DisplayName = "自定义数据浮点数数量"))
+	int32 NumCustomDataFloats = 2;
+
+	// ==================== 地面配置 ====================
+	// 是否使用地面
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Ground",
+			  meta = (DisplayName = "是否使用地面"))
+	bool bUseGround = true;
+	
+	// 地面网格模型（整个农场的基础地面）
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Ground",
+			  meta = (DisplayName = "地面网格模型"))
+	TObjectPtr<UStaticMesh> GroundMesh;
+
+	// ===================== 单元格配置 ====================
+	// 单元格网格模型（每个单元格显示的土地）
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Cell", 
+			  meta = (DisplayName = "单元格网格模型"))
+	TObjectPtr<UStaticMesh> LandCellMesh;
+	
+	// 单元格大小
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Cell",
+			  meta = (DisplayName = "单元格大小", ClampMin = "10.0", ClampMax = "500.0", UIMin = "10.0", UIMax = "500.0"))
+	FVector2D CellSize = FVector2D(200.f, 200.f);
     
 	// ==================== 调试配置 ====================
 	

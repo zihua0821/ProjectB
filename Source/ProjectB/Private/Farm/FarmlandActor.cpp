@@ -28,11 +28,6 @@ AFarmlandActor::AFarmlandActor()
 	GroundMeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	GroundMeshComponent->SetCollisionResponseToAllChannels(ECR_Block);
 
-	LandCellRenderer = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("LandCellRenderer"));
-	LandCellRenderer->SetupAttachment(RootSceneComponent);
-	LandCellRenderer->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-	LandCellRenderer->SetCollisionResponseToAllChannels(ECR_Block);
-
 }
 
 void AFarmlandActor::OnConstruction(const FTransform& Transform)
@@ -51,7 +46,6 @@ void AFarmlandActor::PostInitializeComponents()
 	if (FarmlandComponent)
 	{
 		FarmlandComponent->SetFarmlandConfig(FarmlandConfig);
-		FarmlandComponent->SetPlotInfoIndex(PlotInfoIndex);
 	}
 }
 
@@ -195,89 +189,41 @@ void AFarmlandActor::PlowLand(const FIntPoint PlowCoords) const
 	FarmlandComponent->PlowLand(PlowCoords);
 }
 
+void AFarmlandActor::WetLand(const FIntPoint PlowCoords) const
+{
+	if (!FarmlandComponent)
+	{
+		return ;
+	}
+	FarmlandComponent->WetLand(PlowCoords);
+}
+
 void AFarmlandActor::InitializeComponents()
 {
+	ensure(FarmlandConfig);
+	ensure(FarmlandConfig->GroundMesh);
+	
 	if (bComponentsInitialized && GetWorld()->WorldType != EWorldType::Editor)
 	{
 		return;
 	}
 	bComponentsInitialized = true;
+	
 	// 设置地面网格
-	if (FarmlandConfig->GroundMesh)
+	if (FarmlandConfig->bUseGround)
 	{
 		GroundMeshComponent->SetStaticMesh(FarmlandConfig->GroundMesh);
         
 		// 计算并设置地面缩放
 		UpdateGroundMeshSize();
-	}
 
-	ensure(FarmlandConfig->LandCellMesh);
-	if (FarmlandConfig->LandCellMesh)
-	{
-		LandCellRenderer->SetStaticMesh(FarmlandConfig->LandCellMesh);
+		// 设置地块组件位置
+		FarmlandComponent->SetRelativeLocation(FVector(0, 0, FarmlandConfig->LandHeightOffset / 2.f));
 	}
-	// 清除所有现有实例
-	LandCellRenderer->ClearInstances();
-	PlotToLandInstanceIndex.Empty();
-	PlotInfoIndex.Empty();
-	
-	// 计算缩放因子
-	// 获取土地网格的原始边界
-	FBoxSphereBounds CellBounds = FarmlandConfig->LandCellMesh->GetBounds();
-	FVector CellExtent = CellBounds.BoxExtent;
-	// 计算需要的缩放
-	float ScaleFactorX = FarmlandConfig->CellSize.X / (CellExtent.X * 2.f);
-	float ScaleFactorY = FarmlandConfig->CellSize.Y / (CellExtent.Y * 2.f);
-	float ScaleFactorZ = FarmlandConfig->LandHeightOffset / (CellExtent.Z * 2.f);
-	FVector InstanceScale(ScaleFactorX, ScaleFactorY, ScaleFactorZ);
-    
-	// 计算总偏移（从中心开始）
-	float TotalWidth = FarmlandConfig->GridSizeX * FarmlandConfig->CellSize.X + (FarmlandConfig->GridSizeX - 1) * FarmlandConfig->CellSpacing;
-	float TotalHeight = FarmlandConfig->GridSizeY * FarmlandConfig->CellSize.Y + (FarmlandConfig->GridSizeY - 1) * FarmlandConfig->CellSpacing;
-	float StartX = -TotalWidth * 0.5f + FarmlandConfig->CellSize.X * 0.5f;
-	float StartY = -TotalHeight * 0.5f + FarmlandConfig->CellSize.Y * 0.5f;
-    
-	// 创建所有土地单元格实例
-	for (int32 Y = 0; Y < FarmlandConfig->GridSizeY; Y++)
+	else 
 	{
-		for (int32 X = 0; X < FarmlandConfig->GridSizeX; X++)
-		{
-			int32 PlotIndex = GetPlotIndex(X, Y);
-            
-			// 计算位置
-			float PosX = StartX + X * (FarmlandConfig->CellSize.X + FarmlandConfig->CellSpacing);
-			float PosY = StartY + Y * (FarmlandConfig->CellSize.Y + FarmlandConfig->CellSpacing);
-			float PosZ = FarmlandConfig->LandHeightOffset / 2.0f;
-            
-			// 创建变换
-			FTransform CellTransform;
-			CellTransform.SetLocation(FVector(PosX, PosY, PosZ));
-			CellTransform.SetScale3D(InstanceScale);
-			FFarmLandPlotInfo PlotInfo;
-			PlotInfo.Transform = CellTransform;
-			// 添加到渲染器
-			if (FarmlandConfig->bInitAllLandCells)
-			{
-				PlotInfo.StateData.AddState(EPlotState::Plowed);
-				int32 InstanceIndex = LandCellRenderer->AddInstance(CellTransform);
-				PlotToLandInstanceIndex.Add(PlotIndex, InstanceIndex);
-			}
-            
-			// 记录映射
-			
-			PlotInfoIndex.Add(FIntPoint(X, Y), PlotInfo);
-		}
+		GroundMeshComponent->SetStaticMesh(nullptr);
 	}
-    
-	// 标记渲染数据需要更新
-	if (FarmlandConfig->bInitAllLandCells)
-	{
-		LandCellRenderer->MarkRenderStateDirty();
-    
-		UE_LOG(LogTemp, Log, TEXT("Initialized %d land cells for %dx%d grid"), 
-			   LandCellRenderer->GetInstanceCount(), FarmlandConfig->GridSizeX, FarmlandConfig->GridSizeY);
-	}
-	
 }
 
 void AFarmlandActor::UpdateGroundMeshSize() const
