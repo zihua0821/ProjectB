@@ -25,6 +25,10 @@ public:
 	void SetFarmlandConfig(const TObjectPtr<UFarmlandConfigDataAsset>& InFarmlandConfig){FarmlandConfig = InFarmlandConfig;}
 	
 	// =================== 种植接口 ====================
+	// 移除耕地
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void RemoveLand(FIntPoint PlowCoords);
+	
 	// 耕地
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	void PlowLand(FIntPoint PlowCoords);
@@ -32,6 +36,26 @@ public:
 	// 浇水
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	void WetLand(FIntPoint PlowCoords);
+
+	// 施肥
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void FertilizeLand(FIntPoint PlowCoords);
+
+	// 生成杂草
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void GenerateWeeds(FIntPoint PlowCoords, int32 WeedNum);
+
+	// 清除杂草
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void ClearWeeds(FIntPoint PlowCoords);
+
+	// 生成虫害
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void GeneratePest(FIntPoint PlowCoords);
+
+	// 清除虫害
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void ClearPest(FIntPoint PlowCoords);
 	
 	// 种植作物
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
@@ -79,6 +103,10 @@ private:
 	// 土地单元格渲染组件
 	UPROPERTY()
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> LandCellRenderer;
+
+	// 杂草渲染组件
+	UPROPERTY()
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> WeedsRenderer;
 	
 	// 作物数据映射 [X + Y * GridWidth] -> CropBase
 	UPROPERTY()
@@ -105,3 +133,5 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType,
 	                           FActorComponentTickFunction* ThisTickFunction) override;
 };
+
+

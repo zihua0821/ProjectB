@@ -33,9 +33,29 @@ void ABasePlayerController::OnLeftMouseClick()
 		{
 			HitFarmland->PlowLand(CellCoords);
 		}
-		else if (PlotInfo.StateData.HasState(EPlotState::Plowed))
+		else if (PlotInfo.StateData.HasState(EPlotState::Plowed) && !PlotInfo.StateData.HasState(EPlotState::Watered))
 		{
 			HitFarmland->WetLand(CellCoords);
+		}
+		else if (PlotInfo.StateData.HasState(EPlotState::Watered) && !PlotInfo.StateData.HasState(EPlotState::Fertilized))
+		{
+			HitFarmland->FertilizeLand(CellCoords);
+		}
+		else if (PlotInfo.StateData.HasState(EPlotState::Fertilized) && !PlotInfo.StateData.HasState(EPlotState::WeedInfested))
+		{
+			HitFarmland->GenerateWeeds(CellCoords, 9);
+		}
+		else if (PlotInfo.StateData.HasState(EPlotState::WeedInfested) && !PlotInfo.StateData.HasState(EPlotState::PestInfested))
+		{
+			HitFarmland->GeneratePest(CellCoords);
+		}
+		// else if (PlotInfo.StateData.HasState(EPlotState::WeedInfested))
+		// {
+		// 	HitFarmland->ClearWeeds(CellCoords);
+		// }
+		else if (!PlotInfo.StateData.IsEmpty())
+		{
+			HitFarmland->RemoveLand(CellCoords);
 		}
 		else
 		{

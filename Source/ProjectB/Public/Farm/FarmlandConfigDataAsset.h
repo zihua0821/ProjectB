@@ -6,6 +6,7 @@
 #include "Engine/DataAsset.h"
 #include "FarmlandConfigDataAsset.generated.h"
 
+class UNiagaraSystem;
 /**
  * 农田配置数据资产
  * 用于存储和管理农田的各种配置参数
@@ -73,7 +74,28 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Cell",
 			  meta = (DisplayName = "单元格大小", ClampMin = "10.0", ClampMax = "500.0", UIMin = "10.0", UIMax = "500.0"))
 	FVector2D CellSize = FVector2D(200.f, 200.f);
-    
+
+	// ============== 杂草配置 ==============
+	// 杂草模型
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Weeds", 
+			  meta = (DisplayName = "杂草模型"))
+	TObjectPtr<UStaticMesh> WeedsMesh;
+
+	// ============== 虫害配置 ==============
+	// 虫害粒子系统
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Pest", 
+			  meta = (DisplayName = "虫害粒子系统"))
+	TObjectPtr<UNiagaraSystem> PestNiagaraSystem;
+
+	// 虫害高度
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Pest", 
+			  meta = (DisplayName = "虫害高度"))
+	float PestHeight = 100.f;
+	
+	// 虫害粒子范围缩放
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Pest", 
+			  meta = (DisplayName = "虫害粒子范围缩放"))
+	float PestScale = 0.8f;
 	// ==================== 调试配置 ====================
 	
 	// 是否显示单元格调试信息

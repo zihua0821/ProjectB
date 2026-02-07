@@ -82,6 +82,10 @@ public:
 	FFarmLandPlotInfo GetPlotInfo(const FIntPoint& PlotCoords) const;
 
 	// ====================  农田交互 ====================
+	// 移除耕地
+	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
+	void RemoveLand(FIntPoint PlowCoords);
+	
 	// 耕地
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
 	void PlowLand(FIntPoint PlowCoords) const;
@@ -89,6 +93,26 @@ public:
 	// 浇水
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
 	void WetLand(FIntPoint PlowCoords) const;
+
+	// 施肥
+	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
+	void FertilizeLand(FIntPoint PlowCoords) const;
+
+	// 生成杂草
+	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
+	void GenerateWeeds(FIntPoint PlowCoords, int32 WeedNum) const;
+
+	// 清除杂草
+	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
+	void ClearWeeds(FIntPoint PlowCoords);
+	
+	// 生成虫害
+	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
+	void GeneratePest(FIntPoint PlowCoords) const;
+
+	// 清除虫害
+	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
+	void ClearPest(FIntPoint PlowCoords);
 private:
 	// ==================== 私有方法 ====================
     

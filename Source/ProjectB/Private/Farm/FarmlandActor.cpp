@@ -180,6 +180,33 @@ FFarmLandPlotInfo AFarmlandActor::GetPlotInfo(const FIntPoint& PlotCoords) const
 	return FarmlandComponent->GetPlotInfo(PlotCoords);
 }
 
+void AFarmlandActor::RemoveLand(FIntPoint PlowCoords)
+{
+	if (!FarmlandComponent)
+	{
+		return ;
+	}
+	FarmlandComponent->RemoveLand(PlowCoords);
+}
+
+void AFarmlandActor::GeneratePest(FIntPoint PlowCoords) const
+{
+	if (!FarmlandComponent)
+	{
+		return ;
+	}
+	FarmlandComponent->GeneratePest(PlowCoords);
+}
+
+void AFarmlandActor::ClearPest(FIntPoint PlowCoords)
+{
+	if (!FarmlandComponent)
+	{
+		return ;
+	}
+	FarmlandComponent->ClearPest(PlowCoords);
+}
+
 void AFarmlandActor::PlowLand(const FIntPoint PlowCoords) const
 {
 	if (!FarmlandComponent)
@@ -196,6 +223,33 @@ void AFarmlandActor::WetLand(const FIntPoint PlowCoords) const
 		return ;
 	}
 	FarmlandComponent->WetLand(PlowCoords);
+}
+
+void AFarmlandActor::FertilizeLand(const FIntPoint PlowCoords) const
+{
+	if (!FarmlandComponent)
+	{
+		return ;
+	}
+	FarmlandComponent->FertilizeLand(PlowCoords);
+}
+
+void AFarmlandActor::GenerateWeeds(FIntPoint PlowCoords, int32 WeedNum) const
+{
+	if (!FarmlandComponent)
+	{
+		return ;
+	}
+	FarmlandComponent->GenerateWeeds(PlowCoords, WeedNum);
+}
+
+void AFarmlandActor::ClearWeeds(FIntPoint PlowCoords)
+{
+	if (!FarmlandComponent)
+	{
+		return ;
+	}
+	FarmlandComponent->ClearWeeds(PlowCoords);
 }
 
 void AFarmlandActor::InitializeComponents()

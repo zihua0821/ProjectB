@@ -3,9 +3,12 @@
 
 #include "Farm/FarmlandComponent.h"
 
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Farm/FarmlandActor.h"
+#include "Tools/ISMTools.h"
 
 
 // Sets default values for this component's properties
@@ -17,6 +20,29 @@ UFarmlandComponent::UFarmlandComponent()
 
 	// 初始化土地单元格
 	// InitializeLandCells();
+}
+
+void UFarmlandComponent::RemoveLand(FIntPoint PlowCoords)
+{
+	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
+	if (PlotInfo.StateData.IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("Plot is empty"))
+		return;
+	}
+	if (LandCellRenderer == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LandCellRenderer is nullptr"))
+		return;
+	}
+	ClearWeeds(PlowCoords);
+	ClearPest(PlowCoords);
+	const int32 PlotIndex = GetPlotIndex(PlowCoords);
+	for (int i = 0; i < FarmlandConfig->NumCustomDataFloats; ++i)
+	{
+		LandCellRenderer->SetCustomDataValue(PlotIndex, i, 0.f);
+	}
+	PlotInfo.StateData.Reset();
 }
 
 void UFarmlandComponent::PlowLand(FIntPoint PlowCoords)
@@ -32,9 +58,9 @@ void UFarmlandComponent::PlowLand(FIntPoint PlowCoords)
 		UE_LOG(LogTemp, Error, TEXT("LandCellRenderer is nullptr"))
 		return;
 	}
-	PlotInfo.StateData.AddState(EPlotState::Plowed);
 	const int32 PlotIndex = GetPlotIndex(PlowCoords);
 	LandCellRenderer->SetCustomDataValue(PlotIndex, 0, 1.f);
+	PlotInfo.StateData.AddState(EPlotState::Plowed);
 }
 
 void UFarmlandComponent::WetLand(FIntPoint PlowCoords)
@@ -55,9 +81,178 @@ void UFarmlandComponent::WetLand(FIntPoint PlowCoords)
 		UE_LOG(LogTemp, Error, TEXT("LandCellRenderer is nullptr"))
 		return;
 	}
-	PlotInfo.StateData.AddState(EPlotState::Watered);
 	const int32 PlotIndex = GetPlotIndex(PlowCoords);
 	LandCellRenderer->SetCustomDataValue(PlotIndex, 1, 1.f);
+	PlotInfo.StateData.AddState(EPlotState::Watered);
+}
+
+void UFarmlandComponent::FertilizeLand(FIntPoint PlowCoords)
+{
+	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
+	if (PlotInfo.StateData.IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("Plot is empty"))
+		return;
+	}
+	if (PlotInfo.StateData.HasState(EPlotState::Fertilized))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Plot is already Fertilized"))
+		return;
+	}
+	if (LandCellRenderer == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LandCellRenderer is nullptr"))
+		return;
+	}
+	const int32 PlotIndex = GetPlotIndex(PlowCoords);
+	LandCellRenderer->SetCustomDataValue(PlotIndex, 2, 1.f);
+	PlotInfo.StateData.AddState(EPlotState::Fertilized);
+}
+
+void UFarmlandComponent::GenerateWeeds(FIntPoint PlowCoords, int32 WeedNum)
+{
+	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
+	if (PlotInfo.StateData.IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("Plot is empty"))
+		return;
+	}
+	if (PlotInfo.StateData.HasState(EPlotState::WeedInfested))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Plot is already WeedInfested"))
+		return;
+	}
+	
+	if (WeedsRenderer == nullptr)
+	{
+		WeedsRenderer = NewObject<UHierarchicalInstancedStaticMeshComponent>(GetOwner());
+		WeedsRenderer->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
+		WeedsRenderer->RegisterComponent();
+		WeedsRenderer->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		WeedsRenderer->SetCollisionResponseToAllChannels(ECR_Ignore);
+		check(FarmlandConfig->WeedsMesh);
+		WeedsRenderer->SetStaticMesh(FarmlandConfig->WeedsMesh);
+	}
+	
+	FVector PlotLocation = PlotInfo.Transform.GetLocation();
+	FVector2D PlotSize = FarmlandConfig->CellSize;
+	// 中心原点
+	float HalfWidth = PlotSize.X * 0.5f;
+	float HalfHeight = PlotSize.Y * 0.5f;
+	// 计算地块实际边界
+	float MinX, MaxX, MinY, MaxY;
+	MinX = PlotLocation.X - HalfWidth;
+	MaxX = PlotLocation.X + HalfWidth;
+	MinY = PlotLocation.Y - HalfHeight;
+	MaxY = PlotLocation.Y + HalfHeight;
+    
+	// 1. 计算网格划分
+	int32 GridSize = FMath::CeilToInt(FMath::Sqrt(static_cast<float>(WeedNum)));
+	float CellWidth = (MaxX - MinX) / GridSize;
+	float CellHeight = (MaxY - MinY) / GridSize;
+    
+	// 2. 在每个网格内生成一个杂草
+	for (int32 i = 0; i < WeedNum; i++)
+	{
+		// 计算网格索引
+		int32 GridX = i % GridSize;
+		int32 GridY = i / GridSize;
+        
+		float GridCenterX = MinX + (GridX + 0.5f) * CellWidth;
+		float GridCenterY = MinY + (GridY + 0.5f) * CellHeight;
+        
+		// 随机偏移
+		float OffsetX = FMath::FRandRange(-CellWidth * 0.4f, CellWidth * 0.4f);
+		float OffsetY = FMath::FRandRange(-CellHeight * 0.4f, CellHeight * 0.4f);
+        
+		float FinalX = FMath::Clamp(GridCenterX + OffsetX, MinX, MaxX);
+		float FinalY = FMath::Clamp(GridCenterY + OffsetY, MinY, MaxY);
+
+		FVector WeedLocation(FinalX, FinalY, PlotLocation.Z);
+		
+		FTransform InstanceLocalTransform;
+		InstanceLocalTransform.SetLocation(WeedLocation);
+		
+		
+		WeedsRenderer->AddInstance(InstanceLocalTransform);
+		PlotInfo.WeedsTransform.Add(InstanceLocalTransform);
+
+		
+	}
+	WeedsRenderer->MarkRenderStateDirty();
+ 	PlotInfo.StateData.AddState(EPlotState::WeedInfested);
+}
+
+void UFarmlandComponent::ClearWeeds(FIntPoint PlowCoords)
+{
+	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
+	if (PlotInfo.StateData.IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("Plot is empty"))
+		return;
+	}
+	if (!PlotInfo.StateData.HasState(EPlotState::WeedInfested) && PlotInfo.WeedsTransform.Num() == 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("Plot is now free of weeds"))
+		return;
+	}
+	if (WeedsRenderer == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("WeedsRenderer is nullptr"))
+		return;
+	}
+	for (const FTransform WeedTransform : PlotInfo.WeedsTransform)
+	{
+		UISMTools::RemoveInstanceByTransform(WeedsRenderer, WeedTransform);
+	}
+	PlotInfo.WeedsTransform.Empty();
+	WeedsRenderer->MarkRenderStateDirty();
+	PlotInfo.StateData.RemoveState(EPlotState::WeedInfested);
+}
+
+void UFarmlandComponent::GeneratePest(FIntPoint PlowCoords)
+{
+	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
+	if (PlotInfo.StateData.IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("Plot is empty"))
+		return;
+	}
+	if (PlotInfo.StateData.HasState(EPlotState::PestInfested))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Plot is already PestInfested"))
+		return;
+	}
+
+	check(FarmlandConfig->PestNiagaraSystem)
+	const FVector PestLocation = PlotInfo.Transform.GetLocation() + FVector(0.f, 0.f, FarmlandConfig->PestHeight);
+	UNiagaraComponent* PestParticle = UNiagaraFunctionLibrary::SpawnSystemAttached(
+		FarmlandConfig->PestNiagaraSystem,this, NAME_None,
+		PestLocation, FRotator::ZeroRotator, EAttachLocation::SnapToTarget, false);
+	FVector PestSize = FVector(FarmlandConfig->CellSize.X / 2.f, FarmlandConfig->CellSize.Y / 2.f, FarmlandConfig->PestHeight / 2.f);
+	PestSize *= FarmlandConfig->PestScale;
+	PestParticle->SetVectorParameter("PestSize", PestSize);
+	PlotInfo.PestNiagaraComponent = PestParticle;
+	PlotInfo.StateData.AddState(EPlotState::PestInfested);
+}
+
+void UFarmlandComponent::ClearPest(FIntPoint PlowCoords)
+{
+	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
+	if (PlotInfo.StateData.IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("Plot is empty"))
+		return;
+	}
+	if (!PlotInfo.StateData.HasState(EPlotState::PestInfested) && PlotInfo.PestNiagaraComponent == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("Plot is now free of Pest"))
+		return;
+	}
+	PlotInfo.PestNiagaraComponent->Deactivate();  // 先停用
+	PlotInfo.PestNiagaraComponent->DestroyComponent();  // 销毁组件
+	PlotInfo.PestNiagaraComponent = nullptr;  // 置空指针
+	PlotInfo.StateData.RemoveState(EPlotState::PestInfested);
 }
 
 bool UFarmlandComponent::PlantCrop(int32 PlotX, int32 PlotY, FName CropID)
@@ -222,7 +417,6 @@ void UFarmlandComponent::InitializeLandCells()
 			// 创建信息
 			FFarmLandPlotInfo PlotInfo;
 			PlotInfo.Transform = CellTransform;
-			PlotInfo.InstanceIndex = InstanceIndex;
 			
 			// 记录映射
 			PlotInfoIndex.Add(FIntPoint(X, Y), PlotInfo);

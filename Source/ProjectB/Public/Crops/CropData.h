@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "CropData.generated.h"
 
+class UNiagaraComponent;
 class UCropDataAsset;
 
 /**
@@ -34,6 +35,10 @@ struct FPlotStateData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlotState")
     EPlotState StateFlags = EPlotState::Empty;
 
+    void Reset()
+    {
+        StateFlags = EPlotState::Empty;
+    }
     bool IsEmpty() const
     {
         return StateFlags == EPlotState::Empty;
@@ -113,9 +118,12 @@ struct FFarmLandPlotInfo
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLandPlotInfo")
     FPlotStateData StateData;
-    
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLandPlotInfo")
-    int32 InstanceIndex;
+    TArray<FTransform> WeedsTransform;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLandPlotInfo")
+    TObjectPtr<UNiagaraComponent> PestNiagaraComponent;
 };
 
 /**
