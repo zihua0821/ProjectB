@@ -81,6 +81,11 @@ public:
 			  meta = (DisplayName = "杂草模型"))
 	TObjectPtr<UStaticMesh> WeedsMesh;
 
+	// 地块杂草数量
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Weeds", 
+			  meta = (DisplayName = "地块杂草数量"))
+	int32 WeedNum = 9;
+
 	// ============== 虫害配置 ==============
 	// 虫害粒子系统
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Pest", 

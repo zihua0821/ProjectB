@@ -16,13 +16,61 @@ UFarmlandComponent::UFarmlandComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.TickInterval = 1.0f; // 每秒更新一次作物生长
-    
-
-	// 初始化土地单元格
-	// InitializeLandCells();
+	
 }
 
-void UFarmlandComponent::RemoveLand(FIntPoint PlowCoords)
+void UFarmlandComponent::HandleLeftMouseClicked(const EEditMode EditMode, const FIntPoint PlowCoords)
+{
+	switch (EditMode)
+	{
+	case None:
+		break;
+	case Reset:
+		ResetLand(PlowCoords);
+		break;
+	case Plow:
+		PlowLand(PlowCoords);
+		break;
+	case UnPlow:
+		RemoveLand(PlowCoords);
+		break;
+	case Wet:
+		WetLand(PlowCoords);
+		break;
+	case UnWet:
+		LandDried(PlowCoords);
+		break;
+	case Fertilize:
+		FertilizeLand(PlowCoords);
+		break;
+	case UnFertilize:
+		ClearFertilize(PlowCoords);
+		break;
+	case Weed:
+		GenerateWeeds(PlowCoords);
+		break;
+	case UnWeed:
+		ClearWeeds(PlowCoords);
+		break;
+	case Pest:
+		GeneratePest(PlowCoords);
+		break;
+	case UnPest:
+		ClearPest(PlowCoords);
+		break;
+	case Count:
+		break;
+	}
+}
+
+void UFarmlandComponent::ResetLand(const FIntPoint PlowCoords)
+{
+	ClearWeeds(PlowCoords);
+	ClearPest(PlowCoords);
+	RemoveLand(PlowCoords);
+}
+
+void UFarmlandComponent::RemoveLand(const FIntPoint PlowCoords)
 {
 	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
 	if (PlotInfo.StateData.IsEmpty())
@@ -35,8 +83,7 @@ void UFarmlandComponent::RemoveLand(FIntPoint PlowCoords)
 		UE_LOG(LogTemp, Error, TEXT("LandCellRenderer is nullptr"))
 		return;
 	}
-	ClearWeeds(PlowCoords);
-	ClearPest(PlowCoords);
+
 	const int32 PlotIndex = GetPlotIndex(PlowCoords);
 	for (int i = 0; i < FarmlandConfig->NumCustomDataFloats; ++i)
 	{
@@ -45,7 +92,7 @@ void UFarmlandComponent::RemoveLand(FIntPoint PlowCoords)
 	PlotInfo.StateData.Reset();
 }
 
-void UFarmlandComponent::PlowLand(FIntPoint PlowCoords)
+void UFarmlandComponent::PlowLand(const FIntPoint PlowCoords)
 {
 	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
 	if (!PlotInfo.StateData.IsEmpty())
@@ -63,7 +110,7 @@ void UFarmlandComponent::PlowLand(FIntPoint PlowCoords)
 	PlotInfo.StateData.AddState(EPlotState::Plowed);
 }
 
-void UFarmlandComponent::WetLand(FIntPoint PlowCoords)
+void UFarmlandComponent::WetLand(const FIntPoint PlowCoords)
 {
 	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
 	if (PlotInfo.StateData.IsEmpty())
@@ -86,7 +133,30 @@ void UFarmlandComponent::WetLand(FIntPoint PlowCoords)
 	PlotInfo.StateData.AddState(EPlotState::Watered);
 }
 
-void UFarmlandComponent::FertilizeLand(FIntPoint PlowCoords)
+void UFarmlandComponent::LandDried(const FIntPoint PlowCoords)
+{
+	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
+	if (PlotInfo.StateData.IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("Plot is empty"))
+		return;
+	}
+	if (!PlotInfo.StateData.HasState(EPlotState::Watered))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Plot is not watered"))
+		return;
+	}
+	if (LandCellRenderer == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LandCellRenderer is nullptr"))
+		return;
+	}
+	const int32 PlotIndex = GetPlotIndex(PlowCoords);
+	LandCellRenderer->SetCustomDataValue(PlotIndex, 1, 0.f);
+	PlotInfo.StateData.RemoveState(EPlotState::Watered);
+}
+
+void UFarmlandComponent::FertilizeLand(const FIntPoint PlowCoords)
 {
 	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
 	if (PlotInfo.StateData.IsEmpty())
@@ -109,7 +179,30 @@ void UFarmlandComponent::FertilizeLand(FIntPoint PlowCoords)
 	PlotInfo.StateData.AddState(EPlotState::Fertilized);
 }
 
-void UFarmlandComponent::GenerateWeeds(FIntPoint PlowCoords, int32 WeedNum)
+void UFarmlandComponent::ClearFertilize(const FIntPoint PlowCoords)
+{
+	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
+	if (PlotInfo.StateData.IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("Plot is empty"))
+		return;
+	}
+	if (!PlotInfo.StateData.HasState(EPlotState::Fertilized))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Plot is not Fertilized"))
+		return;
+	}
+	if (LandCellRenderer == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LandCellRenderer is nullptr"))
+		return;
+	}
+	const int32 PlotIndex = GetPlotIndex(PlowCoords);
+	LandCellRenderer->SetCustomDataValue(PlotIndex, 2, 0.f);
+	PlotInfo.StateData.RemoveState(EPlotState::Fertilized);
+}
+
+void UFarmlandComponent::GenerateWeeds(const FIntPoint PlowCoords)
 {
 	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
 	if (PlotInfo.StateData.IsEmpty())
@@ -133,40 +226,40 @@ void UFarmlandComponent::GenerateWeeds(FIntPoint PlowCoords, int32 WeedNum)
 		check(FarmlandConfig->WeedsMesh);
 		WeedsRenderer->SetStaticMesh(FarmlandConfig->WeedsMesh);
 	}
-	
-	FVector PlotLocation = PlotInfo.Transform.GetLocation();
-	FVector2D PlotSize = FarmlandConfig->CellSize;
+
+	const int32 WeedNum = FarmlandConfig->WeedNum;
+	const FVector PlotLocation = PlotInfo.Transform.GetLocation();
+	const FVector2D PlotSize = FarmlandConfig->CellSize;
 	// 中心原点
-	float HalfWidth = PlotSize.X * 0.5f;
-	float HalfHeight = PlotSize.Y * 0.5f;
+	const float HalfWidth = PlotSize.X * 0.5f;
+	const float HalfHeight = PlotSize.Y * 0.5f;
 	// 计算地块实际边界
-	float MinX, MaxX, MinY, MaxY;
-	MinX = PlotLocation.X - HalfWidth;
-	MaxX = PlotLocation.X + HalfWidth;
-	MinY = PlotLocation.Y - HalfHeight;
-	MaxY = PlotLocation.Y + HalfHeight;
+	const float MinX = PlotLocation.X - HalfWidth;
+	const float MaxX = PlotLocation.X + HalfWidth;
+	const float MinY = PlotLocation.Y - HalfHeight;
+	const float MaxY = PlotLocation.Y + HalfHeight;
     
 	// 1. 计算网格划分
-	int32 GridSize = FMath::CeilToInt(FMath::Sqrt(static_cast<float>(WeedNum)));
-	float CellWidth = (MaxX - MinX) / GridSize;
-	float CellHeight = (MaxY - MinY) / GridSize;
+	const int32 GridSize = FMath::CeilToInt(FMath::Sqrt(static_cast<float>(WeedNum)));
+	const float CellWidth = (MaxX - MinX) / GridSize;
+	const float CellHeight = (MaxY - MinY) / GridSize;
     
 	// 2. 在每个网格内生成一个杂草
 	for (int32 i = 0; i < WeedNum; i++)
 	{
 		// 计算网格索引
-		int32 GridX = i % GridSize;
-		int32 GridY = i / GridSize;
-        
-		float GridCenterX = MinX + (GridX + 0.5f) * CellWidth;
-		float GridCenterY = MinY + (GridY + 0.5f) * CellHeight;
+		const int32 GridX = i % GridSize;
+		const int32 GridY = i / GridSize;
+
+		const float GridCenterX = MinX + (GridX + 0.5f) * CellWidth;
+		const float GridCenterY = MinY + (GridY + 0.5f) * CellHeight;
         
 		// 随机偏移
-		float OffsetX = FMath::FRandRange(-CellWidth * 0.4f, CellWidth * 0.4f);
-		float OffsetY = FMath::FRandRange(-CellHeight * 0.4f, CellHeight * 0.4f);
-        
-		float FinalX = FMath::Clamp(GridCenterX + OffsetX, MinX, MaxX);
-		float FinalY = FMath::Clamp(GridCenterY + OffsetY, MinY, MaxY);
+		const float OffsetX = FMath::FRandRange(-CellWidth * 0.4f, CellWidth * 0.4f);
+		const float OffsetY = FMath::FRandRange(-CellHeight * 0.4f, CellHeight * 0.4f);
+
+		const float FinalX = FMath::Clamp(GridCenterX + OffsetX, MinX, MaxX);
+		const float FinalY = FMath::Clamp(GridCenterY + OffsetY, MinY, MaxY);
 
 		FVector WeedLocation(FinalX, FinalY, PlotLocation.Z);
 		
@@ -183,7 +276,7 @@ void UFarmlandComponent::GenerateWeeds(FIntPoint PlowCoords, int32 WeedNum)
  	PlotInfo.StateData.AddState(EPlotState::WeedInfested);
 }
 
-void UFarmlandComponent::ClearWeeds(FIntPoint PlowCoords)
+void UFarmlandComponent::ClearWeeds(const FIntPoint PlowCoords)
 {
 	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
 	if (PlotInfo.StateData.IsEmpty())
@@ -210,7 +303,7 @@ void UFarmlandComponent::ClearWeeds(FIntPoint PlowCoords)
 	PlotInfo.StateData.RemoveState(EPlotState::WeedInfested);
 }
 
-void UFarmlandComponent::GeneratePest(FIntPoint PlowCoords)
+void UFarmlandComponent::GeneratePest(const FIntPoint PlowCoords)
 {
 	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
 	if (PlotInfo.StateData.IsEmpty())
@@ -236,7 +329,7 @@ void UFarmlandComponent::GeneratePest(FIntPoint PlowCoords)
 	PlotInfo.StateData.AddState(EPlotState::PestInfested);
 }
 
-void UFarmlandComponent::ClearPest(FIntPoint PlowCoords)
+void UFarmlandComponent::ClearPest(const FIntPoint PlowCoords)
 {
 	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlowCoords);
 	if (PlotInfo.StateData.IsEmpty())
@@ -278,23 +371,23 @@ void UFarmlandComponent::UpdateCrops(float DeltaTime)
 FIntPoint UFarmlandComponent::WorldToCellCoordinates(const FVector& WorldPosition) const
 {
 	// 将世界坐标转换到组件的本地空间
-	FVector LocalPosition = GetComponentTransform().InverseTransformPosition(WorldPosition);
+	const FVector LocalPosition = GetComponentTransform().InverseTransformPosition(WorldPosition);
     
 	// 计算农场总大小（考虑间距+拓展）
-	float TotalWidth = FarmlandConfig->GridSizeX * FarmlandConfig->CellSize.X + (FarmlandConfig->GridSizeX - 1) * FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension * 2.f;
-	float TotalHeight = FarmlandConfig->GridSizeY * FarmlandConfig->CellSize.Y + (FarmlandConfig->GridSizeY - 1) * FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension * 2.f;
+	const float TotalWidth = FarmlandConfig->GridSizeX * FarmlandConfig->CellSize.X + (FarmlandConfig->GridSizeX - 1) * FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension * 2.f;
+	const float TotalHeight = FarmlandConfig->GridSizeY * FarmlandConfig->CellSize.Y + (FarmlandConfig->GridSizeY - 1) * FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension * 2.f;
     
 	// 计算本地坐标相对于农场边界的偏移
-	float HalfWidth = TotalWidth * 0.5f;
-	float HalfHeight = TotalHeight * 0.5f;
+	const float HalfWidth = TotalWidth * 0.5f;
+	const float HalfHeight = TotalHeight * 0.5f;
     
 	// 计算归一化坐标 [0, 1]
-	float NormX = (LocalPosition.X + HalfWidth) / TotalWidth;
-	float NormY = (LocalPosition.Y + HalfHeight) / TotalHeight;
+	const float NormX = (LocalPosition.X + HalfWidth) / TotalWidth;
+	const float NormY = (LocalPosition.Y + HalfHeight) / TotalHeight;
     
 	// 转换为网格坐标
-	int32 CellX = FMath::FloorToInt(NormX * FarmlandConfig->GridSizeX);
-	int32 CellY = FMath::FloorToInt(NormY * FarmlandConfig->GridSizeY);
+	const int32 CellX = FMath::FloorToInt(NormX * FarmlandConfig->GridSizeX);
+	const int32 CellY = FMath::FloorToInt(NormY * FarmlandConfig->GridSizeY);
     
 	// 边界检查
 	if (CellX >= 0 && CellX < FarmlandConfig->GridSizeX && CellY >= 0 && CellY < FarmlandConfig->GridSizeY)
@@ -306,21 +399,21 @@ FIntPoint UFarmlandComponent::WorldToCellCoordinates(const FVector& WorldPositio
 	return FIntPoint(INDEX_NONE, INDEX_NONE);
 }
 
-FVector UFarmlandComponent::CellToWorldCoordinates(int32 CellX, int32 CellY) const
+FVector UFarmlandComponent::CellToWorldCoordinates(const int32 CellX, const int32 CellY) const
 {
 	// 计算农场总大小
-	float TotalWidth = FarmlandConfig->GridSizeX * FarmlandConfig->CellSize.X + (FarmlandConfig->GridSizeX - 1) * FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension * 2.f;
-	float TotalHeight = FarmlandConfig->GridSizeY * FarmlandConfig->CellSize.Y + (FarmlandConfig->GridSizeY - 1) * FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension * 2.f;
+	const float TotalWidth = FarmlandConfig->GridSizeX * FarmlandConfig->CellSize.X + (FarmlandConfig->GridSizeX - 1) * FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension * 2.f;
+	const float TotalHeight = FarmlandConfig->GridSizeY * FarmlandConfig->CellSize.Y + (FarmlandConfig->GridSizeY - 1) * FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension * 2.f;
     
 	// 计算从中心开始的偏移
-	float StartX = -TotalWidth * 0.5f + FarmlandConfig->CellSize.X * 0.5f;
-	float StartY = -TotalHeight * 0.5f + FarmlandConfig->CellSize.Y * 0.5f;
+	const float StartX = -TotalWidth * 0.5f + FarmlandConfig->CellSize.X * 0.5f;
+	const float StartY = -TotalHeight * 0.5f + FarmlandConfig->CellSize.Y * 0.5f;
     
 	// 计算本地位置
-	float LocalX = StartX + CellX * (FarmlandConfig->CellSize.X + FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension);
-	float LocalY = StartY + CellY * (FarmlandConfig->CellSize.Y + FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension);
-    
-	FVector LocalPosition(LocalX, LocalY, 0);
+	const float LocalX = StartX + CellX * (FarmlandConfig->CellSize.X + FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension);
+	const float LocalY = StartY + CellY * (FarmlandConfig->CellSize.Y + FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension);
+
+	const FVector LocalPosition(LocalX, LocalY, 0);
     
 	// 转换到世界空间
 	return GetComponentTransform().TransformPosition(LocalPosition);
@@ -382,19 +475,19 @@ void UFarmlandComponent::InitializeLandCells()
 	
 	// 计算缩放因子
 	// 获取土地网格的原始边界
-	FBoxSphereBounds CellBounds = FarmlandConfig->LandCellMesh->GetBounds();
-	FVector CellExtent = CellBounds.BoxExtent;
+	const FBoxSphereBounds CellBounds = FarmlandConfig->LandCellMesh->GetBounds();
+	const FVector CellExtent = CellBounds.BoxExtent;
 	// 计算需要的缩放
-	float ScaleFactorX = FarmlandConfig->CellSize.X / (CellExtent.X * 2.f);
-	float ScaleFactorY = FarmlandConfig->CellSize.Y / (CellExtent.Y * 2.f);
-	float ScaleFactorZ = FarmlandConfig->LandHeightOffset / (CellExtent.Z * 2.f);
-	FVector InstanceScale(ScaleFactorX, ScaleFactorY, ScaleFactorZ);
+	const float ScaleFactorX = FarmlandConfig->CellSize.X / (CellExtent.X * 2.f);
+	const float ScaleFactorY = FarmlandConfig->CellSize.Y / (CellExtent.Y * 2.f);
+	const float ScaleFactorZ = FarmlandConfig->LandHeightOffset / (CellExtent.Z * 2.f);
+	const FVector InstanceScale(ScaleFactorX, ScaleFactorY, ScaleFactorZ);
     
 	// 计算总偏移（从中心开始）
-	float TotalWidth = FarmlandConfig->GridSizeX * FarmlandConfig->CellSize.X + (FarmlandConfig->GridSizeX - 1) * FarmlandConfig->CellSpacing;
-	float TotalHeight = FarmlandConfig->GridSizeY * FarmlandConfig->CellSize.Y + (FarmlandConfig->GridSizeY - 1) * FarmlandConfig->CellSpacing;
-	float StartX = -TotalWidth * 0.5f + FarmlandConfig->CellSize.X * 0.5f;
-	float StartY = -TotalHeight * 0.5f + FarmlandConfig->CellSize.Y * 0.5f;
+	const float TotalWidth = FarmlandConfig->GridSizeX * FarmlandConfig->CellSize.X + (FarmlandConfig->GridSizeX - 1) * FarmlandConfig->CellSpacing;
+	const float TotalHeight = FarmlandConfig->GridSizeY * FarmlandConfig->CellSize.Y + (FarmlandConfig->GridSizeY - 1) * FarmlandConfig->CellSpacing;
+	const float StartX = -TotalWidth * 0.5f + FarmlandConfig->CellSize.X * 0.5f;
+	const float StartY = -TotalHeight * 0.5f + FarmlandConfig->CellSize.Y * 0.5f;
     
 	// 创建所有土地单元格实例
 	for (int32 Y = 0; Y < FarmlandConfig->GridSizeY; Y++)
@@ -402,9 +495,9 @@ void UFarmlandComponent::InitializeLandCells()
 		for (int32 X = 0; X < FarmlandConfig->GridSizeX; X++)
 		{
 			// 计算位置
-			float PosX = StartX + X * (FarmlandConfig->CellSize.X + FarmlandConfig->CellSpacing);
-			float PosY = StartY + Y * (FarmlandConfig->CellSize.Y + FarmlandConfig->CellSpacing);
-			float PosZ = FarmlandConfig->LandHeightOffset / 2.0f;
+			const float PosX = StartX + X * (FarmlandConfig->CellSize.X + FarmlandConfig->CellSpacing);
+			const float PosY = StartY + Y * (FarmlandConfig->CellSize.Y + FarmlandConfig->CellSpacing);
+			const float PosZ = FarmlandConfig->LandHeightOffset / 2.0f;
             
 			// 创建变换
 			FTransform CellTransform;
@@ -466,7 +559,7 @@ TObjectPtr<UHierarchicalInstancedStaticMeshComponent> UFarmlandComponent::GetOrC
 
 
 // Called every frame
-void UFarmlandComponent::TickComponent(float DeltaTime, ELevelTick TickType,
+void UFarmlandComponent::TickComponent(const float DeltaTime, const ELevelTick TickType,
                                        FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);

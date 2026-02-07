@@ -127,6 +127,29 @@ struct FFarmLandPlotInfo
 };
 
 /**
+ * 编辑模式
+ */
+UENUM(BlueprintType)
+enum EEditMode : uint8
+{
+    None        UMETA(DisplayName = "无"),
+    Reset       UMETA(DisplayName = "重置"),
+    Plow        UMETA(DisplayName = "耕地"),
+    UnPlow      UMETA(DisplayName = "反耕地"),
+    Wet         UMETA(DisplayName = "灌溉"),
+    UnWet       UMETA(DisplayName = "反灌溉"),
+    Fertilize   UMETA(DisplayName = "施肥"),
+    UnFertilize UMETA(DisplayName = "反施肥"),
+    Weed        UMETA(DisplayName = "杂草"),
+    UnWeed      UMETA(DisplayName = "反杂草"),
+    Pest        UMETA(DisplayName = "虫害"),
+    UnPest      UMETA(DisplayName = "反虫害"),
+
+    // 哨兵：不用于逻辑，仅用于计数
+    Count       UMETA(Hidden)
+};
+
+/**
  * 农作物生长阶段
  */
 UENUM(BlueprintType)

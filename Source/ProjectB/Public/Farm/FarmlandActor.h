@@ -57,10 +57,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	UFarmlandComponent* GetFarmlandComponent() const { return FarmlandComponent; }
     
-	// 获取农场边界（用于UI或碰撞检测）
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Farmland")
-	FBox GetFarmBounds() const;
-    
 	// 获取指定单元格的世界位置
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Farmland")
 	FVector GetCellWorldLocation(int32 CellX, int32 CellY) const;
@@ -68,51 +64,16 @@ public:
 	// 获取鼠标点击的单元格坐标（封装方法）
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
 	bool GetCellCoordinatesFromClick(const FVector& ClickLocation, FIntPoint& OutCellCoords) const;
-    
-	// 检查坐标是否有效
-	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
-	bool AreCellCoordinatesValid(int32 CellX, int32 CellY) const;
-    
-	// 获取点击的单元格中心位置
-	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
-	FVector GetCellCenterFromClick(const FVector& ClickLocation) const;
-
+	
 	// 获取地块信息
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
 	FFarmLandPlotInfo GetPlotInfo(const FIntPoint& PlotCoords) const;
 
 	// ====================  农田交互 ====================
-	// 移除耕地
+	// 处理左键点击
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
-	void RemoveLand(FIntPoint PlowCoords);
-	
-	// 耕地
-	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
-	void PlowLand(FIntPoint PlowCoords) const;
+	void HandleLeftMouseClicked(const EEditMode EditMode, const FIntPoint PlowCoords) const;
 
-	// 浇水
-	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
-	void WetLand(FIntPoint PlowCoords) const;
-
-	// 施肥
-	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
-	void FertilizeLand(FIntPoint PlowCoords) const;
-
-	// 生成杂草
-	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
-	void GenerateWeeds(FIntPoint PlowCoords, int32 WeedNum) const;
-
-	// 清除杂草
-	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
-	void ClearWeeds(FIntPoint PlowCoords);
-	
-	// 生成虫害
-	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
-	void GeneratePest(FIntPoint PlowCoords) const;
-
-	// 清除虫害
-	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
-	void ClearPest(FIntPoint PlowCoords);
 private:
 	// ==================== 私有方法 ====================
     
@@ -128,7 +89,6 @@ private:
 	// 计算农场总大小
 	FVector2D CalculateFarmTotalSize() const;
 	
-	int32 GetPlotIndex(int32 X, int32 Y) const;
 	
 	bool bComponentsInitialized = false;
 };

@@ -7,10 +7,8 @@
 #include "Farm/FarmlandComponent.h"
 
 
-// Sets default values
 AFarmlandActor::AFarmlandActor()
 {
-	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.TickInterval = 0.1f;
 
@@ -55,67 +53,6 @@ void AFarmlandActor::BeginPlay()
 	
 }
 
-// #if WITH_EDITOR
-// void AFarmlandActor::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
-// {
-// 	Super::PostEditChangeProperty(PropertyChangedEvent);
-//
-// 	// 检查是否是网格相关属性发生了变化
-// 	FName PropertyName = PropertyChangedEvent.MemberProperty ? PropertyChangedEvent.MemberProperty->GetFName() : NAME_None;
-//     
-// 	// 定义需要监听的属性名
-// 	static TArray<FName> GridProperties = {
-// 		GET_MEMBER_NAME_CHECKED(AFarmlandActor, LandCellMesh),
-// 		GET_MEMBER_NAME_CHECKED(AFarmlandActor, GroundMesh),
-// 		GET_MEMBER_NAME_CHECKED(AFarmlandActor, CellSize),
-// 		GET_MEMBER_NAME_CHECKED(AFarmlandActor, GridSizeX),
-// 		GET_MEMBER_NAME_CHECKED(AFarmlandActor, GridSizeY),
-// 		GET_MEMBER_NAME_CHECKED(AFarmlandActor, CellSpacing),
-// 		GET_MEMBER_NAME_CHECKED(AFarmlandActor, LandHeightOffset),
-// 		GET_MEMBER_NAME_CHECKED(AFarmlandActor, bShowDebugGrid),
-// 		GET_MEMBER_NAME_CHECKED(AFarmlandActor, bAutoUpdateConfig)
-// 	};
-//
-// 	if (GridProperties.Contains(PropertyName))
-// 	{
-// 		if (bAutoUpdateConfig)
-// 		{
-// 			// 延迟更新，避免在属性编辑过程中频繁重建
-// 			FTimerHandle TimerHandle;
-// 			GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this]()
-// 			{
-// 				UpdateFarmlandConfiguration();
-// 			}, 0.1f, false);
-// 		}
-// 	}
-// }
-//
-// void AFarmlandActor::PostEditMove(bool bFinished)
-// {
-// 	Super::PostEditMove(bFinished);
-//
-// 	// 移动后重新计算单元格位置
-// 	if (bFinished && bAutoUpdateConfig)
-// 	{
-// 		UpdateFarmlandConfiguration();
-// 	}
-// }
-// #endif
-
-FBox AFarmlandActor::GetFarmBounds() const
-{
-	if (!FarmlandComponent) return FBox(EForceInit::ForceInit);
-    
-	FVector2D FarmSize = CalculateFarmTotalSize();
-	FVector Origin = GetActorLocation();
-    
-	// 计算边界框
-	FVector Min = Origin - FVector(FarmSize.X * 0.5f, FarmSize.Y * 0.5f, 0);
-	FVector Max = Origin + FVector(FarmSize.X * 0.5f, FarmSize.Y * 0.5f, 100.0f); // Z方向100单位高度
-    
-	return FBox(Min, Max);
-}
-
 FVector AFarmlandActor::GetCellWorldLocation(int32 CellX, int32 CellY) const
 {
 	if (!FarmlandComponent) return GetActorLocation();
@@ -149,28 +86,6 @@ bool AFarmlandActor::GetCellCoordinatesFromClick(const FVector& ClickLocation, F
 	return FarmlandComponent->GetClickedCellCoordinates(ClickLocation, OutCellCoords);
 }
 
-bool AFarmlandActor::AreCellCoordinatesValid(int32 CellX, int32 CellY) const
-{
-	if (!FarmlandComponent)
-	{
-		return false;
-	}
-    
-	return CellX >= 0 && CellX < FarmlandConfig->GridSizeX && 
-		   CellY >= 0 && CellY < FarmlandConfig->GridSizeY;
-}
-
-FVector AFarmlandActor::GetCellCenterFromClick(const FVector& ClickLocation) const
-{
-	FIntPoint CellCoords;
-	if (GetCellCoordinatesFromClick(ClickLocation, CellCoords))
-	{
-		return FarmlandComponent->CellToWorldCoordinates(CellCoords.X, CellCoords.Y);
-	}
-    
-	return ClickLocation; // 返回原始点击位置作为回退
-}
-
 FFarmLandPlotInfo AFarmlandActor::GetPlotInfo(const FIntPoint& PlotCoords) const
 {
 	if (!FarmlandComponent)
@@ -180,76 +95,13 @@ FFarmLandPlotInfo AFarmlandActor::GetPlotInfo(const FIntPoint& PlotCoords) const
 	return FarmlandComponent->GetPlotInfo(PlotCoords);
 }
 
-void AFarmlandActor::RemoveLand(FIntPoint PlowCoords)
+void AFarmlandActor::HandleLeftMouseClicked(const EEditMode EditMode, const FIntPoint PlowCoords) const
 {
 	if (!FarmlandComponent)
 	{
-		return ;
+		return;
 	}
-	FarmlandComponent->RemoveLand(PlowCoords);
-}
-
-void AFarmlandActor::GeneratePest(FIntPoint PlowCoords) const
-{
-	if (!FarmlandComponent)
-	{
-		return ;
-	}
-	FarmlandComponent->GeneratePest(PlowCoords);
-}
-
-void AFarmlandActor::ClearPest(FIntPoint PlowCoords)
-{
-	if (!FarmlandComponent)
-	{
-		return ;
-	}
-	FarmlandComponent->ClearPest(PlowCoords);
-}
-
-void AFarmlandActor::PlowLand(const FIntPoint PlowCoords) const
-{
-	if (!FarmlandComponent)
-	{
-		return ;
-	}
-	FarmlandComponent->PlowLand(PlowCoords);
-}
-
-void AFarmlandActor::WetLand(const FIntPoint PlowCoords) const
-{
-	if (!FarmlandComponent)
-	{
-		return ;
-	}
-	FarmlandComponent->WetLand(PlowCoords);
-}
-
-void AFarmlandActor::FertilizeLand(const FIntPoint PlowCoords) const
-{
-	if (!FarmlandComponent)
-	{
-		return ;
-	}
-	FarmlandComponent->FertilizeLand(PlowCoords);
-}
-
-void AFarmlandActor::GenerateWeeds(FIntPoint PlowCoords, int32 WeedNum) const
-{
-	if (!FarmlandComponent)
-	{
-		return ;
-	}
-	FarmlandComponent->GenerateWeeds(PlowCoords, WeedNum);
-}
-
-void AFarmlandActor::ClearWeeds(FIntPoint PlowCoords)
-{
-	if (!FarmlandComponent)
-	{
-		return ;
-	}
-	FarmlandComponent->ClearWeeds(PlowCoords);
+	FarmlandComponent->HandleLeftMouseClicked(EditMode, PlowCoords);
 }
 
 void AFarmlandActor::InitializeComponents()
@@ -383,11 +235,3 @@ void AFarmlandActor::Tick(float DeltaTime)
 	
 }
 
-int32 AFarmlandActor::GetPlotIndex(int32 X, int32 Y) const
-{
-	if (X < 0 || X >= FarmlandConfig->GridSizeX || Y < 0 || Y >= FarmlandConfig->GridSizeY)
-	{
-		return INDEX_NONE;
-	}
-	return Y * FarmlandConfig->GridSizeX + X;
-}

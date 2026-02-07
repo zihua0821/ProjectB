@@ -25,25 +25,41 @@ public:
 	void SetFarmlandConfig(const TObjectPtr<UFarmlandConfigDataAsset>& InFarmlandConfig){FarmlandConfig = InFarmlandConfig;}
 	
 	// =================== 种植接口 ====================
+	// 左键点击
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void HandleLeftMouseClicked(const EEditMode EditMode, const FIntPoint PlowCoords);
+
+	// 重置地块
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void ResetLand(FIntPoint PlowCoords);
+
+	// 耕地
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void PlowLand(FIntPoint PlowCoords);
+	
 	// 移除耕地
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	void RemoveLand(FIntPoint PlowCoords);
 	
-	// 耕地
-	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void PlowLand(FIntPoint PlowCoords);
-
 	// 浇水
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	void WetLand(FIntPoint PlowCoords);
+
+	// 变干
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void LandDried(FIntPoint PlowCoords);
 
 	// 施肥
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	void FertilizeLand(FIntPoint PlowCoords);
 
+	// 清除施肥
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void ClearFertilize(FIntPoint PlowCoords);
+
 	// 生成杂草
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void GenerateWeeds(FIntPoint PlowCoords, int32 WeedNum);
+	void GenerateWeeds(FIntPoint PlowCoords);
 
 	// 清除杂草
 	UFUNCTION(BlueprintCallable, Category = "Farmland")

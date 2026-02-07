@@ -26,45 +26,13 @@ void ABasePlayerController::OnLeftMouseClick()
 	FIntPoint CellCoords;
 	if (TraceForFarmlandAndCell(HitLocation, HitFarmland, CellCoords))
 	{
-		DrawDebugSphere(GetWorld(), HitLocation, 10.f, 12, FColor::Red, false, 3.f);
-		
+		// DrawDebugSphere(GetWorld(), HitLocation, 10.f, 12, FColor::Red, false, 3.f);
 		FFarmLandPlotInfo PlotInfo = HitFarmland->GetPlotInfo(CellCoords);
-		if (PlotInfo.StateData.IsEmpty())
-		{
-			HitFarmland->PlowLand(CellCoords);
-		}
-		else if (PlotInfo.StateData.HasState(EPlotState::Plowed) && !PlotInfo.StateData.HasState(EPlotState::Watered))
-		{
-			HitFarmland->WetLand(CellCoords);
-		}
-		else if (PlotInfo.StateData.HasState(EPlotState::Watered) && !PlotInfo.StateData.HasState(EPlotState::Fertilized))
-		{
-			HitFarmland->FertilizeLand(CellCoords);
-		}
-		else if (PlotInfo.StateData.HasState(EPlotState::Fertilized) && !PlotInfo.StateData.HasState(EPlotState::WeedInfested))
-		{
-			HitFarmland->GenerateWeeds(CellCoords, 9);
-		}
-		else if (PlotInfo.StateData.HasState(EPlotState::WeedInfested) && !PlotInfo.StateData.HasState(EPlotState::PestInfested))
-		{
-			HitFarmland->GeneratePest(CellCoords);
-		}
-		// else if (PlotInfo.StateData.HasState(EPlotState::WeedInfested))
-		// {
-		// 	HitFarmland->ClearWeeds(CellCoords);
-		// }
-		else if (!PlotInfo.StateData.IsEmpty())
-		{
-			HitFarmland->RemoveLand(CellCoords);
-		}
-		else
-		{
-			GEngine->AddOnScreenDebugMessage(-1,
-				3.f,
-				FColor::Red,
-				FString::Printf(TEXT("Hit Farmland: %s (%d,%d) %s"), *HitFarmland->GetName(), CellCoords.X, CellCoords.Y, *PlotInfo.StateData.ToString()));
-		}
-		
+		HitFarmland->HandleLeftMouseClicked(EditMode, CellCoords);
+		// GEngine->AddOnScreenDebugMessage(-1,
+		// 		3.f,
+		// 		FColor::Red,
+		// 		FString::Printf(TEXT("Hit Farmland: %s (%d,%d) %s"), *HitFarmland->GetName(), CellCoords.X, CellCoords.Y, *PlotInfo.StateData.ToString()));
 	}
 }
 
@@ -125,4 +93,22 @@ bool ABasePlayerController::TraceForFarmlandAndCell(FVector& OutHitLocation, AFa
     }
     
     return false;
+}
+
+// 切换到下一个编辑模式（正向循环）
+void ABasePlayerController::SwitchToNextEditMode()
+{
+	constexpr int32 EditModeCount = static_cast<int32>(EEditMode::Count);
+	int32 Index = static_cast<int32>(EditMode);
+	Index = (Index + 1) % EditModeCount;
+	EditMode = static_cast<EEditMode>(Index);
+}
+
+// 切换到上一个编辑模式（反向循环）
+void ABasePlayerController::SwitchToPrevEditMode()
+{
+	constexpr int32 EditModeCount = static_cast<int32>(EEditMode::Count);
+	int32 Index = static_cast<int32>(EditMode);
+	Index = (Index - 1 + EditModeCount) % EditModeCount; // 避免负数
+	EditMode = static_cast<EEditMode>(Index);
 }
