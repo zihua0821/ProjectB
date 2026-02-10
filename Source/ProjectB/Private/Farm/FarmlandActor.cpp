@@ -45,6 +45,12 @@ void AFarmlandActor::PostInitializeComponents()
 	{
 		FarmlandComponent->SetFarmlandConfig(FarmlandConfig);
 	}
+
+	check(CropDataTable);
+	if (FarmlandComponent)
+	{
+		FarmlandComponent->SetCropDataTable(CropDataTable);
+	}
 }
 
 void AFarmlandActor::BeginPlay()
@@ -102,6 +108,40 @@ void AFarmlandActor::HandleLeftMouseClicked(const EEditMode EditMode, const FInt
 		return;
 	}
 	FarmlandComponent->HandleLeftMouseClicked(EditMode, PlowCoords);
+}
+
+void AFarmlandActor::PlantCrop(FIntPoint PlowCoords, FName CropID)
+{
+	if (!FarmlandComponent)
+	{
+		return;
+	}
+	FarmlandComponent->PlantCrop(PlowCoords, CropID);
+}
+
+bool AFarmlandActor::HarvestCrop(FIntPoint Coords)
+{
+	if (!FarmlandComponent)
+	{
+		return false;
+	}
+	return FarmlandComponent->HarvestCrop(Coords);
+}
+
+void AFarmlandActor::SetCropDry(FIntPoint Coords, bool bDry)
+{
+	if (!FarmlandComponent)
+	{
+		return;
+	}
+	if (bDry)
+	{
+		FarmlandComponent->CropDried(Coords);
+	}
+	else
+	{
+		FarmlandComponent->UnCropDried(Coords);
+	}
 }
 
 void AFarmlandActor::InitializeComponents()

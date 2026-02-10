@@ -23,64 +23,75 @@ public:
 	// ==================== 配置接口 ====================
 	// 设置地块配置数据
 	void SetFarmlandConfig(const TObjectPtr<UFarmlandConfigDataAsset>& InFarmlandConfig){FarmlandConfig = InFarmlandConfig;}
+
+	// 设置农作物数据表
+	void SetCropDataTable(const TObjectPtr<UDataTable>& InCropDataTable){CropDataTable = InCropDataTable;}
 	
 	// =================== 种植接口 ====================
 	// 左键点击
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void HandleLeftMouseClicked(const EEditMode EditMode, const FIntPoint PlowCoords);
+	void HandleLeftMouseClicked(const EEditMode EditMode, const FIntPoint Coords);
 
 	// 重置地块
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void ResetLand(FIntPoint PlowCoords);
+	void ResetLand(FIntPoint Coords);
 
 	// 耕地
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void PlowLand(FIntPoint PlowCoords);
+	void PlowLand(FIntPoint Coords);
 	
 	// 移除耕地
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void RemoveLand(FIntPoint PlowCoords);
+	void RemoveLand(FIntPoint Coords);
 	
 	// 浇水
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void WetLand(FIntPoint PlowCoords);
+	void WetLand(FIntPoint Coords);
 
 	// 变干
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void LandDried(FIntPoint PlowCoords);
+	void LandDried(FIntPoint Coords);
 
 	// 施肥
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void FertilizeLand(FIntPoint PlowCoords);
+	void FertilizeLand(FIntPoint Coords);
 
 	// 清除施肥
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void ClearFertilize(FIntPoint PlowCoords);
+	void ClearFertilize(FIntPoint Coords);
 
 	// 生成杂草
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void GenerateWeeds(FIntPoint PlowCoords);
+	void GenerateWeeds(FIntPoint Coords);
 
 	// 清除杂草
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void ClearWeeds(FIntPoint PlowCoords);
+	void ClearWeeds(FIntPoint Coords);
 
 	// 生成虫害
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void GeneratePest(FIntPoint PlowCoords);
+	void GeneratePest(FIntPoint Coords);
 
 	// 清除虫害
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void ClearPest(FIntPoint PlowCoords);
+	void ClearPest(FIntPoint Coords);
 	
 	// 种植作物
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	bool PlantCrop(int32 PlotX, int32 PlotY, FName CropID);
+	void PlantCrop(FIntPoint Coords, FName CropID);
     
 	// 收获作物
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	bool HarvestCrop(int32 PlotX, int32 PlotY);
-    
+	bool HarvestCrop(FIntPoint Coords);
+
+	// 作物变干
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void CropDried(FIntPoint Coords);
+
+	// 取消作物变干
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void UnCropDried(FIntPoint Coords);
+	
 	// 获取作物
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Farmland")
 	UCropBase* GetCropAtPlot(int32 PlotX, int32 PlotY) const;
@@ -115,7 +126,6 @@ private:
 	UPROPERTY()
 	TMap<FIntPoint, FFarmLandPlotInfo> PlotInfoIndex;
 
-	// 地块渲染组件
 	// 土地单元格渲染组件
 	UPROPERTY()
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> LandCellRenderer;
@@ -123,14 +133,17 @@ private:
 	// 杂草渲染组件
 	UPROPERTY()
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> WeedsRenderer;
+
+	// 农作物数据表
+	UPROPERTY()
+	TObjectPtr<UDataTable> CropDataTable;
+
+	UPROPERTY()
+	TMap<FStaticMeshHISMKey, UHierarchicalInstancedStaticMeshComponent*> CropHISMComponentMap;
 	
 	// 作物数据映射 [X + Y * GridWidth] -> CropBase
 	UPROPERTY()
 	TMap<int32, UCropBase*> Crops;
-    
-	// 作物渲染组件（按作物类型分组）
-	UPROPERTY()
-	TMap<FName, UHierarchicalInstancedStaticMeshComponent*> CropRenderers;
     
 	// 地块索引到作物实例索引的映射
 	TMap<int32, int32> PlotToCropInstanceIndex;
@@ -140,10 +153,16 @@ private:
 	int32 GetPlotIndex(const FIntPoint& PlotCoords) const;
 	FVector GetPlotWorldPosition(int32 X, int32 Y) const;
 	void UpdateCropVisual(int32 PlotIndex, UCropBase* Crop);
+
+	void SetCropDisease(FIntPoint Coords,bool bDisease, bool bLeafs = false);
     
 	// 获取或创建渲染器
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> GetOrCreateRenderer(FName CropID);
 
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> GetOrCreateCropHISMC(const FFarmLandPlotInfo& PlotInfo);
+
+	UFUNCTION()
+	void OnCropGrowthStageChanged(FIntPoint Coords, ECropGrowthStage NewGrowthStage);
 public:
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType,

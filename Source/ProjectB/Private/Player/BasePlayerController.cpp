@@ -3,6 +3,7 @@
 
 #include "ProjectB/Public/Player/BasePlayerController.h"
 
+#include "Crops/CropBase.h"
 #include "Farm/FarmlandActor.h"
 #include "ProjectB/Public/TimeSync/TimeSyncComponent.h"
 
@@ -27,8 +28,26 @@ void ABasePlayerController::OnLeftMouseClick()
 	if (TraceForFarmlandAndCell(HitLocation, HitFarmland, CellCoords))
 	{
 		// DrawDebugSphere(GetWorld(), HitLocation, 10.f, 12, FColor::Red, false, 3.f);
-		FFarmLandPlotInfo PlotInfo = HitFarmland->GetPlotInfo(CellCoords);
-		HitFarmland->HandleLeftMouseClicked(EditMode, CellCoords);
+		const FFarmLandPlotInfo& PlotInfo = HitFarmland->GetPlotInfo(CellCoords);
+		// HitFarmland->HandleLeftMouseClicked(EditMode, CellCoords);
+		if (PlotInfo.Crop)
+		{
+			// HitFarmland->HarvestCrop(CellCoords);
+			if (PlotInfo.Crop->GetCropData().CropHealth == ECropHealth::Excellent)
+			{
+				HitFarmland->SetCropDry(CellCoords,  true);
+			}
+			else if (PlotInfo.Crop->GetCropData().CropHealth == ECropHealth::Critical)
+			{
+				HitFarmland->SetCropDry(CellCoords, false);
+			}
+			
+		}
+		else
+		{
+			HitFarmland->PlantCrop(CellCoords, "Corn");
+		}
+		
 		// GEngine->AddOnScreenDebugMessage(-1,
 		// 		3.f,
 		// 		FColor::Red,

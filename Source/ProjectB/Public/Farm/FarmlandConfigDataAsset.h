@@ -101,8 +101,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Pest", 
 			  meta = (DisplayName = "虫害粒子范围缩放"))
 	float PestScale = 0.8f;
-	// ==================== 调试配置 ====================
 	
+	// ==================== 调试配置 ====================
 	// 是否显示单元格调试信息
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug Configuration",
 			  meta = (DisplayName = "显示调试信息"))
@@ -112,45 +112,5 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug Configuration",
 			  meta = (DisplayName = "调试信息持续时间"))
 	float DebugDuration = 1.f;
-	
-	// 是否自动更新地块组件配置
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug Configuration",
-			  meta = (DisplayName = "自动更新配置"))
-	bool bAutoUpdateConfig = true;
 
-	// ==================== 实用方法 ====================
-	
-	// 计算农场总大小
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Utility")
-	FVector2D CalculateFarmTotalSize() const
-	{
-		float Width = GridSizeX * CellSize.X + (GridSizeX - 1) * CellSpacing + GroundExtension * 2.f;
-		float Height = GridSizeY * CellSize.Y + (GridSizeY - 1) * CellSpacing + GroundExtension * 2.f;
-		return FVector2D(Width, Height);
-	}
-
-	// 验证配置是否有效
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Validation")
-	bool IsValidConfiguration() const
-	{
-		return LandCellMesh != nullptr && 
-			   GroundMesh != nullptr &&
-			   CellSize.X > 0 && CellSize.Y > 0 &&
-			   GridSizeX > 0 && GridSizeY > 0;
-	}
-
-	// 获取总单元格数量
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Utility")
-	int32 GetTotalCellCount() const
-	{
-		return GridSizeX * GridSizeY;
-	}
-
-	// 检查坐标是否在有效范围内
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Utility")
-	bool IsCellCoordinateValid(int32 CellX, int32 CellY) const
-	{
-		return CellX >= 0 && CellX < GridSizeX && 
-			   CellY >= 0 && CellY < GridSizeY;
-	}
 };

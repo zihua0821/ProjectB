@@ -7,6 +7,7 @@
 #include "CropData.h"
 #include "CropBase.generated.h"
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlantGrowthStageChanged, FIntPoint, Coords, ECropGrowthStage, NewGrowthStage);
 
 /**
  * 农作物基类
@@ -21,9 +22,13 @@ public:
 	UCropBase();
 	
 	// ==================== 生命周期 ====================
+	// 生命周期变化代理
+	UPROPERTY(BlueprintAssignable, Category = "Crop|Events")
+	FOnPlantGrowthStageChanged OnPlantGrowthStageChanged;
+	
 	// 初始化农作物
 	UFUNCTION(BlueprintCallable, Category = "Crop|Initialization")
-	virtual void InitializeCrop(const FCropDataRow& Data, const FDateTime& InPlantTime);
+	virtual void InitializeCrop(FCropData& InCropData);
 	
 	// 更新农作物状态（每帧/每tick调用）
 	UFUNCTION(BlueprintCallable, Category = "Crop|Update")
@@ -33,6 +38,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Crop|Update")
 	virtual void ProcessOfflineGrowth(const FTimespan& OfflineDuration);
 
+	FCropData GetCropData() const { return CropData;}
+	FCropData& GetCropDataRef() { return CropData;}
 	// ==================== 操作接口 ====================
 	// 浇水
 	UFUNCTION(BlueprintCallable, Category = "Crop|Actions")
@@ -49,4 +56,14 @@ public:
 	// 收获
 	UFUNCTION(BlueprintCallable, Category = "Crop|Actions")
 	virtual void HarvestCrop();
+
+private:
+	UPROPERTY()
+	FCropData CropData;
+
+	UPROPERTY()
+	float TotalGrowthTime = 0.f;
+
+	UPROPERTY()
+	float CurrentGrowthTime = 0.f;
 };

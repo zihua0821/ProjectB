@@ -35,6 +35,9 @@ protected:
 	// ==================== 配置属性 ====================
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Farmland, meta = (DisplayName = "农田配置"))
     TObjectPtr<UFarmlandConfigDataAsset> FarmlandConfig;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Farmland, meta = (DisplayName = "农作物配置表"))
+	TObjectPtr<UDataTable> CropDataTable;
 	
 	virtual void BeginPlay() override;
 	
@@ -73,6 +76,18 @@ public:
 	// 处理左键点击
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
 	void HandleLeftMouseClicked(const EEditMode EditMode, const FIntPoint PlowCoords) const;
+
+	// 种植作物
+	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
+	void PlantCrop(FIntPoint PlowCoords, FName CropID);
+
+	// 收获作物
+	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
+	bool HarvestCrop(FIntPoint Coords);
+
+	// 设置作物干旱
+	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
+	void SetCropDry(FIntPoint Coords,bool bDry);
 
 private:
 	// ==================== 私有方法 ====================

@@ -3,8 +3,58 @@
 #include "CoreMinimal.h"
 #include "CropData.generated.h"
 
+class UCropBase;
 class UNiagaraComponent;
 class UCropDataAsset;
+
+/**
+ * 编辑模式
+ */
+UENUM(BlueprintType)
+enum EEditMode : uint8
+{
+    None        UMETA(DisplayName = "无"),
+    Reset       UMETA(DisplayName = "重置"),
+    Plow        UMETA(DisplayName = "耕地"),
+    UnPlow      UMETA(DisplayName = "反耕地"),
+    Wet         UMETA(DisplayName = "灌溉"),
+    UnWet       UMETA(DisplayName = "反灌溉"),
+    Fertilize   UMETA(DisplayName = "施肥"),
+    UnFertilize UMETA(DisplayName = "反施肥"),
+    Weed        UMETA(DisplayName = "杂草"),
+    UnWeed      UMETA(DisplayName = "反杂草"),
+    Pest        UMETA(DisplayName = "虫害"),
+    UnPest      UMETA(DisplayName = "反虫害"),
+
+    // 哨兵：不用于逻辑，仅用于计数
+    Count       UMETA(Hidden)
+};
+
+/**
+ * 农作物生长阶段
+ */
+UENUM(BlueprintType)
+enum class ECropGrowthStage : uint8
+{
+    None        UMETA(DisplayName = "无"),
+    Seed        UMETA(DisplayName = "种子"),
+    Seedling    UMETA(DisplayName = "幼苗"),
+    Mature      UMETA(DisplayName = "成熟"),
+    Harvested   UMETA(DisplayName = "已收获")
+};
+
+/**
+ * 农作物健康状况
+ */
+UENUM(BlueprintType)
+enum class ECropHealth : uint8
+{
+    Excellent   UMETA(DisplayName = "极佳"),
+    Good        UMETA(DisplayName = "良好"),
+    Fair        UMETA(DisplayName = "一般"),
+    Poor        UMETA(DisplayName = "不佳"),
+    Critical    UMETA(DisplayName = "濒危")
+};
 
 /**
  * 地块状态位掩码枚举
@@ -105,6 +155,42 @@ struct FPlotStateData
     }
 };
 
+
+
+/**
+ * 单个作物变体的所有生长阶段Mesh
+ */
+USTRUCT(BlueprintType)
+struct FCropMeshVariant
+{
+    GENERATED_BODY()
+
+    // 变体名称（可选，用于调试）
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crop Mesh", meta = (DisplayName = "变体名称"))
+    FName VariantName;
+    
+    // 单果模型（单个果实/产出物）
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crop Mesh", meta = (DisplayName = "果实模型"))
+    TObjectPtr<UStaticMesh> FruitMesh = nullptr;
+    
+    // 种子模型
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crop Mesh", meta = (DisplayName = "种子模型"))
+    TObjectPtr<UStaticMesh> SeedMesh = nullptr;
+    
+    // 幼苗阶段模型（第一阶段）
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crop Mesh", meta = (DisplayName = "幼苗阶段模型"))
+    TObjectPtr<UStaticMesh> SeedlingMesh = nullptr;
+    
+    // 成熟阶段模型（最后阶段）
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crop Mesh", meta = (DisplayName = "成熟阶段模型"))
+    TObjectPtr<UStaticMesh> MatureMesh = nullptr;
+    
+    // 收获后模型（收获后的状态）
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crop Mesh", meta = (DisplayName = "收获后模型"))
+    TObjectPtr<UStaticMesh> HarvestedMesh = nullptr;
+
+};
+
 /**
  *  FarmLand 地块数据结构
  */
@@ -113,216 +199,140 @@ struct FFarmLandPlotInfo
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLandPlotInfo")
+    // ==================== 地块信息 ====================
+    // 地块Transform
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLand|PlotInfo")
     FTransform Transform;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLandPlotInfo")
+
+    // 地块状态
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLand|PlotInfo")
     FPlotStateData StateData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLandPlotInfo")
+    // 杂草Transform数组
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLand|PlotInfo")
     TArray<FTransform> WeedsTransform;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLandPlotInfo")
+    // 虫害Niagara组件
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLand|PlotInfo")
     TObjectPtr<UNiagaraComponent> PestNiagaraComponent;
+
+    // ==================== 农作物信息 ====================
+    // 农作物
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLand|CropInfo")
+    TObjectPtr<UCropBase> Crop;
+
+    // 农作物变体
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FCropMeshVariant CropMeshVariant;
+
+    // 农作物自定义数据数量
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 CropNumCustomDataFloats;
+
 };
 
-/**
- * 编辑模式
- */
-UENUM(BlueprintType)
-enum EEditMode : uint8
-{
-    None        UMETA(DisplayName = "无"),
-    Reset       UMETA(DisplayName = "重置"),
-    Plow        UMETA(DisplayName = "耕地"),
-    UnPlow      UMETA(DisplayName = "反耕地"),
-    Wet         UMETA(DisplayName = "灌溉"),
-    UnWet       UMETA(DisplayName = "反灌溉"),
-    Fertilize   UMETA(DisplayName = "施肥"),
-    UnFertilize UMETA(DisplayName = "反施肥"),
-    Weed        UMETA(DisplayName = "杂草"),
-    UnWeed      UMETA(DisplayName = "反杂草"),
-    Pest        UMETA(DisplayName = "虫害"),
-    UnPest      UMETA(DisplayName = "反虫害"),
 
-    // 哨兵：不用于逻辑，仅用于计数
-    Count       UMETA(Hidden)
-};
 
 /**
- * 农作物生长阶段
- */
-UENUM(BlueprintType)
-enum class ECropGrowthStage : uint8
-{
-    Seed        UMETA(DisplayName = "种子"),
-    Germination UMETA(DisplayName = "发芽"),
-    Seedling    UMETA(DisplayName = "幼苗"),
-    Vegetative  UMETA(DisplayName = "生长期"),
-    Flowering   UMETA(DisplayName = "开花期"),
-    Fruiting    UMETA(DisplayName = "结果期"),
-    Mature      UMETA(DisplayName = "成熟"),
-    Withered    UMETA(DisplayName = "枯萎"),
-    Dead        UMETA(DisplayName = "死亡")
-};
-
-/**
- * 农作物健康状况
- */
-UENUM(BlueprintType)
-enum class ECropHealth : uint8
-{
-    Excellent   UMETA(DisplayName = "极佳"),
-    Good        UMETA(DisplayName = "良好"),
-    Fair        UMETA(DisplayName = "一般"),
-    Poor        UMETA(DisplayName = "不佳"),
-    Critical    UMETA(DisplayName = "濒危")
-};
-
-/**
- * 农作物数据行结构（用于DataTable配置）
+ * 农作物数据表
  */
 USTRUCT(BlueprintType)
-struct FCropDataRow : public FTableRowBase
+struct FCropTableRow : public FTableRowBase
+{
+    GENERATED_BODY()
+
+    // 唯一ID
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FName CropID;
+    
+    // 显示名称
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FText DisplayName;
+    
+    // 种子-幼苗生长时间
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float GrowthSeedTime = 60.0f;
+
+    // 幼苗-成熟生长时间
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float GrowthSeedlingTime = 60.0f;
+
+    // 成长阶段Mesh变体
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FCropMeshVariant> MeshVariants;
+
+    // 自定义数据数量
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 CropNumCustomDataFloats;
+};
+
+// 使用网格的软引用路径作为键
+USTRUCT(BlueprintType)
+struct FStaticMeshHISMKey
 {
     GENERATED_BODY()
     
-    // 基础信息
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Basic")
-    FName CropID;
+    // 网格的软引用路径
+    UPROPERTY()
+    FSoftObjectPath MeshPath;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Basic")
-    FText CropName;
+    // 默认构造函数
+    FStaticMeshHISMKey(){};
+
+    FStaticMeshHISMKey(const UStaticMesh* Mesh)
+        : MeshPath(Mesh)
+    {}
+
+    FStaticMeshHISMKey(const FSoftObjectPath& InMeshPath)
+        : MeshPath(InMeshPath)
+    {}
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Basic")
-    FText CropDescription;
-    
-    // 生长参数（单位：游戏内分钟）
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth")
-    float GerminationTime = 60.0f;      // 发芽时间
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth")
-    float SeedlingTime = 120.0f;        // 幼苗时间
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth")
-    float VegetativeTime = 240.0f;      // 生长期时间
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth")
-    float FloweringTime = 180.0f;       // 开花时间
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth")
-    float FruitingTime = 300.0f;        // 结果时间
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth")
-    float TotalGrowthTime = 0.0f;       // 计算得出的总时间
-    
-    /*// 环境需求
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    TArray<ESeasonType> SuitableSeasons;  // 适宜季节*/
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    float MinTemperature = 10.0f;       // 最低温度
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    float MaxTemperature = 30.0f;       // 最高温度
-    
-    // 收获信息
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Harvest")
-    int32 HarvestMinAmount = 1;         // 最少收获数量
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Harvest")
-    int32 HarvestMaxAmount = 3;         // 最多收获数量
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Harvest")
-    FName HarvestProductID;             // 收获物ID
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Harvest")
-    bool bCanRegrow = false;            // 是否可再生
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Harvest")
-    float RegrowTime = 0.0f;            // 再生时间
-    
-    // 外观与表现
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
-    TSoftObjectPtr<UStaticMesh> SeedMesh;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
-    TArray<TSoftObjectPtr<UStaticMesh>> GrowthMeshes;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
-    TSoftObjectPtr<UTexture2D> CropIcon;
-    
-    // 初始化计算
-    FCropDataRow()
+    // 获取UStaticMesh指针
+    UStaticMesh* GetMesh() const
     {
-        TotalGrowthTime = GerminationTime + SeedlingTime + VegetativeTime + 
-                         FloweringTime + FruitingTime;
+        return Cast<UStaticMesh>(MeshPath.TryLoad());
+    }
+    
+    // 比较操作符
+    bool operator==(const FStaticMeshHISMKey& Other) const
+    {
+        return MeshPath == Other.MeshPath;
+    }
+    
+    // 哈希函数
+    friend uint32 GetTypeHash(const FStaticMeshHISMKey& Key)
+    {
+        return GetTypeHash(Key.MeshPath);
     }
 };
 
-/**
- * 农作物运行时数据
- */
 USTRUCT(BlueprintType)
-struct FCropRuntimeData
+struct FCropData
 {
     GENERATED_BODY()
-    
-    // 标识
-    UPROPERTY()
+
+    // 唯一ID
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FName CropID;
+
+    // 农作物坐标
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FIntPoint Coords;
+
+    // 农作物当前生长阶段
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ECropGrowthStage CropGrowthStage = ECropGrowthStage::Seed;
     
-    // 时间相关
-    UPROPERTY()
-    FDateTime PlantTime;                // 种植时间
+    // 种子-幼苗生长时间
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float GrowthSeedTime = 60.0f;
+
+    // 幼苗-成熟生长时间
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float GrowthSeedlingTime = 60.0f;
+
+    // 农作物健康度
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ECropHealth CropHealth = ECropHealth::Excellent;
     
-    UPROPERTY()
-    float CurrentGrowthTime = 0.0f;     // 当前生长累计时间
-    
-    UPROPERTY()
-    ECropGrowthStage CurrentStage = ECropGrowthStage::Seed;
-    
-    // 状态值（0-100）
-    UPROPERTY()
-    float HealthValue = 100.0f;         // 健康值
-    
-    UPROPERTY()
-    float WaterLevel = 100.0f;          // 水分值
-    
-    UPROPERTY()
-    float NutrientLevel = 100.0f;       // 营养值
-    
-    UPROPERTY()
-    ECropHealth HealthStatus = ECropHealth::Excellent;
-    
-    // 额外状态
-    UPROPERTY()
-    bool bHasPests = false;             // 是否有害虫
-    
-    UPROPERTY()
-    bool bHasDisease = false;           // 是否有病害
-    
-    UPROPERTY()
-    bool bIsWithered = false;           // 是否枯萎
-    
-    UPROPERTY()
-    bool bIsHarvestable = false;        // 是否可收获
-    
-    UPROPERTY()
-    int32 TimesWatered = 0;             // 浇水次数
-    
-    UPROPERTY()
-    int32 TimesFertilized = 0;          // 施肥次数
-    
-    // 计算进度（0-1）
-    float GetGrowthProgress() const
-    {
-        return FMath::Clamp(CurrentGrowthTime / GetTotalGrowthTime(), 0.0f, 1.0f);
-    }
-    
-    float GetTotalGrowthTime() const
-    {
-        // 从DataTable获取，这里返回默认值
-        return 900.0f; // 15小时
-    }
 };
