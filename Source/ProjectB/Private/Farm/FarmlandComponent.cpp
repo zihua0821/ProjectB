@@ -273,7 +273,7 @@ void UFarmlandComponent::GenerateWeeds(const FIntPoint Coords)
 
 		
 	}
-	WeedsRenderer->MarkRenderStateDirty();
+	// WeedsRenderer->MarkRenderStateDirty();
  	PlotInfo.StateData.AddState(EPlotState::WeedInfested);
 }
 
@@ -599,7 +599,7 @@ void UFarmlandComponent::InitializeLandCells()
 	}
     
 	// 标记渲染数据需要更新
-	LandCellRenderer->MarkRenderStateDirty();
+	// LandCellRenderer->MarkRenderStateDirty();
     
 	UE_LOG(LogTemp, Log, TEXT("Initialized %d land cells for %dx%d grid"), 
 		   LandCellRenderer->GetInstanceCount(), FarmlandConfig->GridSizeX, FarmlandConfig->GridSizeY);
@@ -673,19 +673,19 @@ void UFarmlandComponent::SetCropDisease(FIntPoint Coords, bool bDisease, bool bL
 		if (bLeafs)
 		{
 			CropRenderer->SetCustomDataValue(CropIndex, 1, 1.f);
-			PlotInfo.Crop->GetCropDataRef().CropHealth = ECropHealth::Critical;
+			PlotInfo.Crop->GetCropDataRef().CropStateData.AddState(ECropState::NeedsWater);
 		}
 		else
 		{
 			CropRenderer->SetCustomDataValue(CropIndex, 1, 0.f);
-			PlotInfo.Crop->GetCropDataRef().CropHealth = ECropHealth::Fair;
+			PlotInfo.Crop->GetCropDataRef().CropStateData.AddState(ECropState::NeedsWater);
 		}
 	}
 	else
 	{
 		CropRenderer->SetCustomDataValue(CropIndex, 0, 0.f);
 		CropRenderer->SetCustomDataValue(CropIndex, 1, 0.f);
-		PlotInfo.Crop->GetCropDataRef().CropHealth = ECropHealth::Excellent;
+		PlotInfo.Crop->GetCropDataRef().CropStateData.RemoveState(ECropState::NeedsWater);
 	}
 	
 }
@@ -777,7 +777,18 @@ void UFarmlandComponent::OnCropGrowthStageChanged(FIntPoint Coords, ECropGrowthS
 	{
 		UE_LOG(LogTemp, Log, TEXT("NewInstanceHISMComponent not found"));
 	}
-	NewInstanceHISMComponent->AddInstance(PlotInfo.Transform);
+	const int32 InstanceIndex = NewInstanceHISMComponent->AddInstance(PlotInfo.Transform);
+	if (PlotInfo.Crop->GetCropData().CropStateData.HasState(ECropState::NeedsWater))
+	{
+		NewInstanceHISMComponent->SetCustomDataValue(InstanceIndex, 0, 1.f);
+		NewInstanceHISMComponent->SetCustomDataValue(InstanceIndex, 1, 1.f);
+	}
+	else
+	{
+		NewInstanceHISMComponent->SetCustomDataValue(InstanceIndex, 0, 0.f);
+		NewInstanceHISMComponent->SetCustomDataValue(InstanceIndex, 1, 0.f);
+	}
+	
 	if (const UEnum* GrowthStageEnumPtr = StaticEnum<ECropGrowthStage>())
 	{
 		const FText GrowthStageDisplayName = GrowthStageEnumPtr->GetDisplayNameTextByValue(static_cast<int64>(NewGrowthStage));

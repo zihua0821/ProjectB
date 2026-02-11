@@ -44,19 +44,6 @@ enum class ECropGrowthStage : uint8
 };
 
 /**
- * 农作物健康状况
- */
-UENUM(BlueprintType)
-enum class ECropHealth : uint8
-{
-    Excellent   UMETA(DisplayName = "极佳"),
-    Good        UMETA(DisplayName = "良好"),
-    Fair        UMETA(DisplayName = "一般"),
-    Poor        UMETA(DisplayName = "不佳"),
-    Critical    UMETA(DisplayName = "濒危")
-};
-
-/**
  * 地块状态位掩码枚举
  * 使用位操作可以同时拥有多个状态
  */
@@ -155,7 +142,98 @@ struct FPlotStateData
     }
 };
 
+/**
+ * 农作物状态位掩码枚举
+ * 使用位操作可以同时拥有多个状态
+ */
+UENUM(BlueprintType, meta = (Bitflags, UseEnumValuesAsMaskValuesInEditor = "true"))
+enum class ECropState : uint8
+{
+    None               = 0      UMETA(DisplayName = "无状态"),        // 0000 0000
 
+    // 收获相关
+    ReadyForHarvest    = 1 << 0 UMETA(DisplayName = "可收获"),        // 0000 0001
+    
+    // 健康/营养状态
+    Healthy            = 1 << 1 UMETA(DisplayName = "健康"),          // 0000 0010
+    NeedsWater         = 1 << 2 UMETA(DisplayName = "需要浇水"),      // 0000 0100
+    NeedsFertilizer    = 1 << 3 UMETA(DisplayName = "需要施肥"),      // 0000 1000
+    OverWatered        = 1 << 4 UMETA(DisplayName = "浇水过多"),      // 0001 0000
+    NutrientBurn       = 1 << 5 UMETA(DisplayName = "肥料烧伤"),      // 0010 0000
+    
+    // 病害状态
+    Disease            = 1 << 6 UMETA(DisplayName = "病害"),          // 0100 0000
+};
+ENUM_CLASS_FLAGS(ECropState); 
+
+/**
+ *农作物状态数据结构
+ */
+USTRUCT(BlueprintType)
+struct FCropStateData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CropState")
+    ECropState StateFlags = ECropState::Healthy | ECropState::NeedsWater; // 默认为健康且需要浇水
+
+    void Reset()
+    {
+        StateFlags = ECropState::Healthy | ECropState::NeedsWater;
+    }
+    bool IsEmpty() const
+    {
+        return StateFlags == ECropState::None;
+    }
+    
+    bool HasState(const ECropState& State) const
+    {
+        return (StateFlags & State) != ECropState::None;
+    }
+    
+    void AddState(const ECropState& State)
+    {
+        StateFlags |= State;
+    }
+
+    void RemoveState(const ECropState& State)
+    {
+        StateFlags &= ~State;
+    }
+
+    void ToggleState(const ECropState& State)
+    {
+        StateFlags ^= State;
+    }
+    
+    FString ToString() const
+    {
+        // 特殊处理：完全空状态
+        if (StateFlags == ECropState::None)
+        {
+            return TEXT("空状态");
+        }
+
+        TArray<FString> ActiveStates;
+        
+        if (HasState(ECropState::ReadyForHarvest))       ActiveStates.Add(TEXT("可收获"));
+        if (HasState(ECropState::Healthy))               ActiveStates.Add(TEXT("健康"));
+        if (HasState(ECropState::NeedsWater))            ActiveStates.Add(TEXT("需要浇水"));
+        if (HasState(ECropState::NeedsFertilizer))       ActiveStates.Add(TEXT("需要施肥"));
+        if (HasState(ECropState::OverWatered))           ActiveStates.Add(TEXT("浇水过多"));
+        if (HasState(ECropState::NutrientBurn))          ActiveStates.Add(TEXT("肥料烧伤"));
+        if (HasState(ECropState::Disease))               ActiveStates.Add(TEXT("病害"));
+
+        // 拼接结果
+        FString Result;
+        for (int32 i = 0; i < ActiveStates.Num(); ++i)
+        {
+            if (i > 0) Result.Append(TEXT(" | "));
+            Result.Append(ActiveStates[i]);
+        }
+        return Result;
+    }
+};
 
 /**
  * 单个作物变体的所有生长阶段Mesh
@@ -331,8 +409,8 @@ struct FCropData
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float GrowthSeedlingTime = 60.0f;
 
-    // 农作物健康度
+    // 农作物状态
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ECropHealth CropHealth = ECropHealth::Excellent;
+    FCropStateData CropStateData;
     
 };

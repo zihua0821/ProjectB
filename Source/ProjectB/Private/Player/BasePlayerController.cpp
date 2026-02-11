@@ -33,11 +33,11 @@ void ABasePlayerController::OnLeftMouseClick()
 		if (PlotInfo.Crop)
 		{
 			// HitFarmland->HarvestCrop(CellCoords);
-			if (PlotInfo.Crop->GetCropData().CropHealth == ECropHealth::Excellent)
+			if (!PlotInfo.Crop->GetCropData().CropStateData.HasState(ECropState::NeedsWater))
 			{
 				HitFarmland->SetCropDry(CellCoords,  true);
 			}
-			else if (PlotInfo.Crop->GetCropData().CropHealth == ECropHealth::Critical)
+			else if (PlotInfo.Crop->GetCropData().CropStateData.HasState(ECropState::NeedsWater))
 			{
 				HitFarmland->SetCropDry(CellCoords, false);
 			}
