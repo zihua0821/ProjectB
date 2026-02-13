@@ -9,6 +9,7 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Crops/CropBase.h"
 #include "Farm/FarmlandActor.h"
+#include "Player/BasePlayerController.h"
 #include "Tools/ISMTools.h"
 
 
@@ -58,6 +59,18 @@ void UFarmlandComponent::HandleLeftMouseClicked(const EEditMode EditMode, const 
 		break;
 	case UnPest:
 		ClearPest(Coords);
+		break;
+	case EEditMode::PlantCrop:
+		PlantCrop(Coords, "Corn");
+		break;
+	case EEditMode::HarvestCrop:
+		HarvestCrop(Coords);
+		break;
+	case EEditMode::CropDried:
+		LandDried(Coords);
+		break;
+	case EEditMode::UnCropDried:
+		ResetLand(Coords);
 		break;
 	case Count:
 		break;
@@ -423,6 +436,120 @@ void UFarmlandComponent::UnCropDried(FIntPoint Coords)
 	SetCropDisease(Coords, false, false);
 }
 
+void UFarmlandComponent::UpdateOutlineColor()
+{
+	if (!OutlineHISMComponent)
+	{
+		UE_LOG(LogTemp, Error, TEXT("OutlineHISMComponent is nullptr"))
+		return;
+	}
+	check(FarmlandConfig->OutlineMaterial);
+	UMaterialInstanceDynamic* DynamicOutlineMaterialInstance = OutlineHISMComponent->CreateDynamicMaterialInstance(0, FarmlandConfig->OutlineMaterial);
+	FLinearColor OutlineColor = FLinearColor::Green;
+	switch (BasePlayerController->GetEditMode()) {
+	case None:
+		OutlineColor = FLinearColor::White;
+		break;
+	case Reset:
+		OutlineColor = FLinearColor::Red;
+		break;
+	case Plow:
+		OutlineColor = FLinearColor::Yellow;
+		break;
+	case UnPlow:
+		OutlineColor = FLinearColor::Red;
+		break;
+	case Wet:
+		OutlineColor = FLinearColor::Blue;
+		break;
+	case UnWet:
+		OutlineColor = FLinearColor::Red;
+		break;
+	case Fertilize:
+		OutlineColor = FLinearColor::Gray;
+		break;
+	case UnFertilize:
+		OutlineColor = FLinearColor::Red;
+		break;
+	case Weed:
+		OutlineColor = FLinearColor::Green;
+		break;
+	case UnWeed:
+		OutlineColor = FLinearColor::Red;
+		break;
+	case Pest:
+		OutlineColor = FLinearColor::Gray;
+		break;
+	case UnPest:
+		OutlineColor = FLinearColor::Red;
+		break;
+	case EEditMode::PlantCrop:
+		OutlineColor = FLinearColor::Yellow;
+		break;
+	case EEditMode::HarvestCrop:
+		OutlineColor = FLinearColor::Yellow;
+		break;
+	case EEditMode::CropDried:
+		OutlineColor = FLinearColor::Gray;
+		break;
+	case EEditMode::UnCropDried:
+		OutlineColor = FLinearColor::Red;
+		break;
+	case Count:
+		break;
+	}
+	DynamicOutlineMaterialInstance->SetVectorParameterValue("SelfLuminousColor", OutlineColor);
+	OutlineHISMComponent->SetMaterial(0,DynamicOutlineMaterialInstance);
+}
+
+void UFarmlandComponent::CreateOutline(FIntPoint Coords)
+{
+	if (!PlotInfoIndex.Contains(Coords))
+	{
+		UE_LOG(LogTemp, Error, TEXT("PlotInfo not found"))
+		return;
+	}
+	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(Coords);
+	if (OutlineHISMComponent == nullptr)
+	{
+		OutlineHISMComponent = NewObject<UHierarchicalInstancedStaticMeshComponent>(GetOwner());
+		OutlineHISMComponent->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
+		OutlineHISMComponent->RegisterComponent();
+		OutlineHISMComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		OutlineHISMComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
+		check(FarmlandConfig->LandCellMesh);
+		OutlineHISMComponent->SetStaticMesh(FarmlandConfig->LandCellMesh);
+		
+	}
+	FTransform InstanceTransform = PlotInfo.Transform;
+	InstanceTransform.AddToTranslation(FVector(0.f, 0.f, FarmlandConfig->OutlineOffsetZ));
+	OutlineHISMComponent->AddInstance(InstanceTransform);
+	UpdateOutlineColor();
+}
+
+void UFarmlandComponent::RemoveOutline(FIntPoint Coords)
+{
+	if (!PlotInfoIndex.Contains(Coords))
+	{
+		UE_LOG(LogTemp, Log, TEXT("PlotInfo not found"))
+		return;
+	}
+	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(Coords);
+	if (OutlineHISMComponent == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("OutlineHISMComponent is null"))
+		return;
+	}
+
+	FTransform InstanceTransform = PlotInfo.Transform;
+	InstanceTransform.AddToTranslation(FVector(0.f, 0.f, FarmlandConfig->OutlineOffsetZ));
+	if (!UISMTools::RemoveInstanceByTransform(OutlineHISMComponent,InstanceTransform))
+	{
+		UE_LOG(LogTemp, Error, TEXT("无法移除实例"))
+	}
+	
+}
+
 
 UCropBase* UFarmlandComponent::GetCropAtPlot(int32 PlotX, int32 PlotY) const
 {
@@ -518,6 +645,11 @@ void UFarmlandComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
+	BasePlayerController = Cast<ABasePlayerController>(GetWorld()->GetFirstPlayerController());
+	if (BasePlayerController)
+	{
+		BasePlayerController->OnEditModeChanged.AddDynamic(this, &ThisClass::OnEditModeChanged);
+	}
 	InitializeLandCells();
 }
 
@@ -778,7 +910,7 @@ void UFarmlandComponent::OnCropGrowthStageChanged(FIntPoint Coords, ECropGrowthS
 		UE_LOG(LogTemp, Log, TEXT("NewInstanceHISMComponent not found"));
 	}
 	const int32 InstanceIndex = NewInstanceHISMComponent->AddInstance(PlotInfo.Transform);
-	if (PlotInfo.Crop->GetCropData().CropStateData.HasState(ECropState::NeedsWater))
+	if (PlotInfo.Crop->GetCropData().CropStateData.HasState(ECropState::Withers))
 	{
 		NewInstanceHISMComponent->SetCustomDataValue(InstanceIndex, 0, 1.f);
 		NewInstanceHISMComponent->SetCustomDataValue(InstanceIndex, 1, 1.f);
@@ -795,6 +927,11 @@ void UFarmlandComponent::OnCropGrowthStageChanged(FIntPoint Coords, ECropGrowthS
         const FString CropId = PlotInfo.Crop->GetCropData().CropID.ToString();
 		UE_LOG(LogTemp, Log, TEXT("(%d, %d) [%s] GrowthStageChange to %s"), Coords.X, Coords.Y, *CropId, *GrowthStageDisplayName.ToString());
 	}
+}
+
+void UFarmlandComponent::OnEditModeChanged(EEditMode NewEditMode)
+{
+	UpdateOutlineColor();
 }
 
 // Called every frame

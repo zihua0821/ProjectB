@@ -89,6 +89,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
 	void SetCropDry(FIntPoint Coords,bool bDry);
 
+	// 地块轮廓
+	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
+	void OutlinePlot(FIntPoint Coords, bool bOutline = true) const;
+
 private:
 	// ==================== 私有方法 ====================
     

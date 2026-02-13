@@ -144,6 +144,22 @@ void AFarmlandActor::SetCropDry(FIntPoint Coords, bool bDry)
 	}
 }
 
+void AFarmlandActor::OutlinePlot(const FIntPoint Coords, const bool bOutline) const
+{
+	if (!FarmlandComponent)
+	{
+		return;
+	}
+	if (bOutline)
+	{
+		FarmlandComponent->CreateOutline(Coords);
+	}
+	else
+	{
+		FarmlandComponent->RemoveOutline(Coords);
+	}
+}
+
 void AFarmlandActor::InitializeComponents()
 {
 	ensure(FarmlandConfig);

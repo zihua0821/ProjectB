@@ -101,6 +101,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Pest", 
 			  meta = (DisplayName = "虫害粒子范围缩放"))
 	float PestScale = 0.8f;
+
+	// ==================== 选中配置 ====================
+	// 高亮材质
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Outline", 
+			  meta = (DisplayName = "高亮材质"))
+	TObjectPtr<UMaterialInstance> OutlineMaterial;
+
+	// 高亮材质偏移Z
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Outline", 
+			  meta = (DisplayName = "高亮材质偏移Z"))
+	float OutlineOffsetZ = 1.f;
+
 	
 	// ==================== 调试配置 ====================
 	// 是否显示单元格调试信息

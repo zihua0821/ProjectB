@@ -7,6 +7,9 @@
 #include "GameFramework/PlayerController.h"
 #include "BasePlayerController.generated.h"
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEditModeChanged, EEditMode, NewEditMode);
+
+
 class AFarmlandActor;
 class UTimeSyncComponent;
 /**
@@ -21,7 +24,7 @@ public:
 	ABasePlayerController();
 
 	UFUNCTION(BlueprintCallable)
-	void SetEditMode(const EEditMode InEditMode){EditMode = InEditMode;}
+	void SetEditMode(const EEditMode InEditMode);
 
 	UFUNCTION(BlueprintCallable)
 	EEditMode GetEditMode() const {return EditMode;}
@@ -31,8 +34,13 @@ public:
 
 	UFUNCTION(BlueprintCallable)
 	void SwitchToPrevEditMode();
+
+	UPROPERTY(BlueprintAssignable)
+	FOnEditModeChanged OnEditModeChanged;
 protected:
 	virtual void BeginPlay() override;
+
+	virtual void Tick(float DeltaSeconds) override;
 	// 时间同步组件
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Time Sync")
 	TObjectPtr<UTimeSyncComponent> TimeSyncComponent;
@@ -45,4 +53,11 @@ private:
 	// 射线检测获取点击的农场和单元格
 	bool TraceForFarmlandAndCell(FVector& OutHitLocation, AFarmlandActor*& OutFarmland, FIntPoint& OutCellCoords);
 
+	void UpdateHoveredPlot();
+
+	UPROPERTY()
+	TObjectPtr<AFarmlandActor> PreHoveredFarmland;
+	
+	UPROPERTY()
+	FIntPoint PreHoveredPlotCoords = FIntPoint(-1, -1);
 };

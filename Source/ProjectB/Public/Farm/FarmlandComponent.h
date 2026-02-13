@@ -9,6 +9,7 @@
 #include "FarmlandComponent.generated.h"
 
 
+class ABasePlayerController;
 class UHierarchicalInstancedStaticMeshComponent;
 class UCropBase;
 
@@ -84,13 +85,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	bool HarvestCrop(FIntPoint Coords);
 
-	// 作物变干
+	// 作物干枯
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	void CropDried(FIntPoint Coords);
 
-	// 取消作物变干
+	// 干枯恢复
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	void UnCropDried(FIntPoint Coords);
+
+	// 创建轮廓
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void CreateOutline(FIntPoint Coords);
+
+	// 移除轮廓
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void RemoveOutline(FIntPoint Coords);
 	
 	// 获取作物
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Farmland")
@@ -138,15 +147,16 @@ private:
 	UPROPERTY()
 	TObjectPtr<UDataTable> CropDataTable;
 
+	// 农作物渲染组件
 	UPROPERTY()
 	TMap<FStaticMeshHISMKey, UHierarchicalInstancedStaticMeshComponent*> CropHISMComponentMap;
-	
-	// 作物数据映射 [X + Y * GridWidth] -> CropBase
+
+	// 轮廓渲染组件
 	UPROPERTY()
-	TMap<int32, UCropBase*> Crops;
-    
-	// 地块索引到作物实例索引的映射
-	TMap<int32, int32> PlotToCropInstanceIndex;
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent>  OutlineHISMComponent;
+
+	UPROPERTY()
+	TObjectPtr<ABasePlayerController>  BasePlayerController;
     
 	// 辅助方法
 	void InitializeLandCells();
@@ -155,7 +165,8 @@ private:
 	void UpdateCropVisual(int32 PlotIndex, UCropBase* Crop);
 
 	void SetCropDisease(FIntPoint Coords,bool bDisease, bool bLeafs = false);
-    
+	void UpdateOutlineColor();
+
 	// 获取或创建渲染器
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> GetOrCreateRenderer(FName CropID);
 
@@ -163,6 +174,9 @@ private:
 
 	UFUNCTION()
 	void OnCropGrowthStageChanged(FIntPoint Coords, ECropGrowthStage NewGrowthStage);
+
+	UFUNCTION()
+	void OnEditModeChanged(EEditMode NewEditMode);
 public:
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType,

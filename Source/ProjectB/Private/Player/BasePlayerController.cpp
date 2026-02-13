@@ -12,11 +12,29 @@ ABasePlayerController::ABasePlayerController()
 	TimeSyncComponent = CreateDefaultSubobject<UTimeSyncComponent>(TEXT("TimeSyncComponent"));
 }
 
+void ABasePlayerController::SetEditMode(const EEditMode InEditMode)
+{
+	EditMode = InEditMode;
+	OnEditModeChanged.Broadcast(EditMode);
+}
+
 void ABasePlayerController::BeginPlay()
 {
 	Super::BeginPlay();
 
 	SetShowMouseCursor(true);
+	FInputModeGameAndUI InputMode;
+	// 关键：必须设为 true，否则点击 UI 仍会穿透到场景
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	InputMode.SetHideCursorDuringCapture(false);
+	SetInputMode(InputMode);
+}
+
+void ABasePlayerController::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	UpdateHoveredPlot();
 }
 
 void ABasePlayerController::OnLeftMouseClick()
@@ -27,26 +45,9 @@ void ABasePlayerController::OnLeftMouseClick()
 	FIntPoint CellCoords;
 	if (TraceForFarmlandAndCell(HitLocation, HitFarmland, CellCoords))
 	{
-		// DrawDebugSphere(GetWorld(), HitLocation, 10.f, 12, FColor::Red, false, 3.f);
-		const FFarmLandPlotInfo& PlotInfo = HitFarmland->GetPlotInfo(CellCoords);
-		// HitFarmland->HandleLeftMouseClicked(EditMode, CellCoords);
-		if (PlotInfo.Crop)
-		{
-			// HitFarmland->HarvestCrop(CellCoords);
-			if (!PlotInfo.Crop->GetCropData().CropStateData.HasState(ECropState::NeedsWater))
-			{
-				HitFarmland->SetCropDry(CellCoords,  true);
-			}
-			else if (PlotInfo.Crop->GetCropData().CropStateData.HasState(ECropState::NeedsWater))
-			{
-				HitFarmland->SetCropDry(CellCoords, false);
-			}
-			
-		}
-		else
-		{
-			HitFarmland->PlantCrop(CellCoords, "Corn");
-		}
+		DrawDebugSphere(GetWorld(), HitLocation, 10.f, 12, FColor::Red, false, 3.f);
+		// const FFarmLandPlotInfo& PlotInfo = HitFarmland->GetPlotInfo(CellCoords);
+		HitFarmland->HandleLeftMouseClicked(EditMode, CellCoords);
 		
 		// GEngine->AddOnScreenDebugMessage(-1,
 		// 		3.f,
@@ -112,6 +113,48 @@ bool ABasePlayerController::TraceForFarmlandAndCell(FVector& OutHitLocation, AFa
     }
     
     return false;
+}
+
+void ABasePlayerController::UpdateHoveredPlot()
+{
+	// 执行射线检测
+	FVector HitLocation;
+	AFarmlandActor* HitFarmland = nullptr;
+	FIntPoint CellCoords;
+	// 没有编辑模式
+	if (EditMode == EEditMode::None)
+	{
+		goto LeaveFarmland;
+	}
+	if (TraceForFarmlandAndCell(HitLocation, HitFarmland, CellCoords))
+	{
+		// DrawDebugSphere(GetWorld(), HitLocation, 10.f, 12, FColor::Red, false, 3.f);
+		if (PreHoveredPlotCoords == CellCoords)
+		{
+			return;
+		}
+		if (PreHoveredFarmland && PreHoveredFarmland != HitFarmland)
+		{
+			PreHoveredFarmland->OutlinePlot(PreHoveredPlotCoords, false);
+		}
+		else
+		{
+			HitFarmland->OutlinePlot(PreHoveredPlotCoords, false);
+		}
+		HitFarmland->OutlinePlot(CellCoords, true);
+		PreHoveredPlotCoords = CellCoords;
+		PreHoveredFarmland = HitFarmland;
+	}
+	else
+	{
+		LeaveFarmland:
+		if (PreHoveredFarmland)
+		{
+			PreHoveredFarmland->OutlinePlot(PreHoveredPlotCoords, false);
+			PreHoveredPlotCoords = FIntPoint(-1, -1);
+			PreHoveredFarmland = nullptr;
+		}
+	}
 }
 
 // 切换到下一个编辑模式（正向循环）

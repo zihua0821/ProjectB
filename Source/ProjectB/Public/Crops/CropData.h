@@ -13,21 +13,26 @@ class UCropDataAsset;
 UENUM(BlueprintType)
 enum EEditMode : uint8
 {
-    None        UMETA(DisplayName = "无"),
-    Reset       UMETA(DisplayName = "重置"),
-    Plow        UMETA(DisplayName = "耕地"),
-    UnPlow      UMETA(DisplayName = "反耕地"),
-    Wet         UMETA(DisplayName = "灌溉"),
-    UnWet       UMETA(DisplayName = "反灌溉"),
-    Fertilize   UMETA(DisplayName = "施肥"),
-    UnFertilize UMETA(DisplayName = "反施肥"),
-    Weed        UMETA(DisplayName = "杂草"),
-    UnWeed      UMETA(DisplayName = "反杂草"),
-    Pest        UMETA(DisplayName = "虫害"),
-    UnPest      UMETA(DisplayName = "反虫害"),
+    None          UMETA(DisplayName = "无"),
+    Reset         UMETA(DisplayName = "重置"),
+    Plow          UMETA(DisplayName = "耕地"),
+    UnPlow        UMETA(DisplayName = "反耕地"),
+    Wet           UMETA(DisplayName = "灌溉"),
+    UnWet         UMETA(DisplayName = "反灌溉"),
+    Fertilize     UMETA(DisplayName = "施肥"),
+    UnFertilize   UMETA(DisplayName = "反施肥"),
+    Weed          UMETA(DisplayName = "杂草"),
+    UnWeed        UMETA(DisplayName = "反杂草"),
+    Pest          UMETA(DisplayName = "虫害"),
+    UnPest        UMETA(DisplayName = "反虫害"),
+    PlantCrop     UMETA(DisplayName = "种植"),
+    HarvestCrop   UMETA(DisplayName = "收获"),
+    CropDried     UMETA(DisplayName = "作物干枯"),
+    UnCropDried   UMETA(DisplayName = "干枯恢复"),
+
 
     // 哨兵：不用于逻辑，仅用于计数
-    Count       UMETA(Hidden)
+    Count         UMETA(Hidden)
 };
 
 /**
@@ -160,9 +165,10 @@ enum class ECropState : uint8
     NeedsFertilizer    = 1 << 3 UMETA(DisplayName = "需要施肥"),      // 0000 1000
     OverWatered        = 1 << 4 UMETA(DisplayName = "浇水过多"),      // 0001 0000
     NutrientBurn       = 1 << 5 UMETA(DisplayName = "肥料烧伤"),      // 0010 0000
+    Withers            = 1 << 6 UMETA(DisplayName = "枯萎"),          //0100 0000
     
     // 病害状态
-    Disease            = 1 << 6 UMETA(DisplayName = "病害"),          // 0100 0000
+    Disease            = 1 << 7 UMETA(DisplayName = "病害"),          // 1000 0000
 };
 ENUM_CLASS_FLAGS(ECropState); 
 
