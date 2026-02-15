@@ -8,6 +8,7 @@
 #include "BasePlayerController.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEditModeChanged, EEditMode, NewEditMode);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHoveredPlot, AFarmlandActor*, HoveredFarmlandActor, FIntPoint, HoveredPlotCoords);
 
 
 class AFarmlandActor;
@@ -37,6 +38,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable)
 	FOnEditModeChanged OnEditModeChanged;
+
+	UPROPERTY(BlueprintAssignable)
+	FOnHoveredPlot OnHoveredPlot;
 protected:
 	virtual void BeginPlay() override;
 

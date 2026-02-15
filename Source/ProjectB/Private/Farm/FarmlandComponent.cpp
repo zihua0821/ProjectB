@@ -241,52 +241,59 @@ void UFarmlandComponent::GenerateWeeds(const FIntPoint Coords)
 		WeedsRenderer->SetStaticMesh(FarmlandConfig->WeedsMesh);
 	}
 
-	const int32 WeedNum = FarmlandConfig->WeedNum;
-	const FVector PlotLocation = PlotInfo.Transform.GetLocation();
-	const FVector2D PlotSize = FarmlandConfig->CellSize;
-	// 中心原点
-	const float HalfWidth = PlotSize.X * 0.5f;
-	const float HalfHeight = PlotSize.Y * 0.5f;
-	// 计算地块实际边界
-	const float MinX = PlotLocation.X - HalfWidth;
-	const float MaxX = PlotLocation.X + HalfWidth;
-	const float MinY = PlotLocation.Y - HalfHeight;
-	const float MaxY = PlotLocation.Y + HalfHeight;
-    
-	// 1. 计算网格划分
-	const int32 GridSize = FMath::CeilToInt(FMath::Sqrt(static_cast<float>(WeedNum)));
-	const float CellWidth = (MaxX - MinX) / GridSize;
-	const float CellHeight = (MaxY - MinY) / GridSize;
-    
-	// 2. 在每个网格内生成一个杂草
-	for (int32 i = 0; i < WeedNum; i++)
+	if (PlotInfo.WeedsTransform.Num() > 0)
 	{
-		// 计算网格索引
-		const int32 GridX = i % GridSize;
-		const int32 GridY = i / GridSize;
-
-		const float GridCenterX = MinX + (GridX + 0.5f) * CellWidth;
-		const float GridCenterY = MinY + (GridY + 0.5f) * CellHeight;
-        
-		// 随机偏移
-		const float OffsetX = FMath::FRandRange(-CellWidth * 0.4f, CellWidth * 0.4f);
-		const float OffsetY = FMath::FRandRange(-CellHeight * 0.4f, CellHeight * 0.4f);
-
-		const float FinalX = FMath::Clamp(GridCenterX + OffsetX, MinX, MaxX);
-		const float FinalY = FMath::Clamp(GridCenterY + OffsetY, MinY, MaxY);
-
-		FVector WeedLocation(FinalX, FinalY, PlotLocation.Z);
-		
-		FTransform InstanceLocalTransform;
-		InstanceLocalTransform.SetLocation(WeedLocation);
-		
-		
-		WeedsRenderer->AddInstance(InstanceLocalTransform);
-		PlotInfo.WeedsTransform.Add(InstanceLocalTransform);
-
-		
+		for (FTransform& Transform : PlotInfo.WeedsTransform)
+		{
+			WeedsRenderer->AddInstance(Transform);
+		}
 	}
-	// WeedsRenderer->MarkRenderStateDirty();
+	else
+	{
+		const int32 WeedNum = FarmlandConfig->WeedNum;
+		const FVector PlotLocation = PlotInfo.Transform.GetLocation();
+		const FVector2D PlotSize = FarmlandConfig->CellSize;
+		// 中心原点
+		const float HalfWidth = PlotSize.X * 0.5f;
+		const float HalfHeight = PlotSize.Y * 0.5f;
+		// 计算地块实际边界
+		const float MinX = PlotLocation.X - HalfWidth;
+		const float MaxX = PlotLocation.X + HalfWidth;
+		const float MinY = PlotLocation.Y - HalfHeight;
+		const float MaxY = PlotLocation.Y + HalfHeight;
+    
+		// 1. 计算网格划分
+		const int32 GridSize = FMath::CeilToInt(FMath::Sqrt(static_cast<float>(WeedNum)));
+		const float CellWidth = (MaxX - MinX) / GridSize;
+		const float CellHeight = (MaxY - MinY) / GridSize;
+    
+		// 2. 在每个网格内生成一个杂草
+		for (int32 i = 0; i < WeedNum; i++)
+		{
+			// 计算网格索引
+			const int32 GridX = i % GridSize;
+			const int32 GridY = i / GridSize;
+
+			const float GridCenterX = MinX + (GridX + 0.5f) * CellWidth;
+			const float GridCenterY = MinY + (GridY + 0.5f) * CellHeight;
+        
+			// 随机偏移
+			const float OffsetX = FMath::FRandRange(-CellWidth * 0.4f, CellWidth * 0.4f);
+			const float OffsetY = FMath::FRandRange(-CellHeight * 0.4f, CellHeight * 0.4f);
+
+			const float FinalX = FMath::Clamp(GridCenterX + OffsetX, MinX, MaxX);
+			const float FinalY = FMath::Clamp(GridCenterY + OffsetY, MinY, MaxY);
+
+			FVector WeedLocation(FinalX, FinalY, PlotLocation.Z);
+		
+			FTransform InstanceLocalTransform;
+			InstanceLocalTransform.SetLocation(WeedLocation);
+		
+			WeedsRenderer->AddInstance(InstanceLocalTransform);
+			PlotInfo.WeedsTransform.Add(InstanceLocalTransform);
+		}
+	}
+	
  	PlotInfo.StateData.AddState(EPlotState::WeedInfested);
 }
 
@@ -388,13 +395,12 @@ void UFarmlandComponent::PlantCrop(const FIntPoint Coords, const FName CropID)
 	const int32 VariantsIndex = FMath::RandRange(0, CropTableRow->MeshVariants.Num() - 1);
 	PlotInfo.CropMeshVariant = CropTableRow->MeshVariants[VariantsIndex];
 	PlotInfo.CropNumCustomDataFloats = CropTableRow->CropNumCustomDataFloats;
-	UStaticMesh* SeedMesh = CropTableRow->MeshVariants[VariantsIndex].SeedMesh;
-	check(SeedMesh);
 	UCropBase* Crop = NewObject<UCropBase>();
 	PlotInfo.Crop = Crop;
 	FCropData CropData;
 	CropData.CropID = CropID;
 	CropData.Coords = Coords;
+	CropData.VariantsIndex = VariantsIndex;
 	CropData.GrowthSeedTime = CropTableRow->GrowthSeedTime;
 	CropData.GrowthSeedlingTime = CropTableRow->GrowthSeedlingTime;
 	CropData.CropGrowthStage = ECropGrowthStage::Seed;
@@ -519,6 +525,7 @@ void UFarmlandComponent::CreateOutline(FIntPoint Coords)
 		OutlineHISMComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
 		check(FarmlandConfig->LandCellMesh);
 		OutlineHISMComponent->SetStaticMesh(FarmlandConfig->LandCellMesh);
+		OutlineHISMComponent->bDisallowNanite = true;
 		
 	}
 	FTransform InstanceTransform = PlotInfo.Transform;
@@ -620,15 +627,29 @@ FVector UFarmlandComponent::CellToWorldCoordinates(const int32 CellX, const int3
 
 bool UFarmlandComponent::GetClickedCellCoordinates(const FVector& ClickLocation, FIntPoint& OutCellCoords) const
 {
-	OutCellCoords = WorldToCellCoordinates(ClickLocation);
-    
-	// 检查坐标是否有效
-	if (OutCellCoords.X >= 0 && OutCellCoords.X < FarmlandConfig->GridSizeX && 
-		OutCellCoords.Y >= 0 && OutCellCoords.Y < FarmlandConfig->GridSizeY)
+	// 先通过网格计算获得候选索引
+	FIntPoint Candidate = WorldToCellCoordinates(ClickLocation);
+	if (Candidate.X == INDEX_NONE || Candidate.Y == INDEX_NONE)
 	{
-		return true;
+		return false; // 超出农场范围
 	}
-    
+
+	// 将世界坐标转换到组件本地空间
+	const FVector LocalPos = GetComponentTransform().InverseTransformPosition(ClickLocation);
+
+	// 获取候选地块的边界
+	FBox CellBounds;
+	if (GetCellBounds(Candidate.X, Candidate.Y, CellBounds))
+	{
+		// 检查点是否在地块内部（包括边界，可根据需求使用 IsInside 或 IsInsideOrOn）
+		if (CellBounds.IsInside(LocalPos))
+		{
+			OutCellCoords = Candidate;
+			return true;
+		}
+	}
+
+	// 点击在间隙中
 	return false;
 }
 
@@ -639,6 +660,25 @@ FFarmLandPlotInfo UFarmlandComponent::GetPlotInfo(const FIntPoint& PlotCoords) c
 		return *PlotInfoIndex.Find(PlotCoords);
 	}
 	return FFarmLandPlotInfo();
+}
+
+TArray<FFarmLandPlotSaveGameData> UFarmlandComponent::GetPlotSaveGameData()
+{
+	PlotSaveGameData.Empty();
+	for (const auto& PlotInfoTuple : PlotInfoIndex)
+	{
+		FFarmLandPlotSaveGameData PlotSaveGameDataItem;
+		PlotSaveGameDataItem.Coords = PlotInfoTuple.Key;
+		PlotSaveGameDataItem.StateData = PlotInfoTuple.Value.StateData;
+		PlotSaveGameDataItem.Transform = PlotInfoTuple.Value.Transform;
+		PlotSaveGameDataItem.WeedsTransform = PlotInfoTuple.Value.WeedsTransform;
+		if (PlotInfoTuple.Value.Crop)
+		{
+			PlotSaveGameDataItem.CropData = PlotInfoTuple.Value.Crop->GetCropData();
+		}
+		PlotSaveGameData.Add(PlotSaveGameDataItem);
+	}
+	return PlotSaveGameData;
 }
 
 void UFarmlandComponent::BeginPlay()
@@ -653,30 +693,8 @@ void UFarmlandComponent::BeginPlay()
 	InitializeLandCells();
 }
 
-void UFarmlandComponent::InitializeLandCells()
+void UFarmlandComponent::CreateDefaultLandCells()
 {
-	ensure(FarmlandConfig);
-	ensure(FarmlandConfig->LandCellMesh);
-
-	if (LandCellRenderer != nullptr)
-	{
-		UE_LOG(LogTemp, Error, TEXT("LandCells have been Initialized"));
-		return;
-	}
-	LandCellRenderer = NewObject<UHierarchicalInstancedStaticMeshComponent>(GetOwner());
-	LandCellRenderer->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
-	LandCellRenderer->RegisterComponent();
-	LandCellRenderer->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-	LandCellRenderer->SetCollisionResponseToAllChannels(ECR_Block);
-	check(FarmlandConfig->LandCellMesh);
-	LandCellRenderer->SetStaticMesh(FarmlandConfig->LandCellMesh);
-	// 设置自定义数据数量 你必须告诉 ISM 组件：“每个实例需要占用多少个浮点位？”
-	LandCellRenderer->SetNumCustomDataFloats(FarmlandConfig->NumCustomDataFloats);
-	
-	// 清除所有现有实例 
-	LandCellRenderer->ClearInstances();
-	PlotInfoIndex.Empty();
-	
 	// 计算缩放因子
 	// 获取土地网格的原始边界
 	const FBoxSphereBounds CellBounds = FarmlandConfig->LandCellMesh->GetBounds();
@@ -719,7 +737,7 @@ void UFarmlandComponent::InitializeLandCells()
 			PlotInfoIndex.Add(FIntPoint(X, Y), PlotInfo);
 			
 			// 初始化隐藏所有地块
-			if (FarmlandConfig->bInitAllLandCells)
+			if (FarmlandConfig->bInitAllLandCells && PlotSaveGameData.Num() == 0)
 			{
 				PlowLand(FIntPoint(X, Y));
 			}
@@ -729,12 +747,106 @@ void UFarmlandComponent::InitializeLandCells()
 			}
 		}
 	}
-    
-	// 标记渲染数据需要更新
-	// LandCellRenderer->MarkRenderStateDirty();
-    
-	UE_LOG(LogTemp, Log, TEXT("Initialized %d land cells for %dx%d grid"), 
+	
+	UE_LOG(LogTemp, Log, TEXT("Initialized %d land cells for %dx%d grid by Default"), 
+	       LandCellRenderer->GetInstanceCount(), FarmlandConfig->GridSizeX, FarmlandConfig->GridSizeY);
+}
+
+bool UFarmlandComponent::GetCellBounds(int32 X, int32 Y, FBox& OutBounds) const
+{
+	if (!FarmlandConfig || X < 0 || X >= FarmlandConfig->GridSizeX || Y < 0 || Y >= FarmlandConfig->GridSizeY)
+	{
+		return false;
+	}
+
+	// 计算农场总尺寸
+	const float TotalWidth = FarmlandConfig->GridSizeX * FarmlandConfig->CellSize.X + 
+							 (FarmlandConfig->GridSizeX - 1) * FarmlandConfig->CellSpacing + 
+							 FarmlandConfig->GroundExtension * 2.f;
+	const float TotalHeight = FarmlandConfig->GridSizeY * FarmlandConfig->CellSize.Y + 
+							  (FarmlandConfig->GridSizeY - 1) * FarmlandConfig->CellSpacing + 
+							  FarmlandConfig->GroundExtension * 2.f;
+	const float HalfWidth = TotalWidth * 0.5f;
+	const float HalfHeight = TotalHeight * 0.5f;
+
+	// 计算地块左下角（本地坐标）
+	float Left = -HalfWidth + FarmlandConfig->GroundExtension + 
+				 X * (FarmlandConfig->CellSize.X + FarmlandConfig->CellSpacing);
+	float Bottom = -HalfHeight + FarmlandConfig->GroundExtension + 
+				   Y * (FarmlandConfig->CellSize.Y + FarmlandConfig->CellSpacing); // 假设 Y 向上
+
+	float Right = Left + FarmlandConfig->CellSize.X;
+	float Top = Bottom + FarmlandConfig->CellSize.Y;
+
+	// 返回包围盒（Z 轴范围放宽，假设地块在 Z=0 附近）
+	OutBounds = FBox(FVector(Left, Bottom, -100.f), FVector(Right, Top, 100.f));
+	return true;
+}
+
+void UFarmlandComponent::InitializeLandCells()
+{
+	ensure(FarmlandConfig);
+	ensure(FarmlandConfig->LandCellMesh);
+
+	if (LandCellRenderer != nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LandCells have been Initialized"));
+		return;
+	}
+	LandCellRenderer = NewObject<UHierarchicalInstancedStaticMeshComponent>(GetOwner());
+	LandCellRenderer->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
+	LandCellRenderer->RegisterComponent();
+	LandCellRenderer->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	LandCellRenderer->SetCollisionResponseToAllChannels(ECR_Block);
+	check(FarmlandConfig->LandCellMesh);
+	LandCellRenderer->SetStaticMesh(FarmlandConfig->LandCellMesh);
+	// 设置自定义数据数量 你必须告诉 ISM 组件：“每个实例需要占用多少个浮点位？”
+	LandCellRenderer->SetNumCustomDataFloats(FarmlandConfig->NumCustomDataFloats);
+
+	CreateDefaultLandCells();
+	if (PlotSaveGameData.Num() > 0)
+	{
+		for (auto& PlotSaveGameDataItem : PlotSaveGameData)
+		{
+			FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlotSaveGameDataItem.Coords);
+			PlotInfo.WeedsTransform = PlotSaveGameDataItem.WeedsTransform;
+			if (PlotSaveGameDataItem.StateData.HasState(EPlotState::Plowed))
+			{
+				PlowLand(PlotSaveGameDataItem.Coords);
+				if (PlotSaveGameDataItem.StateData.HasState(EPlotState::Watered))
+				{
+					WetLand(PlotSaveGameDataItem.Coords);
+				}
+				if (PlotSaveGameDataItem.StateData.HasState(EPlotState::Fertilized))
+				{
+					FertilizeLand(PlotSaveGameDataItem.Coords);
+				}
+			}
+			if (PlotSaveGameDataItem.StateData.HasState(EPlotState::WeedInfested))
+			{
+				GenerateWeeds(PlotSaveGameDataItem.Coords);
+			}
+			if (PlotSaveGameDataItem.StateData.HasState(EPlotState::PestInfested))
+			{
+				GeneratePest(PlotSaveGameDataItem.Coords);
+			}
+
+			if (PlotSaveGameDataItem.CropData.CropID != NAME_None)
+			{
+				const FCropTableRow* CropTableRow = CropDataTable->FindRow<FCropTableRow>(PlotSaveGameDataItem.CropData.CropID, TEXT("UFarmlandComponent::InitializeLandCells"));
+				PlotInfo.CropMeshVariant = CropTableRow->MeshVariants[PlotSaveGameDataItem.CropData.VariantsIndex];
+				PlotInfo.CropNumCustomDataFloats = CropTableRow->CropNumCustomDataFloats;
+				UCropBase* Crop = NewObject<UCropBase>();
+				PlotInfo.Crop = Crop;
+				Crop->OnPlantGrowthStageChanged.AddDynamic(this, &ThisClass::OnCropGrowthStageChanged);
+				Crop->InitializeCrop(PlotSaveGameDataItem.CropData);
+			}
+		}
+		UE_LOG(LogTemp, Log, TEXT("Initialized %d land cells for %dx%d grid by PlotSaveGameData"), 
 		   LandCellRenderer->GetInstanceCount(), FarmlandConfig->GridSizeX, FarmlandConfig->GridSizeY);
+	}
+
+	
 	
 }
 
@@ -892,14 +1004,17 @@ void UFarmlandComponent::OnCropGrowthStageChanged(FIntPoint Coords, ECropGrowthS
 	// 清理之前的实例
 	if (OldGrowthStageMesh)
 	{
-		if (UHierarchicalInstancedStaticMeshComponent* OldInstanceHISMComponent = CropHISMComponentMap.FindChecked(FStaticMeshHISMKey(OldGrowthStageMesh)))
+		if (CropHISMComponentMap.Contains(FStaticMeshHISMKey(OldGrowthStageMesh)))
 		{
-			UISMTools::RemoveInstanceByTransform(OldInstanceHISMComponent, PlotInfo.Transform);
-		}
-		else
-		{
-			UE_LOG(LogTemp, Log, TEXT("OldInstanceHISMComponent not found for %s"), *OldGrowthStageMesh->GetName());
-			return;
+			if (UHierarchicalInstancedStaticMeshComponent* OldInstanceHISMComponent = CropHISMComponentMap.FindChecked(FStaticMeshHISMKey(OldGrowthStageMesh)))
+			{
+				UISMTools::RemoveInstanceByTransform(OldInstanceHISMComponent, PlotInfo.Transform);
+			}
+			else
+			{
+				UE_LOG(LogTemp, Log, TEXT("OldInstanceHISMComponent not found for %s"), *OldGrowthStageMesh->GetName());
+				return;
+			}
 		}
 	}
 	

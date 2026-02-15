@@ -38,6 +38,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Crop|Update")
 	virtual void ProcessOfflineGrowth(const FTimespan& OfflineDuration);
 
+	UFUNCTION(BlueprintPure, Category = "Crop|Getter")
 	FCropData GetCropData() const { return CropData;}
 	FCropData& GetCropDataRef() { return CropData;}
 	// ==================== 操作接口 ====================
@@ -61,9 +62,5 @@ private:
 	UPROPERTY()
 	FCropData CropData;
 
-	UPROPERTY()
-	float TotalGrowthTime = 0.f;
 
-	UPROPERTY()
-	float CurrentGrowthTime = 0.f;
 };

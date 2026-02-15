@@ -45,7 +45,7 @@ void ABasePlayerController::OnLeftMouseClick()
 	FIntPoint CellCoords;
 	if (TraceForFarmlandAndCell(HitLocation, HitFarmland, CellCoords))
 	{
-		DrawDebugSphere(GetWorld(), HitLocation, 10.f, 12, FColor::Red, false, 3.f);
+		// DrawDebugSphere(GetWorld(), HitLocation, 10.f, 12, FColor::Red, false, 3.f);
 		// const FFarmLandPlotInfo& PlotInfo = HitFarmland->GetPlotInfo(CellCoords);
 		HitFarmland->HandleLeftMouseClicked(EditMode, CellCoords);
 		
@@ -120,19 +120,16 @@ void ABasePlayerController::UpdateHoveredPlot()
 	// 执行射线检测
 	FVector HitLocation;
 	AFarmlandActor* HitFarmland = nullptr;
-	FIntPoint CellCoords;
-	// 没有编辑模式
-	if (EditMode == EEditMode::None)
-	{
-		goto LeaveFarmland;
-	}
+	FIntPoint CellCoords = FIntPoint(-1, -1);
+
 	if (TraceForFarmlandAndCell(HitLocation, HitFarmland, CellCoords))
 	{
-		// DrawDebugSphere(GetWorld(), HitLocation, 10.f, 12, FColor::Red, false, 3.f);
+		// DrawDebugSphere(GetWorld(), HitLocation, 5.f, 12, FColor::Red, false, 3.f);
 		if (PreHoveredPlotCoords == CellCoords)
 		{
 			return;
 		}
+		OnHoveredPlot.Broadcast(HitFarmland, CellCoords);
 		if (PreHoveredFarmland && PreHoveredFarmland != HitFarmland)
 		{
 			PreHoveredFarmland->OutlinePlot(PreHoveredPlotCoords, false);
@@ -147,7 +144,7 @@ void ABasePlayerController::UpdateHoveredPlot()
 	}
 	else
 	{
-		LeaveFarmland:
+		OnHoveredPlot.Broadcast(nullptr, FIntPoint(-1, -1));
 		if (PreHoveredFarmland)
 		{
 			PreHoveredFarmland->OutlinePlot(PreHoveredPlotCoords, false);

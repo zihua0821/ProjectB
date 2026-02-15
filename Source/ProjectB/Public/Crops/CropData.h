@@ -74,69 +74,81 @@ struct FPlotStateData
 {
     GENERATED_BODY()
 
+    // uint8 存储（保证存档正确性）
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlotState")
-    EPlotState StateFlags = EPlotState::Empty;
+    uint8 StateFlags = static_cast<uint8>(EPlotState::Empty);
 
-    void Reset()
+    EPlotState GetAsEnum() const
     {
-        StateFlags = EPlotState::Empty;
+        return static_cast<EPlotState>(StateFlags);
     }
-    bool IsEmpty() const
+
+    void SetFromEnum(EPlotState NewState)
     {
-        return StateFlags == EPlotState::Empty;
+        StateFlags = static_cast<uint8>(NewState);
     }
     
-    bool IsValidSingleState()
+    // 重置为空
+    void Reset()
     {
-        // 空状态不算单一状态（如果需要允许空状态，可以移除这个检查）
-        if (StateFlags == EPlotState::Empty)
+        StateFlags = static_cast<uint8>(EPlotState::Empty);
+    }
+
+    // 是否为空
+    bool IsEmpty() const
+    {
+        return StateFlags == static_cast<uint8>(EPlotState::Empty);
+    }
+    
+    // 是否只有一个状态（用于验证）
+    bool IsValidSingleState() const
+    {
+        if (StateFlags == static_cast<uint8>(EPlotState::Empty))
         {
             return false;
         }
-
-        // 使用位运算技巧：如果一个数是2的幂（只有一个位为1），
-        // 那么 (n & (n - 1)) == 0
-        const uint8 Value = static_cast<uint8>(StateFlags);
-        return (Value & (Value - 1)) == 0;
-    }
-    
-    bool HasState(const EPlotState& State) const
-    {
-        return (StateFlags & State) != EPlotState::Empty;
-    }
-    
-    void AddState(const EPlotState& State)
-    {
-        StateFlags |= State;
+        return (StateFlags & (StateFlags - 1)) == 0;
     }
 
-    void RemoveState(const EPlotState& State)
+    // 检查是否包含指定状态
+    bool HasState(EPlotState State) const
     {
-        StateFlags &= ~State;
+        return (StateFlags & static_cast<uint8>(State)) != 0;
     }
 
-    void ToggleState(const EPlotState& State)
+    // 添加状态
+    void AddState(EPlotState State)
     {
-        StateFlags ^= State;
+        StateFlags |= static_cast<uint8>(State);
     }
-    
+
+    // 移除状态
+    void RemoveState(EPlotState State)
+    {
+        StateFlags &= ~static_cast<uint8>(State);
+    }
+
+    // 切换状态
+    void ToggleState(EPlotState State)
+    {
+        StateFlags ^= static_cast<uint8>(State);
+    }
+
+    // 转换为显示字符串
     FString ToString() const
     {
-        // 特殊处理：完全空状态
-        if (StateFlags == EPlotState::Empty)
+        if (StateFlags == static_cast<uint8>(EPlotState::Empty))
         {
             return TEXT("空地");
         }
 
         TArray<FString> ActiveStates;
-        
         if (HasState(EPlotState::Plowed))       ActiveStates.Add(TEXT("已耕地"));
         if (HasState(EPlotState::Watered))      ActiveStates.Add(TEXT("已灌溉"));
         if (HasState(EPlotState::Fertilized))   ActiveStates.Add(TEXT("已施肥"));
         if (HasState(EPlotState::WeedInfested)) ActiveStates.Add(TEXT("有杂草"));
         if (HasState(EPlotState::PestInfested)) ActiveStates.Add(TEXT("有虫害"));
 
-        // 拼接结果
         FString Result;
         for (int32 i = 0; i < ActiveStates.Num(); ++i)
         {
@@ -180,57 +192,76 @@ struct FCropStateData
 {
     GENERATED_BODY()
 
+   // 使用 uint8 存储状态位（保证存档大小固定）
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CropState")
-    ECropState StateFlags = ECropState::Healthy | ECropState::NeedsWater; // 默认为健康且需要浇水
+    uint8 StateFlags = static_cast<uint8>(ECropState::Healthy | ECropState::NeedsWater);
 
+    // 获取当前状态作为枚举值（用于需要直接操作枚举的场景）
+    ECropState GetAsEnum() const
+    {
+        return static_cast<ECropState>(StateFlags);
+    }
+
+    // 从枚举值设置状态
+    void SetFromEnum(ECropState NewState)
+    {
+        StateFlags = static_cast<uint8>(NewState);
+    }
+    
+    // 重置为默认状态
     void Reset()
     {
-        StateFlags = ECropState::Healthy | ECropState::NeedsWater;
+        StateFlags = static_cast<uint8>(ECropState::Healthy | ECropState::NeedsWater);
     }
+
+    // 是否为空状态
     bool IsEmpty() const
     {
-        return StateFlags == ECropState::None;
-    }
-    
-    bool HasState(const ECropState& State) const
-    {
-        return (StateFlags & State) != ECropState::None;
-    }
-    
-    void AddState(const ECropState& State)
-    {
-        StateFlags |= State;
+        return StateFlags == static_cast<uint8>(ECropState::None);
     }
 
-    void RemoveState(const ECropState& State)
+    // 检查是否包含指定状态
+    bool HasState(ECropState State) const
     {
-        StateFlags &= ~State;
+        return (StateFlags & static_cast<uint8>(State)) != 0;
     }
 
-    void ToggleState(const ECropState& State)
+    // 添加一个或多个状态
+    void AddState(ECropState State)
     {
-        StateFlags ^= State;
+        StateFlags |= static_cast<uint8>(State);
     }
-    
+
+    // 移除指定状态
+    void RemoveState(ECropState State)
+    {
+        StateFlags &= ~static_cast<uint8>(State);
+    }
+
+    // 切换指定状态
+    void ToggleState(ECropState State)
+    {
+        StateFlags ^= static_cast<uint8>(State);
+    }
+
+    // 转换为可读字符串
     FString ToString() const
     {
-        // 特殊处理：完全空状态
-        if (StateFlags == ECropState::None)
+        if (StateFlags == static_cast<uint8>(ECropState::None))
         {
             return TEXT("空状态");
         }
 
         TArray<FString> ActiveStates;
-        
-        if (HasState(ECropState::ReadyForHarvest))       ActiveStates.Add(TEXT("可收获"));
-        if (HasState(ECropState::Healthy))               ActiveStates.Add(TEXT("健康"));
-        if (HasState(ECropState::NeedsWater))            ActiveStates.Add(TEXT("需要浇水"));
-        if (HasState(ECropState::NeedsFertilizer))       ActiveStates.Add(TEXT("需要施肥"));
-        if (HasState(ECropState::OverWatered))           ActiveStates.Add(TEXT("浇水过多"));
-        if (HasState(ECropState::NutrientBurn))          ActiveStates.Add(TEXT("肥料烧伤"));
-        if (HasState(ECropState::Disease))               ActiveStates.Add(TEXT("病害"));
 
-        // 拼接结果
+        if (HasState(ECropState::ReadyForHarvest)) ActiveStates.Add(TEXT("可收获"));
+        if (HasState(ECropState::Healthy))         ActiveStates.Add(TEXT("健康"));
+        if (HasState(ECropState::NeedsWater))      ActiveStates.Add(TEXT("需要浇水"));
+        if (HasState(ECropState::NeedsFertilizer)) ActiveStates.Add(TEXT("需要施肥"));
+        if (HasState(ECropState::OverWatered))     ActiveStates.Add(TEXT("浇水过多"));
+        if (HasState(ECropState::NutrientBurn))    ActiveStates.Add(TEXT("肥料烧伤"));
+        if (HasState(ECropState::Disease))         ActiveStates.Add(TEXT("病害"));
+
         FString Result;
         for (int32 i = 0; i < ActiveStates.Num(); ++i)
         {
@@ -403,6 +434,10 @@ struct FCropData
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FIntPoint Coords;
 
+    // 农作物变体索引
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 VariantsIndex = 0;
+
     // 农作物当前生长阶段
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     ECropGrowthStage CropGrowthStage = ECropGrowthStage::Seed;
@@ -418,5 +453,13 @@ struct FCropData
     // 农作物状态
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FCropStateData CropStateData;
+
+    // 农作物总生长时间
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TotalGrowthTime = 0.f;
+
+    // 农作物当前阶段生长时间
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float CurrentStageGrowthTime = 0.f;
     
 };

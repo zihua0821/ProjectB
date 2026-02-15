@@ -15,32 +15,32 @@ void UCropBase::InitializeCrop(FCropData& InCropData)
 
 void UCropBase::UpdateCrop(float DeltaTime)
 {
-	TotalGrowthTime += DeltaTime;
+	CropData.TotalGrowthTime += DeltaTime;
 
 	switch (CropData.CropGrowthStage)
 	{
 	case ECropGrowthStage::None:
-		CurrentGrowthTime = TotalGrowthTime = 0.f;
+		CropData.CurrentStageGrowthTime = CropData.TotalGrowthTime = 0.f;
 		break;
 	case ECropGrowthStage::Seed:
-		CurrentGrowthTime = TotalGrowthTime;
+		CropData.CurrentStageGrowthTime = CropData.TotalGrowthTime;
 		break;
 	case ECropGrowthStage::Seedling:
-		CurrentGrowthTime = TotalGrowthTime - CropData.GrowthSeedTime;
+		CropData.CurrentStageGrowthTime = CropData.TotalGrowthTime - CropData.GrowthSeedTime;
 		break;
 	case ECropGrowthStage::Mature:
-		CurrentGrowthTime = TotalGrowthTime - CropData.GrowthSeedTime - CropData.GrowthSeedlingTime;
+		CropData.CurrentStageGrowthTime = CropData.TotalGrowthTime - CropData.GrowthSeedTime - CropData.GrowthSeedlingTime;
 		break;
 	case ECropGrowthStage::Harvested:
-		CurrentGrowthTime = TotalGrowthTime - CropData.GrowthSeedTime - CropData.GrowthSeedlingTime;
+		CropData.CurrentStageGrowthTime = CropData.TotalGrowthTime - CropData.GrowthSeedTime - CropData.GrowthSeedlingTime;
 		break;
 	}
-	if (CropData.CropGrowthStage == ECropGrowthStage::Seed && CurrentGrowthTime >= CropData.GrowthSeedTime)
+	if (CropData.CropGrowthStage == ECropGrowthStage::Seed && CropData.CurrentStageGrowthTime >= CropData.GrowthSeedTime)
 	{
 		CropData.CropGrowthStage = ECropGrowthStage::Seedling;
 		OnPlantGrowthStageChanged.Broadcast(CropData.Coords, CropData.CropGrowthStage);
 	}
-	else if (CropData.CropGrowthStage == ECropGrowthStage::Seedling && CurrentGrowthTime >= CropData.GrowthSeedlingTime)
+	else if (CropData.CropGrowthStage == ECropGrowthStage::Seedling && CropData.CurrentStageGrowthTime >= CropData.GrowthSeedlingTime)
 	{
 		CropData.CropGrowthStage = ECropGrowthStage::Mature;
 		OnPlantGrowthStageChanged.Broadcast(CropData.Coords, CropData.CropGrowthStage);

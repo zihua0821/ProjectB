@@ -6,6 +6,7 @@
 #include "FarmlandConfigDataAsset.h"
 #include "Components/SceneComponent.h"
 #include "Crops/CropData.h"
+#include "Tools/FarmSaveGame.h"
 #include "FarmlandComponent.generated.h"
 
 
@@ -123,6 +124,12 @@ public:
 	// 获取地块信息
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Coordinate")
 	FFarmLandPlotInfo GetPlotInfo(const FIntPoint& PlotCoords) const;
+
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	TArray<FFarmLandPlotSaveGameData> GetPlotSaveGameData();
+
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void SetPlotSaveGameData(const TArray<FFarmLandPlotSaveGameData>& InPlotSaveGameData){PlotSaveGameData = InPlotSaveGameData;}
 protected:
 	virtual void BeginPlay() override;
 
@@ -157,6 +164,9 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<ABasePlayerController>  BasePlayerController;
+
+	UPROPERTY()
+	TArray<FFarmLandPlotSaveGameData> PlotSaveGameData;
     
 	// 辅助方法
 	void InitializeLandCells();
@@ -166,6 +176,8 @@ private:
 
 	void SetCropDisease(FIntPoint Coords,bool bDisease, bool bLeafs = false);
 	void UpdateOutlineColor();
+	void CreateDefaultLandCells();
+	bool GetCellBounds(int32 X, int32 Y, FBox& OutBounds) const;
 
 	// 获取或创建渲染器
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> GetOrCreateRenderer(FName CropID);

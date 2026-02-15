@@ -101,6 +101,24 @@ FFarmLandPlotInfo AFarmlandActor::GetPlotInfo(const FIntPoint& PlotCoords) const
 	return FarmlandComponent->GetPlotInfo(PlotCoords);
 }
 
+TArray<FFarmLandPlotSaveGameData> AFarmlandActor::GetPlotSaveGameData() const
+{
+	if (!FarmlandComponent)
+	{
+		return TArray<FFarmLandPlotSaveGameData>();
+	}
+	return FarmlandComponent->GetPlotSaveGameData();
+}
+
+void AFarmlandActor::SetPlotSaveGameData(const TArray<FFarmLandPlotSaveGameData>& InPlotSaveGameData)
+{
+	if (!FarmlandComponent)
+	{
+		return;
+	}
+	FarmlandComponent->SetPlotSaveGameData(InPlotSaveGameData);
+}
+
 void AFarmlandActor::HandleLeftMouseClicked(const EEditMode EditMode, const FIntPoint PlowCoords) const
 {
 	if (!FarmlandComponent)
