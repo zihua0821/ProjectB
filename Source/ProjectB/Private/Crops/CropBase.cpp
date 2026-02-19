@@ -3,7 +3,7 @@
 
 #include "ProjectB/Public/Crops/CropBase.h"
 
-UCropBase::UCropBase()
+UCropBase::UCropBase(): CropData()
 {
 }
 
@@ -11,6 +11,7 @@ void UCropBase::InitializeCrop(FCropData& InCropData)
 {
 	CropData = InCropData;
 	OnPlantGrowthStageChanged.Broadcast(CropData.Coords, CropData.CropGrowthStage);
+	OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
 }
 
 void UCropBase::UpdateCrop(float DeltaTime)
@@ -35,15 +36,18 @@ void UCropBase::UpdateCrop(float DeltaTime)
 		CropData.CurrentStageGrowthTime = CropData.TotalGrowthTime - CropData.GrowthSeedTime - CropData.GrowthSeedlingTime;
 		break;
 	}
-	if (CropData.CropGrowthStage == ECropGrowthStage::Seed && CropData.CurrentStageGrowthTime >= CropData.GrowthSeedTime)
+	// 判断是否需要转换成下一阶段
+	if (CropData.CropGrowthStage == ECropGrowthStage::Seed && CropData.CurrentStageGrowthTime >= CropData.GrowthSeedTime) // 种子-发芽
 	{
 		CropData.CropGrowthStage = ECropGrowthStage::Seedling;
 		OnPlantGrowthStageChanged.Broadcast(CropData.Coords, CropData.CropGrowthStage);
 	}
-	else if (CropData.CropGrowthStage == ECropGrowthStage::Seedling && CropData.CurrentStageGrowthTime >= CropData.GrowthSeedlingTime)
+	else if (CropData.CropGrowthStage == ECropGrowthStage::Seedling && CropData.CurrentStageGrowthTime >= CropData.GrowthSeedlingTime) // 幼苗-成熟
 	{
 		CropData.CropGrowthStage = ECropGrowthStage::Mature;
+		CropData.CropStateData.AddState(ECropState::ReadyForHarvest);
 		OnPlantGrowthStageChanged.Broadcast(CropData.Coords, CropData.CropGrowthStage);
+		OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
 	}
 
 	
@@ -76,5 +80,7 @@ void UCropBase::HarvestCrop()
 		return;
 	}
 	CropData.CropGrowthStage = ECropGrowthStage::Harvested;
+	CropData.CropStateData.RemoveState(ECropState::ReadyForHarvest);
 	OnPlantGrowthStageChanged.Broadcast(CropData.Coords, CropData.CropGrowthStage);
+	OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
 }

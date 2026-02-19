@@ -193,7 +193,7 @@ struct FCropStateData
 {
     GENERATED_BODY()
 
-   // 使用 uint8 存储状态位（保证存档大小固定）
+    // 使用 uint8 存储状态位（保证存档大小固定）
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CropState")
     uint8 StateFlags = static_cast<uint8>(ECropState::Healthy | ECropState::NeedsWater);
 

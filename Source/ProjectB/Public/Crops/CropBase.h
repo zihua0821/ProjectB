@@ -8,12 +8,13 @@
 #include "CropBase.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlantGrowthStageChanged, FIntPoint, Coords, ECropGrowthStage, NewGrowthStage);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnCropStateChanged, FIntPoint, Coords, FCropStateData, NewCropState);
 
 /**
  * 农作物基类
  * 所有农作物的抽象基类，提供基础功能和接口
  */
-UCLASS()
+UCLASS(Blueprintable)
 class PROJECTB_API UCropBase : public UObject
 {
 	GENERATED_BODY()
@@ -25,6 +26,10 @@ public:
 	// 生命周期变化代理
 	UPROPERTY(BlueprintAssignable, Category = "Crop|Events")
 	FOnPlantGrowthStageChanged OnPlantGrowthStageChanged;
+
+	// 状态变化代理
+	UPROPERTY(BlueprintAssignable, Category = "Crop|Events")
+	FOnCropStateChanged OnCropStateChanged;
 	
 	// 初始化农作物
 	UFUNCTION(BlueprintCallable, Category = "Crop|Initialization")

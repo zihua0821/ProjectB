@@ -14,6 +14,9 @@ class ABasePlayerController;
 class UInstancedStaticMeshComponent;
 class UCropBase;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlotStateChanged, FIntPoint, Coords, FPlotStateData, NewPlotState);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCropPlantedOrRemoved, FIntPoint, Coords);
+
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class PROJECTB_API UFarmlandComponent : public USceneComponent
 {
@@ -22,6 +25,16 @@ class PROJECTB_API UFarmlandComponent : public USceneComponent
 public:
 	// Sets default values for this component's properties
 	UFarmlandComponent();
+
+	// =================== 事件 ====================
+	// 地块状态改变
+	UPROPERTY(BlueprintAssignable, Category = "Farmland|Events")
+	FOnPlotStateChanged OnPlotStateChanged;
+
+	// 农作物播种或移除
+	UPROPERTY(BlueprintAssignable, Category = "Farmland|Events")
+	FOnCropPlantedOrRemoved OnCropPlantedOrRemoved;
+	
 	// ==================== 配置接口 ====================
 	// 设置地块配置数据
 	void SetFarmlandConfig(const TObjectPtr<UFarmlandConfigDataAsset>& InFarmlandConfig){FarmlandConfig = InFarmlandConfig;}

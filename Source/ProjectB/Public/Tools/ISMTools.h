@@ -19,6 +19,7 @@ class PROJECTB_API UISMTools : public UBlueprintFunctionLibrary
 public:
 	/**
 	 * 通过精确Transform删除实例
+	 * 时间复杂度 O(N)，仅在低频操作时使用
 	 * @param ISMComponent 目标ISM组件
 	 * @param TargetTransform 要匹配的Transform
 	 * @param bCheckLocation 是否检查位置
@@ -39,6 +40,7 @@ public:
 
 	/**
 	 * 通过精确Transform获取实例Index
+	 * 时间复杂度 O(N)，仅在低频操作时使用
 	 * @param ISMComponent 目标ISM组件
 	 * @param TargetTransform 要匹配的Transform
 	 * @param OutIndex 输出的实例Index

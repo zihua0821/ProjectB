@@ -109,6 +109,7 @@ void UFarmlandComponent::RemoveLand(const FIntPoint Coords)
 	}
 	
 	PlotInfo.StateData.Reset();
+	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 }
 
 void UFarmlandComponent::PlowLand(const FIntPoint Coords)
@@ -133,6 +134,7 @@ void UFarmlandComponent::PlowLand(const FIntPoint Coords)
 	const int32 Index = LandCellRenderer->AddInstance(PlotInfo.Transform);
 	LandCellRenderer->SetCustomDataValue(Index, 0, 1.f);
 	PlotInfo.StateData.AddState(EPlotState::Plowed);
+	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 }
 
 void UFarmlandComponent::WetLand(const FIntPoint Coords)
@@ -161,6 +163,7 @@ void UFarmlandComponent::WetLand(const FIntPoint Coords)
 	}
 	LandCellRenderer->SetCustomDataValue(PlotIndex, 1, 1.f);
 	PlotInfo.StateData.AddState(EPlotState::Watered);
+	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 }
 
 void UFarmlandComponent::LandDried(const FIntPoint Coords)
@@ -189,6 +192,7 @@ void UFarmlandComponent::LandDried(const FIntPoint Coords)
 	}
 	LandCellRenderer->SetCustomDataValue(PlotIndex, 1, 0.f);
 	PlotInfo.StateData.RemoveState(EPlotState::Watered);
+	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 }
 
 void UFarmlandComponent::FertilizeLand(const FIntPoint Coords)
@@ -217,6 +221,7 @@ void UFarmlandComponent::FertilizeLand(const FIntPoint Coords)
 	}
 	LandCellRenderer->SetCustomDataValue(PlotIndex, 2, 1.f);
 	PlotInfo.StateData.AddState(EPlotState::Fertilized);
+	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 }
 
 void UFarmlandComponent::ClearFertilize(const FIntPoint Coords)
@@ -245,6 +250,7 @@ void UFarmlandComponent::ClearFertilize(const FIntPoint Coords)
 	}
 	LandCellRenderer->SetCustomDataValue(PlotIndex, 2, 0.f);
 	PlotInfo.StateData.RemoveState(EPlotState::Fertilized);
+	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 }
 
 void UFarmlandComponent::GenerateWeeds(const FIntPoint Coords)
@@ -326,6 +332,7 @@ void UFarmlandComponent::GenerateWeeds(const FIntPoint Coords)
 	}
 	
  	PlotInfo.StateData.AddState(EPlotState::WeedInfested);
+	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 }
 
 void UFarmlandComponent::ClearWeeds(const FIntPoint Coords)
@@ -351,6 +358,7 @@ void UFarmlandComponent::ClearWeeds(const FIntPoint Coords)
 	}
 	PlotInfo.WeedsTransform.Empty();
 	PlotInfo.StateData.RemoveState(EPlotState::WeedInfested);
+	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 }
 
 void UFarmlandComponent::GeneratePest(const FIntPoint Coords)
@@ -376,6 +384,7 @@ void UFarmlandComponent::GeneratePest(const FIntPoint Coords)
 	PestParticle->SetFloatParameter("PestRadius", FarmlandConfig->PestRadius);
 	PlotInfo.PestNiagaraComponent = PestParticle;
 	PlotInfo.StateData.AddState(EPlotState::PestInfested);
+	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 }
 
 void UFarmlandComponent::ClearPest(const FIntPoint Coords)
@@ -394,6 +403,7 @@ void UFarmlandComponent::ClearPest(const FIntPoint Coords)
 	PlotInfo.PestNiagaraComponent->DestroyComponent();  // 销毁组件
 	PlotInfo.PestNiagaraComponent = nullptr;  // 置空指针
 	PlotInfo.StateData.RemoveState(EPlotState::PestInfested);
+	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 }
 
 void UFarmlandComponent::RemoveCrop(FIntPoint Coords)
@@ -448,6 +458,7 @@ void UFarmlandComponent::RemoveCrop(FIntPoint Coords)
 	PlotInfo.CropMeshVariant = FCropMeshVariant();
 	PlotInfo.CropNumCustomDataFloats = -1;
 	PlotInfo.CropTransform = FTransform();
+	OnCropPlantedOrRemoved.Broadcast(Coords);
 }
 
 void UFarmlandComponent::PlantCrop(const FIntPoint Coords)
@@ -491,7 +502,7 @@ void UFarmlandComponent::PlantCrop(const FIntPoint Coords)
 	CropData.CropGrowthStage = ECropGrowthStage::Seed;
 	Crop->OnPlantGrowthStageChanged.AddDynamic(this, &ThisClass::OnCropGrowthStageChanged);
 	Crop->InitializeCrop(CropData);
-	
+	OnCropPlantedOrRemoved.Broadcast(Coords);
 }
 
 bool UFarmlandComponent::HarvestCrop(FIntPoint Coords)
