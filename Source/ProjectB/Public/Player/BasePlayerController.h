@@ -36,6 +36,12 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void SwitchToPrevEditMode();
 
+	UFUNCTION(BlueprintCallable)
+	void SetSelectedCropName(const FString& InCropName) {SelectedCropName = InCropName;}
+
+	UFUNCTION(BlueprintCallable)
+	FString GetSelectedCropName() const {return SelectedCropName;}
+	
 	UPROPERTY(BlueprintAssignable)
 	FOnEditModeChanged OnEditModeChanged;
 
@@ -64,4 +70,7 @@ private:
 	
 	UPROPERTY()
 	FIntPoint PreHoveredPlotCoords = FIntPoint(-1, -1);
+
+	UPROPERTY()
+	FString SelectedCropName;
 };

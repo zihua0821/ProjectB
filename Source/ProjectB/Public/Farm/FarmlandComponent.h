@@ -11,7 +11,7 @@
 
 
 class ABasePlayerController;
-class UHierarchicalInstancedStaticMeshComponent;
+class UInstancedStaticMeshComponent;
 class UCropBase;
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -77,10 +77,14 @@ public:
 	// 清除虫害
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	void ClearPest(FIntPoint Coords);
+
+	// 移除作物
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void RemoveCrop(FIntPoint Coords);
 	
 	// 种植作物
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void PlantCrop(FIntPoint Coords, FName CropID);
+	void PlantCrop(FIntPoint Coords);
     
 	// 收获作物
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
@@ -144,11 +148,11 @@ private:
 
 	// 土地单元格渲染组件
 	UPROPERTY()
-	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> LandCellRenderer;
+	TObjectPtr<UInstancedStaticMeshComponent> LandCellRenderer;
 
 	// 杂草渲染组件
 	UPROPERTY()
-	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> WeedsRenderer;
+	TObjectPtr<UInstancedStaticMeshComponent> WeedsRenderer;
 
 	// 农作物数据表
 	UPROPERTY()
@@ -156,11 +160,11 @@ private:
 
 	// 农作物渲染组件
 	UPROPERTY()
-	TMap<FStaticMeshHISMKey, UHierarchicalInstancedStaticMeshComponent*> CropHISMComponentMap;
+	TMap<FStaticMeshHISMKey, UInstancedStaticMeshComponent*> CropHISMComponentMap;
 
 	// 轮廓渲染组件
 	UPROPERTY()
-	TObjectPtr<UHierarchicalInstancedStaticMeshComponent>  OutlineHISMComponent;
+	TObjectPtr<UInstancedStaticMeshComponent>  OutlineHISMComponent;
 
 	UPROPERTY()
 	TObjectPtr<ABasePlayerController>  BasePlayerController;
@@ -180,9 +184,9 @@ private:
 	bool GetCellBounds(int32 X, int32 Y, FBox& OutBounds) const;
 
 	// 获取或创建渲染器
-	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> GetOrCreateRenderer(FName CropID);
+	TObjectPtr<UInstancedStaticMeshComponent> GetOrCreateRenderer(FName CropID);
 
-	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> GetOrCreateCropHISMC(const FFarmLandPlotInfo& PlotInfo);
+	TObjectPtr<UInstancedStaticMeshComponent> GetOrCreateCropHISMC(const FFarmLandPlotInfo& PlotInfo);
 
 	UFUNCTION()
 	void OnCropGrowthStageChanged(FIntPoint Coords, ECropGrowthStage NewGrowthStage);
@@ -194,5 +198,6 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType,
 	                           FActorComponentTickFunction* ThisTickFunction) override;
 };
+
 
 

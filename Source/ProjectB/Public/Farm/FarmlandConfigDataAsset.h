@@ -75,6 +75,17 @@ public:
 			  meta = (DisplayName = "单元格大小", ClampMin = "10.0", ClampMax = "500.0", UIMin = "10.0", UIMax = "500.0"))
 	FVector2D CellSize = FVector2D(200.f, 200.f);
 
+	// 作物z偏移
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Cell",
+			  meta = (DisplayName = "单元格z偏移"))
+	float CellOffsetZ;
+
+	// ============== 作物配置 ==============
+	// 作物z偏移
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Crop",
+			  meta = (DisplayName = "作物z偏移"))
+	FVector CropOffset;
+	
 	// ============== 杂草配置 ==============
 	// 杂草模型
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Weeds", 
@@ -97,10 +108,10 @@ public:
 			  meta = (DisplayName = "虫害高度"))
 	float PestHeight = 100.f;
 	
-	// 虫害粒子范围缩放
+	// 虫害粒子半径
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Pest", 
-			  meta = (DisplayName = "虫害粒子范围缩放"))
-	float PestScale = 0.8f;
+			  meta = (DisplayName = "虫害粒子半径"))
+	float PestRadius = 50.f;
 
 	// ==================== 选中配置 ====================
 	// 高亮材质

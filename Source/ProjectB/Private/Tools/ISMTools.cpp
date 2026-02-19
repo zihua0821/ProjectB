@@ -2,7 +2,6 @@
 
 
 #include "Tools/ISMTools.h"
-
 #include "Components/InstancedStaticMeshComponent.h"
 
 bool UISMTools::RemoveInstanceByTransform(UInstancedStaticMeshComponent* ISMComponent,

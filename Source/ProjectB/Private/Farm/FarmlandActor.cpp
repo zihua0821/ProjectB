@@ -128,13 +128,13 @@ void AFarmlandActor::HandleLeftMouseClicked(const EEditMode EditMode, const FInt
 	FarmlandComponent->HandleLeftMouseClicked(EditMode, PlowCoords);
 }
 
-void AFarmlandActor::PlantCrop(FIntPoint PlowCoords, FName CropID)
+void AFarmlandActor::PlantCrop(FIntPoint PlowCoords)
 {
 	if (!FarmlandComponent)
 	{
 		return;
 	}
-	FarmlandComponent->PlantCrop(PlowCoords, CropID);
+	FarmlandComponent->PlantCrop(PlowCoords);
 }
 
 bool AFarmlandActor::HarvestCrop(FIntPoint Coords)
@@ -196,14 +196,13 @@ void AFarmlandActor::InitializeComponents()
         
 		// 计算并设置地面缩放
 		UpdateGroundMeshSize();
-
-		// 设置地块组件位置
-		FarmlandComponent->SetRelativeLocation(FVector(0, 0, FarmlandConfig->LandHeightOffset / 2.f));
 	}
 	else 
 	{
 		GroundMeshComponent->SetStaticMesh(nullptr);
 	}
+	// 设置地块组件位置
+	FarmlandComponent->SetRelativeLocation(FVector(0.f, 0.f, FarmlandConfig->CellOffsetZ));
 }
 
 void AFarmlandActor::UpdateGroundMeshSize() const
@@ -228,7 +227,7 @@ void AFarmlandActor::UpdateGroundMeshSize() const
 		GroundMeshComponent->SetRelativeScale3D(NewScale);
         
 		// 确保地面在土地下方
-		GroundMeshComponent->SetRelativeLocation(FVector(0, 0, GroundExtent.Z));
+		// GroundMeshComponent->SetRelativeLocation(FVector(0, 0, GroundExtent.Z));
 	}
 }
 

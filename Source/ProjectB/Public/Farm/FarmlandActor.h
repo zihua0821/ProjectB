@@ -84,7 +84,7 @@ public:
 
 	// 种植作物
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
-	void PlantCrop(FIntPoint PlowCoords, FName CropID);
+	void PlantCrop(FIntPoint PlowCoords);
 
 	// 收获作物
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")

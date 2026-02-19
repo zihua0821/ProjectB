@@ -74,18 +74,22 @@ bool ABasePlayerController::TraceForFarmlandAndCell(FVector& OutHitLocation, AFa
             
             // 执行射线检测
             FHitResult HitResult;
-            FCollisionQueryParams QueryParams;
-            QueryParams.bTraceComplex = true;
-            QueryParams.bReturnPhysicalMaterial = false;
-            
-            // 忽略玩家自身
-            if (GetPawn())
-            {
-                QueryParams.AddIgnoredActor(GetPawn());
-            }
-            
-            // 执行射线检测
-            if (GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_Visibility, QueryParams))
+        	
+        	// 指定只检测 WorldDynamic 类型
+        	FCollisionObjectQueryParams ObjectQueryParams;
+        	ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+
+        	// 设置参数
+        	FCollisionQueryParams QueryParams;
+        	QueryParams.bTraceComplex = true;
+        	QueryParams.bReturnPhysicalMaterial = false;
+        	// 忽略玩家自身
+        	if (GetPawn())
+        	{
+        		QueryParams.AddIgnoredActor(GetPawn());
+        	}
+        
+            if (GetWorld()->LineTraceSingleByObjectType(HitResult, TraceStart, TraceEnd, ObjectQueryParams, QueryParams))
             {
                 OutHitLocation = HitResult.Location;
                 

@@ -29,6 +29,7 @@ enum EEditMode : uint8
     HarvestCrop   UMETA(DisplayName = "收获"),
     CropDried     UMETA(DisplayName = "作物干枯"),
     UnCropDried   UMETA(DisplayName = "干枯恢复"),
+    RemoveCrop    UMETA(DisplayName = "移除作物"),
 
 
     // 哨兵：不用于逻辑，仅用于计数
@@ -336,12 +337,16 @@ struct FFarmLandPlotInfo
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLand|CropInfo")
     TObjectPtr<UCropBase> Crop;
 
+    // 农作物Transform
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLand|CropInfo")
+    FTransform CropTransform;
+    
     // 农作物变体
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLand|CropInfo")
     FCropMeshVariant CropMeshVariant;
 
     // 农作物自定义数据数量
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLand|CropInfo")
     int32 CropNumCustomDataFloats;
 
 };
