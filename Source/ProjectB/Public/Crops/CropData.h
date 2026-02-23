@@ -7,6 +7,28 @@ class UCropBase;
 class UNiagaraComponent;
 class UCropDataAsset;
 
+
+/**
+ * 地块自定义数据索引
+ */
+namespace PlotCustomData
+{
+    constexpr int32 Opacity = 0;
+    constexpr int32 Wetness = 1;
+    constexpr int32 Fertility = 2;
+    constexpr int32 Count = 3;
+}
+
+/**
+ * 农作物自定义数据索引
+ */
+namespace CropCustomData
+{
+    constexpr int32 Disease = 0;
+    constexpr int32 IsLeaf = 1;
+    constexpr int32 Count = 2;
+}
+
 /**
  * 编辑模式
  */
@@ -173,7 +195,6 @@ enum class ECropState : uint8
     ReadyForHarvest    = 1 << 0 UMETA(DisplayName = "可收获"),        // 0000 0001
     
     // 健康/营养状态
-    Healthy            = 1 << 1 UMETA(DisplayName = "健康"),          // 0000 0010
     NeedsWater         = 1 << 2 UMETA(DisplayName = "需要浇水"),      // 0000 0100
     NeedsFertilizer    = 1 << 3 UMETA(DisplayName = "需要施肥"),      // 0000 1000
     OverWatered        = 1 << 4 UMETA(DisplayName = "浇水过多"),      // 0001 0000
@@ -195,7 +216,7 @@ struct FCropStateData
 
     // 使用 uint8 存储状态位（保证存档大小固定）
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CropState")
-    uint8 StateFlags = static_cast<uint8>(ECropState::Healthy | ECropState::NeedsWater);
+    uint8 StateFlags = static_cast<uint8>(ECropState::NeedsWater);
 
     // 获取当前状态作为枚举值（用于需要直接操作枚举的场景）
     ECropState GetAsEnum() const
@@ -212,7 +233,7 @@ struct FCropStateData
     // 重置为默认状态
     void Reset()
     {
-        StateFlags = static_cast<uint8>(ECropState::Healthy | ECropState::NeedsWater);
+        StateFlags = static_cast<uint8>(ECropState::NeedsWater);
     }
 
     // 是否为空状态
@@ -248,15 +269,9 @@ struct FCropStateData
     // 转换为可读字符串
     FString ToString() const
     {
-        if (StateFlags == static_cast<uint8>(ECropState::None))
-        {
-            return TEXT("空状态");
-        }
-
         TArray<FString> ActiveStates;
 
         if (HasState(ECropState::ReadyForHarvest)) ActiveStates.Add(TEXT("可收获"));
-        if (HasState(ECropState::Healthy))         ActiveStates.Add(TEXT("健康"));
         if (HasState(ECropState::NeedsWater))      ActiveStates.Add(TEXT("需要浇水"));
         if (HasState(ECropState::NeedsFertilizer)) ActiveStates.Add(TEXT("需要施肥"));
         if (HasState(ECropState::OverWatered))     ActiveStates.Add(TEXT("浇水过多"));
@@ -269,7 +284,16 @@ struct FCropStateData
             if (i > 0) Result.Append(TEXT(" | "));
             Result.Append(ActiveStates[i]);
         }
+        Result.Append(IsHealthy() ? TEXT(" # 健康") : TEXT(" # 不健康"));
         return Result;
+    }
+
+    // 检查作物是否健康
+    bool IsHealthy() const
+    {
+        // 健康定义：没有枯萎、病害、浇水过多、肥料烧伤
+        ECropState NegativeMask = ECropState::NeedsWater | ECropState::NeedsFertilizer | ECropState::OverWatered | ECropState::NutrientBurn | ECropState::Withers | ECropState::Disease;
+        return (StateFlags & static_cast<uint8>(NegativeMask)) == 0;
     }
 };
 

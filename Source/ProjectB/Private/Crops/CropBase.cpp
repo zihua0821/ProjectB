@@ -16,8 +16,13 @@ void UCropBase::InitializeCrop(FCropData& InCropData)
 
 void UCropBase::UpdateCrop(float DeltaTime)
 {
+	if (CropData.CropStateData.HasState(ECropState::NeedsWater))
+	{
+		return;
+	}
+	
 	CropData.TotalGrowthTime += DeltaTime;
-
+	
 	switch (CropData.CropGrowthStage)
 	{
 	case ECropGrowthStage::None:
@@ -59,7 +64,20 @@ void UCropBase::ProcessOfflineGrowth(const FTimespan& OfflineDuration)
 
 bool UCropBase::WaterCrop(float Amount)
 {
-	return true;
+	if (CropData.CropStateData.HasState(ECropState::NeedsWater))
+	{
+		CropData.CropStateData.RemoveState(ECropState::NeedsWater);
+		OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
+		return true;
+	}
+	if (!CropData.CropStateData.HasState(ECropState::OverWatered))
+	{
+		CropData.CropStateData.RemoveState(ECropState::NeedsWater);
+		CropData.CropStateData.AddState(ECropState::OverWatered);
+		OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
+		return true;
+	}
+	return false;
 }
 
 bool UCropBase::FertilizeCrop()

@@ -132,7 +132,7 @@ void UFarmlandComponent::PlowLand(const FIntPoint Coords)
 	}
 
 	const int32 Index = LandCellRenderer->AddInstance(PlotInfo.Transform);
-	LandCellRenderer->SetCustomDataValue(Index, 0, 1.f);
+	LandCellRenderer->SetCustomDataValue(Index, PlotCustomData::Opacity, 1.f);
 	PlotInfo.StateData.AddState(EPlotState::Plowed);
 	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 }
@@ -161,9 +161,14 @@ void UFarmlandComponent::WetLand(const FIntPoint Coords)
 		UE_LOG(LogTemp, Error, TEXT("Plot not exists"));
 		return;
 	}
-	LandCellRenderer->SetCustomDataValue(PlotIndex, 1, 1.f);
+	LandCellRenderer->SetCustomDataValue(PlotIndex, PlotCustomData::Wetness, 1.f);
 	PlotInfo.StateData.AddState(EPlotState::Watered);
 	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
+
+	if (PlotInfo.Crop)
+	{
+		PlotInfo.Crop->WaterCrop();
+	}
 }
 
 void UFarmlandComponent::LandDried(const FIntPoint Coords)
@@ -190,7 +195,7 @@ void UFarmlandComponent::LandDried(const FIntPoint Coords)
 		UE_LOG(LogTemp, Error, TEXT("Plot not exists"));
 		return;
 	}
-	LandCellRenderer->SetCustomDataValue(PlotIndex, 1, 0.f);
+	LandCellRenderer->SetCustomDataValue(PlotIndex, PlotCustomData::Wetness, 0.f);
 	PlotInfo.StateData.RemoveState(EPlotState::Watered);
 	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 }
@@ -219,7 +224,7 @@ void UFarmlandComponent::FertilizeLand(const FIntPoint Coords)
 		UE_LOG(LogTemp, Error, TEXT("Plot not exists"));
 		return;
 	}
-	LandCellRenderer->SetCustomDataValue(PlotIndex, 2, 1.f);
+	LandCellRenderer->SetCustomDataValue(PlotIndex, PlotCustomData::Fertility, 1.f);
 	PlotInfo.StateData.AddState(EPlotState::Fertilized);
 	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 }
@@ -248,7 +253,7 @@ void UFarmlandComponent::ClearFertilize(const FIntPoint Coords)
 		UE_LOG(LogTemp, Error, TEXT("Plot not exists"));
 		return;
 	}
-	LandCellRenderer->SetCustomDataValue(PlotIndex, 2, 0.f);
+	LandCellRenderer->SetCustomDataValue(PlotIndex, PlotCustomData::Fertility, 0.f);
 	PlotInfo.StateData.RemoveState(EPlotState::Fertilized);
 	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 }
@@ -325,7 +330,8 @@ void UFarmlandComponent::GenerateWeeds(const FIntPoint Coords)
 		
 			FTransform InstanceLocalTransform;
 			InstanceLocalTransform.SetLocation(WeedLocation);
-		
+			InstanceLocalTransform.SetScale3D(FVector::One() * FarmlandConfig->WeedsScale);
+			InstanceLocalTransform.AddToTranslation(FVector(0.f, 0.f, FarmlandConfig->WeedsOffsetZ));
 			WeedsRenderer->AddInstance(InstanceLocalTransform);
 			PlotInfo.WeedsTransform.Add(InstanceLocalTransform);
 		}
@@ -491,7 +497,7 @@ void UFarmlandComponent::PlantCrop(const FIntPoint Coords)
 	FTransform CropTransform = PlotInfo.Transform;
 	CropTransform.AddToTranslation(FarmlandConfig->CropOffset);
 	PlotInfo.CropTransform = CropTransform;
-	UCropBase* Crop = NewObject<UCropBase>();
+	UCropBase* Crop = NewObject<UCropBase>(this);
 	PlotInfo.Crop = Crop;
 	FCropData CropData;
 	CropData.CropID = CropID;
@@ -500,6 +506,10 @@ void UFarmlandComponent::PlantCrop(const FIntPoint Coords)
 	CropData.GrowthSeedTime = CropTableRow->GrowthSeedTime;
 	CropData.GrowthSeedlingTime = CropTableRow->GrowthSeedlingTime;
 	CropData.CropGrowthStage = ECropGrowthStage::Seed;
+	if (PlotInfo.StateData.HasState(EPlotState::Watered))
+	{
+		CropData.CropStateData.RemoveState(ECropState::NeedsWater);
+	}
 	Crop->OnPlantGrowthStageChanged.AddDynamic(this, &ThisClass::OnCropGrowthStageChanged);
 	Crop->InitializeCrop(CropData);
 	OnCropPlantedOrRemoved.Broadcast(Coords);
@@ -1005,22 +1015,22 @@ void UFarmlandComponent::SetCropDisease(FIntPoint Coords, bool bDisease, bool bL
 	UISMTools::GetInstanceIndexByTransform(CropRenderer, PlotInfo.Transform, CropIndex);
 	if (bDisease)
 	{
-		CropRenderer->SetCustomDataValue(CropIndex, 0, 1.f);
+		CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::Disease, 1.f);
 		if (bLeafs)
 		{
-			CropRenderer->SetCustomDataValue(CropIndex, 1, 1.f);
+			CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::IsLeaf, 1.f);
 			PlotInfo.Crop->GetCropDataRef().CropStateData.AddState(ECropState::NeedsWater);
 		}
 		else
 		{
-			CropRenderer->SetCustomDataValue(CropIndex, 1, 0.f);
+			CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::IsLeaf, 0.f);
 			PlotInfo.Crop->GetCropDataRef().CropStateData.AddState(ECropState::NeedsWater);
 		}
 	}
 	else
 	{
-		CropRenderer->SetCustomDataValue(CropIndex, 0, 0.f);
-		CropRenderer->SetCustomDataValue(CropIndex, 1, 0.f);
+		CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::Disease, 0.f);
+		CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::IsLeaf, 0.f);
 		PlotInfo.Crop->GetCropDataRef().CropStateData.RemoveState(ECropState::NeedsWater);
 	}
 	
@@ -1121,13 +1131,13 @@ void UFarmlandComponent::OnCropGrowthStageChanged(FIntPoint Coords, ECropGrowthS
 		const int32 InstanceIndex = NewInstanceHISMComponent->AddInstance(PlotInfo.CropTransform);
 		if (PlotInfo.Crop->GetCropData().CropStateData.HasState(ECropState::Withers))
 		{
-			NewInstanceHISMComponent->SetCustomDataValue(InstanceIndex, 0, 1.f);
-			NewInstanceHISMComponent->SetCustomDataValue(InstanceIndex, 1, 1.f);
+			NewInstanceHISMComponent->SetCustomDataValue(InstanceIndex, CropCustomData::Disease, 1.f);
+			NewInstanceHISMComponent->SetCustomDataValue(InstanceIndex, CropCustomData::IsLeaf, 1.f);
 		}
 		else
 		{
-			NewInstanceHISMComponent->SetCustomDataValue(InstanceIndex, 0, 0.f);
-			NewInstanceHISMComponent->SetCustomDataValue(InstanceIndex, 1, 0.f);
+			NewInstanceHISMComponent->SetCustomDataValue(InstanceIndex, CropCustomData::Disease, 0.f);
+			NewInstanceHISMComponent->SetCustomDataValue(InstanceIndex, CropCustomData::IsLeaf, 0.f);
 		}
 	}
 	

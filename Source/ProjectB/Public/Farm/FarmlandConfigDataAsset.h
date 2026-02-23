@@ -97,6 +97,16 @@ public:
 			  meta = (DisplayName = "地块杂草数量"))
 	int32 WeedNum = 9;
 
+	// 杂草缩放
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Weeds", 
+			  meta = (DisplayName = "杂草缩放"))
+	float WeedsScale = 1.f;
+
+	// 杂草z偏移
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Weeds", 
+			  meta = (DisplayName = "杂草z偏移"))
+	float WeedsOffsetZ = 10.f;
+	
 	// ============== 虫害配置 ==============
 	// 虫害粒子系统
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Pest", 
