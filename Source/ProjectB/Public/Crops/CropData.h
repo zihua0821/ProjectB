@@ -72,6 +72,258 @@ enum class ECropGrowthStage : uint8
 };
 
 /**
+ * 农作物品质
+ */
+UENUM(BlueprintType)
+enum class ECropQuality : uint8
+{
+    Poor      UMETA(DisplayName = "劣质"),
+    Normal    UMETA(DisplayName = "普通"),
+    Good      UMETA(DisplayName = "良好"),
+    Excellent UMETA(DisplayName = "优质")
+};
+
+/**
+ * 品质参数结构（配置最大惩罚/奖励值，以及各项系数）
+ */
+USTRUCT(BlueprintType)
+struct FQualityParams
+{
+    GENERATED_BODY()
+
+    // 基础得分
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float BaseScore = 60.0f;
+
+    // ========== 负面因素最大惩罚值（当占比达到100%时扣分） ==========
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaxWaterDeficitPenalty = 20.0f;      // 缺水最大扣分
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaxOverwaterPenalty = 20.0f;          // 过度浇水最大扣分
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaxFertilizerDeficitPenalty = 15.0f;  // 缺肥最大扣分
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaxOverfertilizePenalty = 25.0f;       // 过度施肥最大扣分
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaxWeedInfestedPenalty = 15.0f;       // 杂草最大扣分
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaxPestInfestedPenalty = 20.0f;       // 虫害最大扣分
+
+    // ========== 正面因素最大奖励值（当占比达到100%时加分） ==========
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaxIdealMoistureReward = 20.0f;       // 理想湿度最大加分
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaxIdealFertilityReward = 20.0f;       // 理想肥力最大加分
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaxNoWeedReward = 10.0f;               // 无杂草最大加分
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaxNoPestReward = 10.0f;               // 无虫害最大加分
+
+    // ========== 事件型奖励/惩罚 ==========
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ReasonableWaterReward = 5.0f;          // 每次合理浇水加分
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ReasonableOverwaterPenalty = 5.0f;     // 每次过度浇水扣分
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ReasonableFertilizeReward = 5.0f;      // 每次合理施肥加分
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FertilizerOverdosePenalty = 15.0f;     // 每次施肥过量扣分
+    
+};
+
+/**
+ * 作物品质数据（基于比例计算负面惩罚）
+ */
+USTRUCT(BlueprintType)
+struct FCropQualityData
+{
+    GENERATED_BODY()
+
+    // 品质参数
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FQualityParams Params;
+    
+    // 当前品质得分
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Score = 60.0f;
+
+    // 品质等级
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ECropQuality Quality = ECropQuality::Normal;
+
+    // ========== 负面因素累计时间（秒） ==========
+    UPROPERTY()
+    float TotalWaterDeficitTime = 0.0f; // 缺水累计时间
+    UPROPERTY()
+    float TotalOverwaterTime = 0.0f; // 过度浇水累计时间
+    UPROPERTY()
+    float TotalFertilizerDeficitTime = 0.0f; // 缺肥累计时间
+    UPROPERTY()
+    float TotalOverfertilizeTime = 0.0f; // 过度施肥累计时间
+    UPROPERTY()
+    float TotalWeedInfestedTime = 0.0f; // 杂草累计时间
+    UPROPERTY()
+    float TotalPestInfestedTime = 0.0f; // 虫害累计时间
+
+    // ========== 正面因素累计时间 ==========
+    UPROPERTY()
+    float TotalIdealMoistureTime = 0.0f;          // 理想湿度累计时间
+    UPROPERTY()
+    float TotalIdealFertilityTime = 0.0f;         // 理想肥力累计时间
+    UPROPERTY()
+    float TotalNoWeedTime = 0.0f;                  // 无杂草累计时间
+    UPROPERTY()
+    float TotalNoPestTime = 0.0f;                  // 无虫害累计时间
+
+    // ========== 事件计数 ==========
+    UPROPERTY()
+    int32 ReasonableWaterCount = 0;                // 合理浇水次数
+    UPROPERTY()
+    int32 ReasonableFertilizeCount = 0;           // 合理施肥次数
+    UPROPERTY()
+    int32 FertilizerOverdoseCount = 0;            // 施肥过量次数
+    UPROPERTY()
+    int32 ReasonableOverwaterCount = 0;           // 过度浇水次数
+
+    // ========== 作物生命周期总时间（用于比例计算） ==========
+    UPROPERTY()
+    float TotalExpectedGrowthTime = 0.0f;
+
+    FCropQualityData(const FQualityParams& InParams = FQualityParams()): Params(InParams){}
+
+    // 重置所有数据（用于作物初始化）
+    void Reset()
+    {
+        Score = 60.0f;
+        Quality = ECropQuality::Normal;
+        TotalWaterDeficitTime = 0.0f;
+        TotalOverwaterTime = 0.0f;
+        TotalFertilizerDeficitTime = 0.0f;
+        TotalOverfertilizeTime = 0.0f;
+        TotalWeedInfestedTime = 0.0f;
+        TotalPestInfestedTime = 0.0f;
+        TotalIdealMoistureTime = 0.0f;
+        TotalIdealFertilityTime = 0.0f;
+        TotalNoWeedTime = 0.0f;
+        TotalNoPestTime = 0.0f;
+        ReasonableWaterCount = 0;
+        ReasonableFertilizeCount = 0;
+        FertilizerOverdoseCount = 0;
+        ReasonableOverwaterCount = 0;
+        TotalExpectedGrowthTime = 0;
+    }
+
+    // ========== 负面因素累加 ==========
+    void AddWaterDeficitTime(float DeltaTime) { TotalWaterDeficitTime += DeltaTime; }
+    void AddOverwaterTime(float DeltaTime) { TotalOverwaterTime += DeltaTime; }
+    void AddFertilizerDeficitTime(float DeltaTime) { TotalFertilizerDeficitTime += DeltaTime; }
+    void AddOverfertilizeTime(float DeltaTime) { TotalOverfertilizeTime += DeltaTime; }
+    void AddWeedInfestedTime(float DeltaTime) { TotalWeedInfestedTime += DeltaTime; }
+    void AddPestInfestedTime(float DeltaTime) { TotalPestInfestedTime += DeltaTime; }
+
+    // ========== 正面因素累加 ==========
+    void AddIdealMoistureTime(float DeltaTime) { TotalIdealMoistureTime += DeltaTime; }
+    void AddIdealFertilityTime(float DeltaTime) { TotalIdealFertilityTime += DeltaTime; }
+    void AddNoWeedTime(float DeltaTime) { TotalNoWeedTime += DeltaTime; }
+    void AddNoPestTime(float DeltaTime) { TotalNoPestTime += DeltaTime; }
+
+    // 记录浇水事件（bIsReasonable 表示是否在需要水的时候浇水）
+    void RecordWatering(bool bIsReasonable)
+    {
+        if (bIsReasonable)
+        {
+            ReasonableWaterCount++;
+        }
+        else
+        {
+            ReasonableOverwaterCount++;
+        }
+    }
+
+    // 记录施肥事件
+    void RecordFertilize(bool bIsReasonable)
+    {
+        if (bIsReasonable)
+        {
+            ReasonableFertilizeCount++;
+        }
+        else
+        {
+            FertilizerOverdoseCount++;
+        }
+    }
+
+    // 统一重新计算得分（基于当前累计数据和参数）
+    void UpdateScore()
+    {
+        if (TotalExpectedGrowthTime <= 0.0f)
+        {
+            Score = Params.BaseScore;
+            return;
+        }
+
+        // 计算各负面因素的占比（限制最大为1.0）
+        float WaterDeficitRatio = FMath::Min(TotalWaterDeficitTime / TotalExpectedGrowthTime, 1.0f);
+        float OverwaterRatio = FMath::Min(TotalOverwaterTime / TotalExpectedGrowthTime, 1.0f);
+        float FertilizerDeficitRatio = FMath::Min(TotalFertilizerDeficitTime / TotalExpectedGrowthTime, 1.0f);
+        float OverfertilizeRatio = FMath::Min(TotalOverfertilizeTime / TotalExpectedGrowthTime, 1.0f);
+        float WeedInfestedRatio = FMath::Min(TotalWeedInfestedTime / TotalExpectedGrowthTime, 1.0f);
+        float PestInfestedRatio = FMath::Min(TotalPestInfestedTime / TotalExpectedGrowthTime, 1.0f);
+
+        // 计算正面因素的占比
+        float IdealMoistureRatio = FMath::Min(TotalIdealMoistureTime / TotalExpectedGrowthTime, 1.0f);
+        float IdealFertilityRatio = FMath::Min(TotalIdealFertilityTime / TotalExpectedGrowthTime, 1.0f);
+        float NoWeedRatio = FMath::Min(TotalNoWeedTime / TotalExpectedGrowthTime, 1.0f);
+        float NoPestRatio = FMath::Min(TotalNoPestTime / TotalExpectedGrowthTime, 1.0f);
+
+        Score = Params.BaseScore
+            - WaterDeficitRatio * Params.MaxWaterDeficitPenalty
+            - OverwaterRatio * Params.MaxOverwaterPenalty
+            - FertilizerDeficitRatio * Params.MaxFertilizerDeficitPenalty
+            - OverfertilizeRatio * Params.MaxOverfertilizePenalty
+            - WeedInfestedRatio * Params.MaxWeedInfestedPenalty
+            - PestInfestedRatio * Params.MaxPestInfestedPenalty
+            + IdealMoistureRatio * Params.MaxIdealMoistureReward
+            + IdealFertilityRatio * Params.MaxIdealFertilityReward
+            + NoWeedRatio * Params.MaxNoWeedReward
+            + NoPestRatio * Params.MaxNoPestReward
+            + ReasonableWaterCount * Params.ReasonableWaterReward
+            + ReasonableFertilizeCount * Params.ReasonableFertilizeReward
+            - FertilizerOverdoseCount * Params.FertilizerOverdosePenalty
+            - ReasonableOverwaterCount * Params.ReasonableOverwaterPenalty;
+
+        ClampScore();
+    }
+
+    // 根据当前得分计算最终品质等级
+    ECropQuality CalculateFinalQuality() const
+    {
+        if (Score >= 90.0f)
+            return ECropQuality::Excellent;
+        if (Score >= 70.0f)
+            return ECropQuality::Good;
+        if (Score >= 50.0f)
+            return ECropQuality::Normal;
+        return ECropQuality::Poor;
+    }
+
+    // 获取品质等级（会自动计算得分）
+    ECropQuality GetQuality(const float InTotalExpectedGrowthTime)
+    {
+        TotalExpectedGrowthTime = InTotalExpectedGrowthTime;
+        UpdateScore();
+        Quality = CalculateFinalQuality();
+        return Quality;
+    }
+
+private:
+    void ClampScore()
+    {
+        Score = FMath::Clamp(Score, 0.0f, 200.0f); // 允许略高于100
+    }
+};
+
+/**
  * 地块状态位掩码枚举
  * 使用位操作可以同时拥有多个状态
  */
@@ -186,23 +438,24 @@ struct FPlotStateData
  * 农作物状态位掩码枚举
  * 使用位操作可以同时拥有多个状态
  */
-UENUM(BlueprintType, meta = (Bitflags, UseEnumValuesAsMaskValuesInEditor = "true"))
-enum class ECropState : uint8
+enum class ECropState : uint32
 {
-    None               = 0      UMETA(DisplayName = "无状态"),        // 0000 0000
+    None            = 0         UMETA(DisplayName = "无状态"),        // 0000 0000
 
     // 收获相关
-    ReadyForHarvest    = 1 << 0 UMETA(DisplayName = "可收获"),        // 0000 0001
+    ReadyForHarvest = 1U << 0   UMETA(DisplayName = "可收获"),        // 0000 0001
     
     // 健康/营养状态
-    NeedsWater         = 1 << 2 UMETA(DisplayName = "需要浇水"),      // 0000 0100
-    NeedsFertilizer    = 1 << 3 UMETA(DisplayName = "需要施肥"),      // 0000 1000
-    OverWatered        = 1 << 4 UMETA(DisplayName = "浇水过多"),      // 0001 0000
-    NutrientBurn       = 1 << 5 UMETA(DisplayName = "肥料烧伤"),      // 0010 0000
-    Withers            = 1 << 6 UMETA(DisplayName = "枯萎"),          //0100 0000
+    NeedsWater      = 1U << 1   UMETA(DisplayName = "需要浇水"),      // 0000 0010
+    NeedsFertilizer = 1U << 2   UMETA(DisplayName = "需要施肥"),      // 0000 0100
+    OverWatered     = 1U << 3   UMETA(DisplayName = "浇水过多"),      // 0000 1000
+    NutrientBurn    = 1U << 4   UMETA(DisplayName = "肥料烧伤"),      // 0001 0000
+    Withers         = 1U << 5   UMETA(DisplayName = "枯萎"),          // 0010 0000
     
     // 病害状态
-    Disease            = 1 << 7 UMETA(DisplayName = "病害"),          // 1000 0000
+    PestInfested    = 1U << 6   UMETA(DisplayName = "有虫害"),        // 0100 0000
+    WeedInfested    = 1U << 7   UMETA(DisplayName = "有杂草"),        // 1000 0000
+    Disease         = 1U << 8   UMETA(DisplayName = "病害"),          // 1 0000 0000
 };
 ENUM_CLASS_FLAGS(ECropState); 
 
@@ -214,9 +467,8 @@ struct FCropStateData
 {
     GENERATED_BODY()
 
-    // 使用 uint8 存储状态位（保证存档大小固定）
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CropState")
-    uint8 StateFlags = static_cast<uint8>(ECropState::NeedsWater);
+    // 使用 uint32 存储状态位（保证存档大小固定）
+    uint32 StateFlags = static_cast<uint32>(ECropState::NeedsWater);
 
     // 获取当前状态作为枚举值（用于需要直接操作枚举的场景）
     ECropState GetAsEnum() const
@@ -227,43 +479,43 @@ struct FCropStateData
     // 从枚举值设置状态
     void SetFromEnum(ECropState NewState)
     {
-        StateFlags = static_cast<uint8>(NewState);
+        StateFlags = static_cast<uint32>(NewState);
     }
     
     // 重置为默认状态
     void Reset()
     {
-        StateFlags = static_cast<uint8>(ECropState::NeedsWater);
+        StateFlags = static_cast<uint32>(ECropState::NeedsWater);
     }
 
     // 是否为空状态
     bool IsEmpty() const
     {
-        return StateFlags == static_cast<uint8>(ECropState::None);
+        return StateFlags == static_cast<uint32>(ECropState::None);
     }
 
     // 检查是否包含指定状态
     bool HasState(ECropState State) const
     {
-        return (StateFlags & static_cast<uint8>(State)) != 0;
+        return (StateFlags & static_cast<uint32>(State)) != 0;
     }
 
     // 添加一个或多个状态
     void AddState(ECropState State)
     {
-        StateFlags |= static_cast<uint8>(State);
+        StateFlags |= static_cast<uint32>(State);
     }
 
     // 移除指定状态
     void RemoveState(ECropState State)
     {
-        StateFlags &= ~static_cast<uint8>(State);
+        StateFlags &= ~static_cast<uint32>(State);
     }
 
     // 切换指定状态
     void ToggleState(ECropState State)
     {
-        StateFlags ^= static_cast<uint8>(State);
+        StateFlags ^= static_cast<uint32>(State);
     }
 
     // 转换为可读字符串
@@ -293,7 +545,7 @@ struct FCropStateData
     {
         // 健康定义：没有枯萎、病害、浇水过多、肥料烧伤
         ECropState NegativeMask = ECropState::NeedsWater | ECropState::NeedsFertilizer | ECropState::OverWatered | ECropState::NutrientBurn | ECropState::Withers | ECropState::Disease;
-        return (StateFlags & static_cast<uint8>(NegativeMask)) == 0;
+        return (StateFlags & static_cast<uint32>(NegativeMask)) == 0;
     }
 };
 
@@ -330,7 +582,6 @@ struct FCropMeshVariant
     TObjectPtr<UStaticMesh> HarvestedMesh = nullptr;
 
 };
-
 /**
  *  FarmLand 地块数据结构
  */
@@ -347,6 +598,14 @@ struct FFarmLandPlotInfo
     // 地块状态
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLand|PlotInfo")
     FPlotStateData StateData;
+
+    // 地块水分（百分比）
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLand|PlotInfo")
+    float MoisturePercentage = 0.0f;
+
+    // 地块肥力（百分比）
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLand|PlotInfo")
+    float FertilityPercentage = 0.0f;
 
     // 杂草Transform数组
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLand|PlotInfo")
@@ -470,6 +729,10 @@ struct FCropData
     // 农作物当前生长阶段
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     ECropGrowthStage CropGrowthStage = ECropGrowthStage::Seed;
+
+    // 农作物品质
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FCropQualityData CropQualityData;
     
     // 种子-幼苗生长时间
     UPROPERTY(EditAnywhere, BlueprintReadWrite)

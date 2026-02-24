@@ -109,6 +109,8 @@ void UFarmlandComponent::RemoveLand(const FIntPoint Coords)
 	}
 	
 	PlotInfo.StateData.Reset();
+	PlotInfo.MoisturePercentage = 0.f;
+	PlotInfo.FertilityPercentage = 0.f;
 	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 }
 
@@ -163,6 +165,7 @@ void UFarmlandComponent::WetLand(const FIntPoint Coords)
 	}
 	LandCellRenderer->SetCustomDataValue(PlotIndex, PlotCustomData::Wetness, 1.f);
 	PlotInfo.StateData.AddState(EPlotState::Watered);
+	PlotInfo.MoisturePercentage = FMath::Clamp(PlotInfo.MoisturePercentage + 1.f, 0.f, 2.f);
 	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 
 	if (PlotInfo.Crop)
@@ -226,6 +229,7 @@ void UFarmlandComponent::FertilizeLand(const FIntPoint Coords)
 	}
 	LandCellRenderer->SetCustomDataValue(PlotIndex, PlotCustomData::Fertility, 1.f);
 	PlotInfo.StateData.AddState(EPlotState::Fertilized);
+	PlotInfo.FertilityPercentage = FMath::Clamp(PlotInfo.FertilityPercentage + 1.f, 0.f, 2.f);
 	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 }
 
@@ -256,6 +260,11 @@ void UFarmlandComponent::ClearFertilize(const FIntPoint Coords)
 	LandCellRenderer->SetCustomDataValue(PlotIndex, PlotCustomData::Fertility, 0.f);
 	PlotInfo.StateData.RemoveState(EPlotState::Fertilized);
 	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
+
+	if (PlotInfo.Crop)
+	{
+		PlotInfo.Crop->FertilizeCrop();
+	}
 }
 
 void UFarmlandComponent::GenerateWeeds(const FIntPoint Coords)
@@ -460,6 +469,7 @@ void UFarmlandComponent::RemoveCrop(FIntPoint Coords)
 	}
 	// 清除作物对象
 	PlotInfo.Crop->OnPlantGrowthStageChanged.RemoveDynamic(this, &ThisClass::OnCropGrowthStageChanged);
+	PlotInfo.Crop->OnCropGrownThisTime.Unbind();
 	PlotInfo.Crop = nullptr;
 	PlotInfo.CropMeshVariant = FCropMeshVariant();
 	PlotInfo.CropNumCustomDataFloats = -1;
@@ -510,7 +520,12 @@ void UFarmlandComponent::PlantCrop(const FIntPoint Coords)
 	{
 		CropData.CropStateData.RemoveState(ECropState::NeedsWater);
 	}
+	if (PlotInfo.StateData.HasState(EPlotState::Fertilized))
+	{
+		CropData.CropStateData.RemoveState(ECropState::NeedsFertilizer);
+	}
 	Crop->OnPlantGrowthStageChanged.AddDynamic(this, &ThisClass::OnCropGrowthStageChanged);
+	Crop->OnCropGrownThisTime.BindDynamic(this, &ThisClass::OnCropGrownThisTime);
 	Crop->InitializeCrop(CropData);
 	OnCropPlantedOrRemoved.Broadcast(Coords);
 }
@@ -1152,6 +1167,45 @@ void UFarmlandComponent::OnCropGrowthStageChanged(FIntPoint Coords, ECropGrowthS
 void UFarmlandComponent::OnEditModeChanged(EEditMode NewEditMode)
 {
 	UpdateOutlineColor();
+}
+
+void UFarmlandComponent::OnCropGrownThisTime(FIntPoint Coords, float MoistureCost, float FertilityCost)
+{
+	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(Coords);
+	PlotInfo.MoisturePercentage = FMath::Clamp(PlotInfo.MoisturePercentage - MoistureCost, 0.f, 2.f);
+	PlotInfo.FertilityPercentage = FMath::Clamp(PlotInfo.FertilityPercentage - FertilityCost, 0.f, 2.f);
+
+	// 判断水分状态
+	if (PlotInfo.MoisturePercentage >= 0.7f && PlotInfo.MoisturePercentage <= 1.2f)
+	{
+		UE_LOG(LogTemp, Log, TEXT("Moisture level is normal: %.2f"), PlotInfo.MoisturePercentage);
+	}
+	else if (PlotInfo.MoisturePercentage > 1.2f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Moisture level is excessive: %.2f"), PlotInfo.MoisturePercentage);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Moisture level is insufficient: %.2f"), PlotInfo.MoisturePercentage);
+		PlotInfo.StateData.RemoveState(EPlotState::Watered);
+		OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
+	}
+
+	// 判断肥力状态
+	if (PlotInfo.FertilityPercentage >= 0.7f && PlotInfo.FertilityPercentage <= 1.2f)
+	{
+		UE_LOG(LogTemp, Log, TEXT("Fertility level is normal: %.2f"), PlotInfo.FertilityPercentage);
+	}
+	else if (PlotInfo.FertilityPercentage > 1.2f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Fertility level is excessive: %.2f"), PlotInfo.FertilityPercentage);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Fertility level is insufficient: %.2f"), PlotInfo.FertilityPercentage);
+		PlotInfo.StateData.RemoveState(EPlotState::Fertilized);
+		OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
+	}
 }
 
 void UFarmlandComponent::TickComponent(const float DeltaTime, const ELevelTick TickType,

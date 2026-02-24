@@ -206,6 +206,9 @@ private:
 
 	UFUNCTION()
 	void OnEditModeChanged(EEditMode NewEditMode);
+
+	UFUNCTION()
+	void OnCropGrownThisTime(FIntPoint Coords, float MoistureCost, float FertilityCost);
 public:
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType,
