@@ -3,12 +3,19 @@
 
 #include "ProjectB/Public/Crops/CropBase.h"
 
+#include "Farm/FarmlandComponent.h"
+
 UCropBase::UCropBase(): CropData()
 {
 }
 
-void UCropBase::InitializeCrop(FCropData& InCropData)
+void UCropBase::InitializeCrop(UFarmlandComponent* InComponent, FCropData& InCropData)
 {
+	OwnerComponent = InComponent;
+	if (OwnerComponent.IsValid())
+	{
+		OwnerComponent->OnPlotStateChanged.AddDynamic(this, &ThisClass::HandlePlotStateChanged);
+	}
 	CropData = InCropData;
 	OnPlantGrowthStageChanged.Broadcast(CropData.Coords, CropData.CropGrowthStage);
 	OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
@@ -61,7 +68,11 @@ void UCropBase::UpdateCropQuality(float DeltaTime)
 
 void UCropBase::UpdateCrop(float DeltaTime)
 {
-	if (CropData.CropGrowthStage == ECropGrowthStage::Mature || CropData.CropGrowthStage == ECropGrowthStage::Harvested)
+	const bool bIsCropNotGrowth = CropData.CropGrowthStage == ECropGrowthStage::Mature ||
+								  CropData.CropGrowthStage == ECropGrowthStage::Harvested ||
+								  (CropData.CropGrowthStage == ECropGrowthStage::Seed && CropData.CropStateData.HasState(ECropState::NeedsWater)) ||
+								  (CropData.CropGrowthStage == ECropGrowthStage::Seedling && CropData.CropStateData.HasState(ECropState::NeedsFertilizer));
+	if (bIsCropNotGrowth)
 	{
 		return;
 	}
@@ -70,21 +81,15 @@ void UCropBase::UpdateCrop(float DeltaTime)
 	CropData.TotalGrowthTime += DeltaTime;
 	switch (CropData.CropGrowthStage)
 	{
-	case ECropGrowthStage::None:
-		CropData.CurrentStageGrowthTime = CropData.TotalGrowthTime = 0.f;
-		break;
 	case ECropGrowthStage::Seed:
 		CropData.CurrentStageGrowthTime = CropData.TotalGrowthTime;
 		break;
 	case ECropGrowthStage::Seedling:
 		CropData.CurrentStageGrowthTime = CropData.TotalGrowthTime - CropData.GrowthSeedTime;
 		break;
-	case ECropGrowthStage::Mature:
-		CropData.CurrentStageGrowthTime = CropData.TotalGrowthTime - CropData.GrowthSeedTime - CropData.GrowthSeedlingTime;
-		break;
-	case ECropGrowthStage::Harvested:
-		CropData.CurrentStageGrowthTime = CropData.TotalGrowthTime - CropData.GrowthSeedTime - CropData.GrowthSeedlingTime;
-		break;
+	default:
+		UE_LOG(LogTemp, Error, TEXT("Crop is in Wrong CropGrowthStage!"))
+		return;
 	}
 	// 判断是否需要转换成下一阶段
 	if (CropData.CropGrowthStage == ECropGrowthStage::Seed && CropData.CurrentStageGrowthTime >= CropData.GrowthSeedTime) // 种子-发芽
@@ -104,7 +109,7 @@ void UCropBase::UpdateCrop(float DeltaTime)
 
 	if (OnCropGrownThisTime.IsBound())
 	{
-		OnCropGrownThisTime.Execute(CropData.Coords, 0.01f, 0.02f);
+		OnCropGrownThisTime.Execute(CropData.Coords, 0.001f, 0.002f);
 	}
 }
 
@@ -112,53 +117,54 @@ void UCropBase::ProcessOfflineGrowth(const FTimespan& OfflineDuration)
 {
 }
 
-bool UCropBase::WaterCrop(float Amount)
+void UCropBase::HandleCropMoisture(const float PlotMoisture)
 {
-	if (CropData.CropStateData.HasState(ECropState::NeedsWater))
+	const FCropStateData PreCropState = CropData.CropStateData;
+	// 判断水分状态
+	if (PlotMoisture >= 0.2f && PlotMoisture <= 0.8f)// 正常
 	{
 		CropData.CropStateData.RemoveState(ECropState::NeedsWater);
-		CropData.CropQualityData.RecordWatering(true);
-		OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
-		OnCropCropQualityChanged.Broadcast(CropData.Coords, CropData.CropQualityData.GetQuality(CropData.TotalGrowthTime));
-		return true;
+		CropData.CropStateData.RemoveState(ECropState::OverWatered);
 	}
-	if (!CropData.CropStateData.HasState(ECropState::OverWatered))
+	else if (PlotMoisture > 0.8f)// 过高
 	{
 		CropData.CropStateData.RemoveState(ECropState::NeedsWater);
 		CropData.CropStateData.AddState(ECropState::OverWatered);
-		CropData.CropQualityData.RecordWatering(false);
-		OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
-		OnCropCropQualityChanged.Broadcast(CropData.Coords, CropData.CropQualityData.GetQuality(CropData.TotalGrowthTime));
-		return true;
 	}
-	return false;
+	else// 过低
+	{
+		CropData.CropStateData.RemoveState(ECropState::OverWatered);
+		CropData.CropStateData.AddState(ECropState::NeedsWater);
+	}
+	if (PreCropState != CropData.CropStateData)
+	{
+		OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
+	}
 }
 
-bool UCropBase::FertilizeCrop()
+void UCropBase::HandleCropFertility(const float PlotFertility)
 {
-	if (CropData.CropStateData.HasState(ECropState::NeedsFertilizer))
+	const FCropStateData PreCropState = CropData.CropStateData;
+	// 判断肥力状态
+	if (PlotFertility >= 0.2f && PlotFertility <= 0.8f)// 正常
 	{
 		CropData.CropStateData.RemoveState(ECropState::NeedsFertilizer);
-		CropData.CropQualityData.RecordFertilize(true);
-		OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
-		OnCropCropQualityChanged.Broadcast(CropData.Coords, CropData.CropQualityData.GetQuality(CropData.TotalGrowthTime));
-		return true;
+		CropData.CropStateData.RemoveState(ECropState::NutrientBurn);
 	}
-	if (!CropData.CropStateData.HasState(ECropState::NutrientBurn))
+	else if (PlotFertility > 0.8f)// 过高
 	{
 		CropData.CropStateData.RemoveState(ECropState::NeedsFertilizer);
 		CropData.CropStateData.AddState(ECropState::NutrientBurn);
-		CropData.CropQualityData.RecordFertilize(false);
-		OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
-		OnCropCropQualityChanged.Broadcast(CropData.Coords, CropData.CropQualityData.GetQuality(CropData.TotalGrowthTime));
-		return true;
 	}
-	return false;
-}
-
-bool UCropBase::RemovePests()
-{
-	return true;
+	else// 过低
+	{
+		CropData.CropStateData.RemoveState(ECropState::NutrientBurn);
+		CropData.CropStateData.AddState(ECropState::NeedsFertilizer);
+	}
+	if (PreCropState != CropData.CropStateData)
+	{
+		OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
+	}
 }
 
 void UCropBase::HarvestCrop()
@@ -172,4 +178,30 @@ void UCropBase::HarvestCrop()
 	CropData.CropStateData.RemoveState(ECropState::ReadyForHarvest);
 	OnPlantGrowthStageChanged.Broadcast(CropData.Coords, CropData.CropGrowthStage);
 	OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
+}
+
+void UCropBase::BeginDestroy()
+{
+	if (OwnerComponent.IsValid())
+	{
+		OwnerComponent->OnPlotStateChanged.RemoveAll(this);
+	}
+	UObject::BeginDestroy();
+}
+
+void UCropBase::HandlePlotStateChanged(FIntPoint Coords, FPlotStateData NewPlotState)
+{
+	if (CropData.Coords != Coords)
+	{
+		UE_LOG(LogTemp, Error, TEXT("Crop is not in the same plot!"))
+		return;
+	}
+	if (!OwnerComponent.IsValid())
+	{
+		UE_LOG(LogTemp, Error, TEXT("Crop owner component is invalid!"))
+		return;
+	}
+	const FFarmLandPlotInfo& PlotInfo = OwnerComponent->GetPlotInfo(Coords);
+	HandleCropMoisture(PlotInfo.MoisturePercentage);
+	HandleCropFertility(PlotInfo.FertilityPercentage);
 }

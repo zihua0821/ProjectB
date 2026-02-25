@@ -432,6 +432,18 @@ struct FPlotStateData
         }
         return Result;
     }
+
+    // 重载 == 操作符
+    bool operator==(const FPlotStateData& Other) const
+    {
+        return StateFlags == Other.StateFlags;
+    }
+
+    // 重载 != 操作符
+    bool operator!=(const FPlotStateData& Other) const
+    {
+        return !(*this == Other);
+    }
 };
 
 /**
@@ -468,7 +480,7 @@ struct FCropStateData
     GENERATED_BODY()
 
     // 使用 uint32 存储状态位（保证存档大小固定）
-    uint32 StateFlags = static_cast<uint32>(ECropState::NeedsWater);
+    uint32 StateFlags = static_cast<uint32>(ECropState::NeedsWater | ECropState::NeedsFertilizer);
 
     // 获取当前状态作为枚举值（用于需要直接操作枚举的场景）
     ECropState GetAsEnum() const
@@ -485,7 +497,7 @@ struct FCropStateData
     // 重置为默认状态
     void Reset()
     {
-        StateFlags = static_cast<uint32>(ECropState::NeedsWater);
+        StateFlags = static_cast<uint32>(ECropState::NeedsWater | ECropState::NeedsFertilizer);
     }
 
     // 是否为空状态
@@ -546,6 +558,18 @@ struct FCropStateData
         // 健康定义：没有枯萎、病害、浇水过多、肥料烧伤
         ECropState NegativeMask = ECropState::NeedsWater | ECropState::NeedsFertilizer | ECropState::OverWatered | ECropState::NutrientBurn | ECropState::Withers | ECropState::Disease;
         return (StateFlags & static_cast<uint32>(NegativeMask)) == 0;
+    }
+
+    // 重载 == 操作符
+    bool operator==(const FCropStateData& Other) const
+    {
+        return StateFlags == Other.StateFlags;
+    }
+
+    // 重载 != 操作符
+    bool operator!=(const FCropStateData& Other) const
+    {
+        return !(*this == Other);
     }
 };
 

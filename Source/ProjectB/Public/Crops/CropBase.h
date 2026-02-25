@@ -7,7 +7,9 @@
 #include "CropData.h"
 #include "CropBase.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlantGrowthStageChanged, FIntPoint, Coords, ECropGrowthStage, NewGrowthStage);
+class UFarmlandComponent;
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlantGrowthStageChanged, FIntPoint, Coords, ECropGrowthStage,
+                                             NewGrowthStage);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnCropStateChanged, FIntPoint, Coords, FCropStateData, NewCropState);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnCropCropQualityChanged, FIntPoint, Coords, ECropQuality, NewCropQuality);
 
@@ -44,7 +46,7 @@ public:
 	
 	// 初始化农作物
 	UFUNCTION(BlueprintCallable, Category = "Crop|Initialization")
-	virtual void InitializeCrop(FCropData& InCropData);
+	virtual void InitializeCrop(UFarmlandComponent* InComponent, FCropData& InCropData);
 
 	// 更新农作物状态（每帧/每tick调用）
 	UFUNCTION(BlueprintCallable, Category = "Crop|Update")
@@ -58,26 +60,33 @@ public:
 	FCropData GetCropData() const { return CropData;}
 	FCropData& GetCropDataRef() { return CropData;}
 	// ==================== 操作接口 ====================
-	// 浇水
+
+	// 处理作物水份
 	UFUNCTION(BlueprintCallable, Category = "Crop|Actions")
-	virtual bool WaterCrop(float Amount = 100.0f);
-    
-	// 施肥
+	virtual void HandleCropMoisture(float PlotMoisture);
+
+	// 处理作物肥力
 	UFUNCTION(BlueprintCallable, Category = "Crop|Actions")
-	virtual bool FertilizeCrop();
-    
-	// 除虫
-	UFUNCTION(BlueprintCallable, Category = "Crop|Actions")
-	virtual bool RemovePests();
-    
+	virtual void HandleCropFertility(float PlotFertility);
+
 	// 收获
 	UFUNCTION(BlueprintCallable, Category = "Crop|Actions")
 	virtual void HarvestCrop();
 
+protected:
+	virtual void BeginDestroy() override;
 private:
+	UPROPERTY()
+	TWeakObjectPtr<UFarmlandComponent> OwnerComponent;
+	
 	UPROPERTY()
 	FCropData CropData;
 
 	void UpdateCropQuality(float DeltaTime);
+	
+	UFUNCTION()
+	void HandlePlotStateChanged(FIntPoint Coords, FPlotStateData NewPlotState);
 
 };
+
+

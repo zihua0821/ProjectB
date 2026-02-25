@@ -17,7 +17,7 @@
 UFarmlandComponent::UFarmlandComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
-	// PrimaryComponentTick.TickInterval = 0.1f; 
+	PrimaryComponentTick.TickInterval = 0.1f; 
 	
 }
 
@@ -165,13 +165,8 @@ void UFarmlandComponent::WetLand(const FIntPoint Coords)
 	}
 	LandCellRenderer->SetCustomDataValue(PlotIndex, PlotCustomData::Wetness, 1.f);
 	PlotInfo.StateData.AddState(EPlotState::Watered);
-	PlotInfo.MoisturePercentage = FMath::Clamp(PlotInfo.MoisturePercentage + 1.f, 0.f, 2.f);
+	PlotInfo.MoisturePercentage = FMath::Clamp(PlotInfo.MoisturePercentage + 0.8f, 0.f, 2.f);
 	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
-
-	if (PlotInfo.Crop)
-	{
-		PlotInfo.Crop->WaterCrop();
-	}
 }
 
 void UFarmlandComponent::LandDried(const FIntPoint Coords)
@@ -229,7 +224,7 @@ void UFarmlandComponent::FertilizeLand(const FIntPoint Coords)
 	}
 	LandCellRenderer->SetCustomDataValue(PlotIndex, PlotCustomData::Fertility, 1.f);
 	PlotInfo.StateData.AddState(EPlotState::Fertilized);
-	PlotInfo.FertilityPercentage = FMath::Clamp(PlotInfo.FertilityPercentage + 1.f, 0.f, 2.f);
+	PlotInfo.FertilityPercentage = FMath::Clamp(PlotInfo.FertilityPercentage + 0.8f, 0.f, 2.f);
 	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 }
 
@@ -260,11 +255,6 @@ void UFarmlandComponent::ClearFertilize(const FIntPoint Coords)
 	LandCellRenderer->SetCustomDataValue(PlotIndex, PlotCustomData::Fertility, 0.f);
 	PlotInfo.StateData.RemoveState(EPlotState::Fertilized);
 	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
-
-	if (PlotInfo.Crop)
-	{
-		PlotInfo.Crop->FertilizeCrop();
-	}
 }
 
 void UFarmlandComponent::GenerateWeeds(const FIntPoint Coords)
@@ -468,7 +458,7 @@ void UFarmlandComponent::RemoveCrop(FIntPoint Coords)
 		}
 	}
 	// 清除作物对象
-	PlotInfo.Crop->OnPlantGrowthStageChanged.RemoveDynamic(this, &ThisClass::OnCropGrowthStageChanged);
+	PlotInfo.Crop->OnPlantGrowthStageChanged.RemoveAll(this);
 	PlotInfo.Crop->OnCropGrownThisTime.Unbind();
 	PlotInfo.Crop = nullptr;
 	PlotInfo.CropMeshVariant = FCropMeshVariant();
@@ -526,7 +516,7 @@ void UFarmlandComponent::PlantCrop(const FIntPoint Coords)
 	}
 	Crop->OnPlantGrowthStageChanged.AddDynamic(this, &ThisClass::OnCropGrowthStageChanged);
 	Crop->OnCropGrownThisTime.BindDynamic(this, &ThisClass::OnCropGrownThisTime);
-	Crop->InitializeCrop(CropData);
+	Crop->InitializeCrop(this, CropData);
 	OnCropPlantedOrRemoved.Broadcast(Coords);
 }
 
@@ -956,7 +946,7 @@ void UFarmlandComponent::InitializeLandCells()
 				UCropBase* Crop = NewObject<UCropBase>();
 				PlotInfo.Crop = Crop;
 				Crop->OnPlantGrowthStageChanged.AddDynamic(this, &ThisClass::OnCropGrowthStageChanged);
-				Crop->InitializeCrop(PlotSaveGameDataItem.CropData);
+				Crop->InitializeCrop(this, PlotSaveGameDataItem.CropData);
 			}
 		}
 		UE_LOG(LogTemp, Log, TEXT("Initialized %d land cells for %dx%d grid by PlotSaveGameData"), 
@@ -1172,39 +1162,45 @@ void UFarmlandComponent::OnEditModeChanged(EEditMode NewEditMode)
 void UFarmlandComponent::OnCropGrownThisTime(FIntPoint Coords, float MoistureCost, float FertilityCost)
 {
 	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(Coords);
-	PlotInfo.MoisturePercentage = FMath::Clamp(PlotInfo.MoisturePercentage - MoistureCost, 0.f, 2.f);
-	PlotInfo.FertilityPercentage = FMath::Clamp(PlotInfo.FertilityPercentage - FertilityCost, 0.f, 2.f);
+	PlotInfo.MoisturePercentage = FMath::Clamp(PlotInfo.MoisturePercentage - MoistureCost, 0.f, 1.f);
+	PlotInfo.FertilityPercentage = FMath::Clamp(PlotInfo.FertilityPercentage - FertilityCost, 0.f, 1.f);
 
+	UCropBase* Crop = PlotInfo.Crop;
+	if (Crop == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("Crop is null"));
+		return;
+	}
+	Crop->HandleCropMoisture(PlotInfo.MoisturePercentage);
+	Crop->HandleCropFertility(PlotInfo.FertilityPercentage);
 	// 判断水分状态
-	if (PlotInfo.MoisturePercentage >= 0.7f && PlotInfo.MoisturePercentage <= 1.2f)
+	if (PlotInfo.MoisturePercentage >= 0.2f && PlotInfo.MoisturePercentage <= 0.8f)// 正常
 	{
 		UE_LOG(LogTemp, Log, TEXT("Moisture level is normal: %.2f"), PlotInfo.MoisturePercentage);
 	}
-	else if (PlotInfo.MoisturePercentage > 1.2f)
+	else if (PlotInfo.MoisturePercentage > 0.8f)// 过高
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Moisture level is excessive: %.2f"), PlotInfo.MoisturePercentage);
+		UE_LOG(LogTemp, Log, TEXT("Moisture level is excessive: %.2f"), PlotInfo.MoisturePercentage);
 	}
-	else
+	else// 过低
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Moisture level is insufficient: %.2f"), PlotInfo.MoisturePercentage);
-		PlotInfo.StateData.RemoveState(EPlotState::Watered);
-		OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
+		UE_LOG(LogTemp, Log, TEXT("Moisture level is insufficient: %.2f"), PlotInfo.MoisturePercentage);
+		LandDried(Coords);
 	}
 
 	// 判断肥力状态
-	if (PlotInfo.FertilityPercentage >= 0.7f && PlotInfo.FertilityPercentage <= 1.2f)
+	if (PlotInfo.FertilityPercentage >= 0.2f && PlotInfo.FertilityPercentage <= 0.8f)// 正常
 	{
 		UE_LOG(LogTemp, Log, TEXT("Fertility level is normal: %.2f"), PlotInfo.FertilityPercentage);
 	}
-	else if (PlotInfo.FertilityPercentage > 1.2f)
+	else if (PlotInfo.FertilityPercentage > 0.8f)// 过高
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Fertility level is excessive: %.2f"), PlotInfo.FertilityPercentage);
+		UE_LOG(LogTemp, Log, TEXT("Fertility level is excessive: %.2f"), PlotInfo.FertilityPercentage);
 	}
-	else
+	else// 过低
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Fertility level is insufficient: %.2f"), PlotInfo.FertilityPercentage);
-		PlotInfo.StateData.RemoveState(EPlotState::Fertilized);
-		OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
+		UE_LOG(LogTemp, Log, TEXT("Fertility level is insufficient: %.2f"), PlotInfo.FertilityPercentage);
+		ClearFertilize(Coords);
 	}
 }
 
