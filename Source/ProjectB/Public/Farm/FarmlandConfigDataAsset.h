@@ -82,55 +82,95 @@ public:
 
 	// ============== 作物配置 ==============
 	// 作物z偏移
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Crop",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crop",
 			  meta = (DisplayName = "作物z偏移"))
 	FVector CropOffset;
 	
 	// ============== 杂草配置 ==============
 	// 杂草模型
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Weeds", 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weeds", 
 			  meta = (DisplayName = "杂草模型"))
 	TObjectPtr<UStaticMesh> WeedsMesh;
 
 	// 地块杂草数量
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Weeds", 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weeds", 
 			  meta = (DisplayName = "地块杂草数量"))
 	int32 WeedNum = 9;
 
 	// 杂草缩放
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Weeds", 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weeds", 
 			  meta = (DisplayName = "杂草缩放"))
 	float WeedsScale = 1.f;
 
 	// 杂草z偏移
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Weeds", 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weeds", 
 			  meta = (DisplayName = "杂草z偏移"))
 	float WeedsOffsetZ = 10.f;
 	
 	// ============== 虫害配置 ==============
 	// 虫害粒子系统
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Pest", 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pest", 
 			  meta = (DisplayName = "虫害粒子系统"))
 	TObjectPtr<UNiagaraSystem> PestNiagaraSystem;
 
 	// 虫害高度
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Pest", 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pest", 
 			  meta = (DisplayName = "虫害高度"))
 	float PestHeight = 100.f;
 	
 	// 虫害粒子半径
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Pest", 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pest", 
 			  meta = (DisplayName = "虫害粒子半径"))
 	float PestRadius = 50.f;
 
+	// ==================== 操作配置 ====================
+
+	// 每次灌溉湿度增加
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Actions Configuration",
+			  meta = (DisplayName = "每次灌溉湿度增加", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+	float IncreasedMoistureWithEachIrrigation = 0.6f;
+
+	// 每次施肥肥力增加
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Actions Configuration",
+			  meta = (DisplayName = "每次施肥肥力增加", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+	float IncreasedFertilityWithEachFertilization = 0.6f;
+
+	// ============== 杂草扩散配置 ==============
+	
+	// 杂草扩散检测间隔（秒）
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spread|Weed")
+	float WeedSpreadInterval = 5.0f;
+
+	// 每个感染地块向邻居传播的概率
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spread|Weed")
+	float WeedSpreadProbability = 0.1f;
+
+	// 杂草是否可以传播到未耕地？若false则只传播到已耕地
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spread|Weed")
+	bool bWeedCanSpreadToEmptyPlots = true;
+
+	// ============== 虫害扩散配置 ==============
+	
+	// 虫害扩散检测间隔（秒）
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spread|Pest")
+	float PestSpreadInterval = 5.0f;
+
+	// 每个感染地块向邻居传播的概率
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spread|Pest")
+	float PestSpreadProbability = 0.05f;
+
+	// 虫害是否可以传播到无作物的地块？通常虫害需要作物
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spread|Pest")
+	bool bPestCanSpreadToEmptyPlots = false;
+	
 	// ==================== 选中配置 ====================
 	// 高亮材质
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Outline", 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Outline", 
 			  meta = (DisplayName = "高亮材质"))
 	TObjectPtr<UMaterialInstance> OutlineMaterial;
 
 	// 高亮材质偏移Z
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Outline", 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Outline", 
 			  meta = (DisplayName = "高亮材质偏移Z"))
 	float OutlineOffsetZ = 1.f;
 

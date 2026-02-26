@@ -61,6 +61,21 @@ public:
 		float Tolerance = 0.1f
 	);
 
+	/**
+	 * 调整 Transform 使其贴合地面（通过向下射线检测），可选地旋转以对齐地面法线
+	 * @param InOutTransform 输入/输出的变换（位置会被修改，旋转可能修改）
+	 * @param World 世界指针
+	 * @param IgnoredActor 要忽略的 Actor（通常是放置实例的 Actor 自身）
+	 * @param bAlignToNormal 是否启用旋转对齐法线（使物体的 Z 轴对齐地面法线）
+	 * @return 是否成功命中地面并调整
+	*/
+	UFUNCTION(BlueprintCallable, Category = "ISM Tools|Transform")
+	static bool AdjustTransformToGround(
+		FTransform& InOutTransform,
+		UWorld* World,
+		AActor* IgnoredActor,
+		bool bAlignToNormal = false
+	);
 private:
 	// ================ 内部辅助函数 ================
     

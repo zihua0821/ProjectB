@@ -16,6 +16,7 @@ class UCropBase;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlotStateChanged, FIntPoint, Coords, FPlotStateData, NewPlotState);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCropPlantedOrRemoved, FIntPoint, Coords);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlotParamChanged, FIntPoint, Coords, float, NewPlotParam);
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class PROJECTB_API UFarmlandComponent : public USceneComponent
@@ -34,6 +35,14 @@ public:
 	// 农作物播种或移除
 	UPROPERTY(BlueprintAssignable, Category = "Farmland|Events")
 	FOnCropPlantedOrRemoved OnCropPlantedOrRemoved;
+
+	// 农作物参数湿度改变
+	UPROPERTY(BlueprintAssignable, Category = "Farmland|Events")
+	FOnPlotParamChanged OnPlotMoistureChanged;
+
+	// 农作物参数肥力改变
+	UPROPERTY(BlueprintAssignable, Category = "Farmland|Events")
+	FOnPlotParamChanged OnPlotFertilityChanged;
 	
 	// ==================== 配置接口 ====================
 	// 设置地块配置数据
@@ -184,6 +193,10 @@ private:
 
 	UPROPERTY()
 	TArray<FFarmLandPlotSaveGameData> PlotSaveGameData;
+
+	FTimerHandle WeedSpreadTimerHandle;
+	
+	FTimerHandle PestSpreadTimerHandle;
     
 	// 辅助方法
 	void InitializeLandCells();
@@ -209,6 +222,24 @@ private:
 
 	UFUNCTION()
 	void OnCropGrownThisTime(FIntPoint Coords, float MoistureCost, float FertilityCost);
+
+	// 开始杂草扩散定时器
+	void StartWeedsSpreadTimers();
+
+	// 开始虫害扩散定时器
+	void StartPestsSpreadTimers();
+	
+	// 杂草扩散逻辑
+	UFUNCTION()
+	void SpreadWeeds();
+
+	// 虫害扩散逻辑
+	UFUNCTION()
+	void SpreadPests();
+
+	// 获取相邻地块坐标（八邻域）
+	void GetNeighborCoords(FIntPoint Coords, TArray<FIntPoint>& OutNeighbors) const;
+
 public:
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType,

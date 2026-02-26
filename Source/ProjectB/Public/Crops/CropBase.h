@@ -73,6 +73,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Crop|Actions")
 	virtual void HarvestCrop();
 
+	// 处理作物虫害
+	UFUNCTION(BlueprintCallable, Category = "Crop|Actions")
+	virtual void HandleCropPestInfested(bool bIsPestInfested);
+
+	// 处理作物杂草
+	UFUNCTION(BlueprintCallable, Category = "Crop|Actions")
+	virtual void HandleCropWeedInfested(bool bIsWeedInfested);
+
 protected:
 	virtual void BeginDestroy() override;
 private:

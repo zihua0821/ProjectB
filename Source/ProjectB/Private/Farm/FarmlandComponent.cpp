@@ -5,6 +5,7 @@
 
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
+#include "Algo/RandomShuffle.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Crops/CropBase.h"
@@ -147,11 +148,6 @@ void UFarmlandComponent::WetLand(const FIntPoint Coords)
 		UE_LOG(LogTemp, Error, TEXT("Plot is empty"))
 		return;
 	}
-	if (PlotInfo.StateData.HasState(EPlotState::Watered))
-	{
-		UE_LOG(LogTemp, Error, TEXT("Plot is already watered"))
-		return;
-	}
 	if (LandCellRenderer == nullptr)
 	{
 		UE_LOG(LogTemp, Error, TEXT("LandCellRenderer is nullptr"))
@@ -165,7 +161,8 @@ void UFarmlandComponent::WetLand(const FIntPoint Coords)
 	}
 	LandCellRenderer->SetCustomDataValue(PlotIndex, PlotCustomData::Wetness, 1.f);
 	PlotInfo.StateData.AddState(EPlotState::Watered);
-	PlotInfo.MoisturePercentage = FMath::Clamp(PlotInfo.MoisturePercentage + 0.8f, 0.f, 2.f);
+	PlotInfo.MoisturePercentage = FMath::Clamp(PlotInfo.MoisturePercentage + FarmlandConfig->IncreasedMoistureWithEachIrrigation, 0.f, 1.f);
+	OnPlotMoistureChanged.Broadcast(Coords, PlotInfo.MoisturePercentage);
 	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 }
 
@@ -206,11 +203,6 @@ void UFarmlandComponent::FertilizeLand(const FIntPoint Coords)
 		UE_LOG(LogTemp, Error, TEXT("Plot is empty"))
 		return;
 	}
-	if (PlotInfo.StateData.HasState(EPlotState::Fertilized))
-	{
-		UE_LOG(LogTemp, Error, TEXT("Plot is already Fertilized"))
-		return;
-	}
 	if (LandCellRenderer == nullptr)
 	{
 		UE_LOG(LogTemp, Error, TEXT("LandCellRenderer is nullptr"))
@@ -224,7 +216,8 @@ void UFarmlandComponent::FertilizeLand(const FIntPoint Coords)
 	}
 	LandCellRenderer->SetCustomDataValue(PlotIndex, PlotCustomData::Fertility, 1.f);
 	PlotInfo.StateData.AddState(EPlotState::Fertilized);
-	PlotInfo.FertilityPercentage = FMath::Clamp(PlotInfo.FertilityPercentage + 0.8f, 0.f, 2.f);
+	PlotInfo.FertilityPercentage = FMath::Clamp(PlotInfo.FertilityPercentage + FarmlandConfig->IncreasedFertilityWithEachFertilization, 0.f, 1.f);
+	OnPlotFertilityChanged.Broadcast(Coords, PlotInfo.FertilityPercentage);
 	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
 }
 
@@ -260,11 +253,11 @@ void UFarmlandComponent::ClearFertilize(const FIntPoint Coords)
 void UFarmlandComponent::GenerateWeeds(const FIntPoint Coords)
 {
 	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(Coords);
-	if (PlotInfo.StateData.IsEmpty())
-	{
-		UE_LOG(LogTemp, Error, TEXT("Plot is empty"))
-		return;
-	}
+	// if (PlotInfo.StateData.IsEmpty())
+	// {
+	// 	UE_LOG(LogTemp, Error, TEXT("Plot is empty"))
+	// 	return;
+	// }
 	if (PlotInfo.StateData.HasState(EPlotState::WeedInfested))
 	{
 		UE_LOG(LogTemp, Error, TEXT("Plot is already WeedInfested"))
@@ -331,13 +324,18 @@ void UFarmlandComponent::GenerateWeeds(const FIntPoint Coords)
 			InstanceLocalTransform.SetLocation(WeedLocation);
 			InstanceLocalTransform.SetScale3D(FVector::One() * FarmlandConfig->WeedsScale);
 			InstanceLocalTransform.AddToTranslation(FVector(0.f, 0.f, FarmlandConfig->WeedsOffsetZ));
-			WeedsRenderer->AddInstance(InstanceLocalTransform);
-			PlotInfo.WeedsTransform.Add(InstanceLocalTransform);
+			FTransform WorldTransform = InstanceLocalTransform * GetComponentTransform();
+			UISMTools::AdjustTransformToGround(WorldTransform, GetWorld(), nullptr, true);
+			FTransform NewLocalTransform = WorldTransform.GetRelativeTransform(GetComponentTransform());
+			WeedsRenderer->AddInstance(NewLocalTransform);
+			PlotInfo.WeedsTransform.Add(NewLocalTransform);
 		}
 	}
 	
  	PlotInfo.StateData.AddState(EPlotState::WeedInfested);
 	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
+
+	StartWeedsSpreadTimers();
 }
 
 void UFarmlandComponent::ClearWeeds(const FIntPoint Coords)
@@ -390,6 +388,8 @@ void UFarmlandComponent::GeneratePest(const FIntPoint Coords)
 	PlotInfo.PestNiagaraComponent = PestParticle;
 	PlotInfo.StateData.AddState(EPlotState::PestInfested);
 	OnPlotStateChanged.Broadcast(Coords, PlotInfo.StateData);
+
+	StartPestsSpreadTimers();
 }
 
 void UFarmlandComponent::ClearPest(const FIntPoint Coords)
@@ -513,6 +513,14 @@ void UFarmlandComponent::PlantCrop(const FIntPoint Coords)
 	if (PlotInfo.StateData.HasState(EPlotState::Fertilized))
 	{
 		CropData.CropStateData.RemoveState(ECropState::NeedsFertilizer);
+	}
+	if (PlotInfo.StateData.HasState(EPlotState::PestInfested))
+	{
+		CropData.CropStateData.AddState(ECropState::PestInfested);
+	}
+	if (PlotInfo.StateData.HasState(EPlotState::WeedInfested))
+	{
+		CropData.CropStateData.AddState(ECropState::WeedInfested);
 	}
 	Crop->OnPlantGrowthStageChanged.AddDynamic(this, &ThisClass::OnCropGrowthStageChanged);
 	Crop->OnCropGrownThisTime.BindDynamic(this, &ThisClass::OnCropGrownThisTime);
@@ -801,6 +809,9 @@ void UFarmlandComponent::BeginPlay()
 		BasePlayerController->OnEditModeChanged.AddDynamic(this, &ThisClass::OnEditModeChanged);
 	}
 	InitializeLandCells();
+
+	StartPestsSpreadTimers();
+	StartWeedsSpreadTimers();
 }
 
 void UFarmlandComponent::CreateDefaultLandCells()
@@ -1164,7 +1175,8 @@ void UFarmlandComponent::OnCropGrownThisTime(FIntPoint Coords, float MoistureCos
 	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(Coords);
 	PlotInfo.MoisturePercentage = FMath::Clamp(PlotInfo.MoisturePercentage - MoistureCost, 0.f, 1.f);
 	PlotInfo.FertilityPercentage = FMath::Clamp(PlotInfo.FertilityPercentage - FertilityCost, 0.f, 1.f);
-
+	OnPlotMoistureChanged.Broadcast(Coords, PlotInfo.MoisturePercentage);
+	OnPlotFertilityChanged.Broadcast(Coords, PlotInfo.FertilityPercentage);
 	UCropBase* Crop = PlotInfo.Crop;
 	if (Crop == nullptr)
 	{
@@ -1201,6 +1213,158 @@ void UFarmlandComponent::OnCropGrownThisTime(FIntPoint Coords, float MoistureCos
 	{
 		UE_LOG(LogTemp, Log, TEXT("Fertility level is insufficient: %.2f"), PlotInfo.FertilityPercentage);
 		ClearFertilize(Coords);
+	}
+}
+
+void UFarmlandComponent::StartWeedsSpreadTimers()
+{
+	if (GetWorld()->GetTimerManager().IsTimerActive(WeedSpreadTimerHandle))
+	{
+		return;
+	}
+	if (FarmlandConfig)
+	{
+		GetWorld()->GetTimerManager().SetTimer(WeedSpreadTimerHandle, this, &ThisClass::SpreadWeeds,
+												FarmlandConfig->WeedSpreadInterval, true);
+	}
+}
+
+void UFarmlandComponent::StartPestsSpreadTimers()
+{
+	if (GetWorld()->GetTimerManager().IsTimerActive(PestSpreadTimerHandle))
+	{
+		return;
+	}
+	if (FarmlandConfig)
+	{
+		GetWorld()->GetTimerManager().SetTimer(PestSpreadTimerHandle, this, &ThisClass::SpreadPests,
+												FarmlandConfig->PestSpreadInterval, true);
+	}
+}
+
+void UFarmlandComponent::SpreadWeeds()
+{
+	if (!FarmlandConfig) return;
+
+	// 收集当前所有有杂草的地块
+	TArray<FIntPoint> InfectedPlots;
+	for (const auto& Pair : PlotInfoIndex)
+	{
+		if (Pair.Value.StateData.HasState(EPlotState::WeedInfested))
+		{
+			InfectedPlots.Add(Pair.Key);
+		}
+	}
+
+	// 如果没有被感染的地块，则停止定时器
+	if (InfectedPlots.Num() == 0)
+	{
+		GetWorld()->GetTimerManager().ClearTimer(WeedSpreadTimerHandle);
+	}
+
+	// 随机顺序处理，避免偏向性
+	Algo::RandomShuffle(InfectedPlots);
+	
+	for (const FIntPoint& Source : InfectedPlots)
+	{
+		TArray<FIntPoint> Neighbors;
+		GetNeighborCoords(Source, Neighbors);
+
+		for (const FIntPoint& Target : Neighbors)
+		{
+			FFarmLandPlotInfo& TargetPlot = PlotInfoIndex.FindChecked(Target);
+
+			// 如果目标地块已经感染，跳过
+			if (TargetPlot.StateData.HasState(EPlotState::WeedInfested))
+				continue;
+
+			// 检查是否可以传播到目标（根据配置和地块状态）
+			bool bCanSpread = true;
+			if (!FarmlandConfig->bWeedCanSpreadToEmptyPlots)
+			{
+				// 需要目标地块已耕地
+				if (!TargetPlot.StateData.HasState(EPlotState::Plowed))
+					bCanSpread = false;
+			}
+
+			if (bCanSpread && FMath::FRand() < FarmlandConfig->WeedSpreadProbability)
+			{
+				// 调用现有的生成杂草方法（该方法会更新状态和视觉）
+				GenerateWeeds(Target);
+			}
+		}
+	}
+}
+
+void UFarmlandComponent::SpreadPests()
+{
+	if (!FarmlandConfig) return;
+
+	// 收集所有有虫害的地块
+	TArray<FIntPoint> InfestedPlots;
+	for (const auto& Pair : PlotInfoIndex)
+	{
+		if (Pair.Value.StateData.HasState(EPlotState::PestInfested))
+		{
+			InfestedPlots.Add(Pair.Key);
+		}
+	}
+
+	// 如果没有被感染的地块，则停止定时器
+	if (InfestedPlots.Num() == 0)
+	{
+		GetWorld()->GetTimerManager().ClearTimer(PestSpreadTimerHandle);
+	}
+	
+	// 随机顺序处理，避免偏向性
+	Algo::RandomShuffle(InfestedPlots);
+
+	for (const FIntPoint& Source : InfestedPlots)
+	{
+		TArray<FIntPoint> Neighbors;
+		GetNeighborCoords(Source, Neighbors);
+
+		for (const FIntPoint& Target : Neighbors)
+		{
+			FFarmLandPlotInfo& TargetPlot = PlotInfoIndex.FindChecked(Target);
+
+			if (TargetPlot.StateData.HasState(EPlotState::PestInfested))
+				continue;
+
+			// 虫害传播条件：通常需要目标有作物，或至少已耕地
+			bool bCanSpread = true;
+			if (!FarmlandConfig->bPestCanSpreadToEmptyPlots)
+			{
+				// 要求目标地块有作物
+				if (TargetPlot.Crop == nullptr)
+					bCanSpread = false;
+			}
+
+			if (bCanSpread && FMath::FRand() < FarmlandConfig->PestSpreadProbability)
+			{
+				GeneratePest(Target);
+			}
+		}
+	}
+}
+
+void UFarmlandComponent::GetNeighborCoords(FIntPoint Coords, TArray<FIntPoint>& OutNeighbors) const
+{
+	// 八个方向偏移量：上下左右 + 四个对角线
+	const FIntPoint Directions[] = {
+		FIntPoint(1, 0), FIntPoint(-1, 0), FIntPoint(0, 1), FIntPoint(0, -1), // 四邻域
+		FIntPoint(1, 1), FIntPoint(1, -1), FIntPoint(-1, 1), FIntPoint(-1, -1) // 对角线
+	};
+
+	for (const FIntPoint& Dir : Directions)
+	{
+		FIntPoint Neighbor = Coords + Dir;
+		// 边界检查
+		if (Neighbor.X >= 0 && Neighbor.X < FarmlandConfig->GridSizeX &&
+			Neighbor.Y >= 0 && Neighbor.Y < FarmlandConfig->GridSizeY)
+		{
+			OutNeighbors.Add(Neighbor);
+		}
 	}
 }
 

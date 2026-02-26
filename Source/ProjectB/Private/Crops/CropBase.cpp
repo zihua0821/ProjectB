@@ -139,6 +139,16 @@ void UCropBase::HandleCropMoisture(const float PlotMoisture)
 	if (PreCropState != CropData.CropStateData)
 	{
 		OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
+		if (PreCropState.HasState(ECropState::NeedsWater) && !CropData.CropStateData.HasState(ECropState::OverWatered))
+		{
+			CropData.CropQualityData.RecordWatering(true);
+			OnCropCropQualityChanged.Broadcast(CropData.Coords, CropData.CropQualityData.GetQuality(CropData.TotalGrowthTime));
+		}
+		if (CropData.CropStateData.HasState(ECropState::OverWatered))
+		{
+			CropData.CropQualityData.RecordWatering(false);
+			OnCropCropQualityChanged.Broadcast(CropData.Coords, CropData.CropQualityData.GetQuality(CropData.TotalGrowthTime));
+		}
 	}
 }
 
@@ -164,6 +174,16 @@ void UCropBase::HandleCropFertility(const float PlotFertility)
 	if (PreCropState != CropData.CropStateData)
 	{
 		OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
+		if (PreCropState.HasState(ECropState::NeedsFertilizer) && !CropData.CropStateData.HasState(ECropState::NutrientBurn))
+		{
+			CropData.CropQualityData.RecordFertilize(true);
+			OnCropCropQualityChanged.Broadcast(CropData.Coords, CropData.CropQualityData.GetQuality(CropData.TotalGrowthTime));
+		}
+		if (CropData.CropStateData.HasState(ECropState::NutrientBurn))
+		{
+			CropData.CropQualityData.RecordFertilize(false);
+			OnCropCropQualityChanged.Broadcast(CropData.Coords, CropData.CropQualityData.GetQuality(CropData.TotalGrowthTime));
+		}
 	}
 }
 
@@ -178,6 +198,30 @@ void UCropBase::HarvestCrop()
 	CropData.CropStateData.RemoveState(ECropState::ReadyForHarvest);
 	OnPlantGrowthStageChanged.Broadcast(CropData.Coords, CropData.CropGrowthStage);
 	OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
+}
+
+void UCropBase::HandleCropPestInfested(bool bIsPestInfested)
+{
+	if (bIsPestInfested)
+	{
+		CropData.CropStateData.AddState(ECropState::PestInfested);
+	}
+	else
+	{
+		CropData.CropStateData.RemoveState(ECropState::PestInfested);
+	}
+}
+
+void UCropBase::HandleCropWeedInfested(bool bIsWeedInfested)
+{
+	if (bIsWeedInfested)
+	{
+		CropData.CropStateData.AddState(ECropState::WeedInfested);
+	}
+	else
+	{
+		CropData.CropStateData.RemoveState(ECropState::WeedInfested);
+	}
 }
 
 void UCropBase::BeginDestroy()
@@ -204,4 +248,6 @@ void UCropBase::HandlePlotStateChanged(FIntPoint Coords, FPlotStateData NewPlotS
 	const FFarmLandPlotInfo& PlotInfo = OwnerComponent->GetPlotInfo(Coords);
 	HandleCropMoisture(PlotInfo.MoisturePercentage);
 	HandleCropFertility(PlotInfo.FertilityPercentage);
+	HandleCropPestInfested(NewPlotState.HasState(EPlotState::PestInfested));
+	HandleCropWeedInfested(NewPlotState.HasState(EPlotState::WeedInfested));
 }
