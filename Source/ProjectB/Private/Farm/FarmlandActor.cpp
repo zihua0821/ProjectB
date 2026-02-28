@@ -128,6 +128,15 @@ TArray<FFarmLandPlotSaveGameData> AFarmlandActor::GetPlotSaveGameData() const
 	return FarmlandComponent->GetPlotSaveGameData();
 }
 
+TArray<FCropSaveGameData> AFarmlandActor::GetCropSaveGameData() const
+{
+	if (!CropManagerComponent)
+	{
+		return TArray<FCropSaveGameData>();
+	}
+	return CropManagerComponent->GetCropSaveGameData();
+}
+
 void AFarmlandActor::SetPlotSaveGameData(const TArray<FFarmLandPlotSaveGameData>& InPlotSaveGameData)
 {
 	if (!FarmlandComponent)
@@ -135,6 +144,15 @@ void AFarmlandActor::SetPlotSaveGameData(const TArray<FFarmLandPlotSaveGameData>
 		return;
 	}
 	FarmlandComponent->SetPlotSaveGameData(InPlotSaveGameData);
+}
+
+void AFarmlandActor::SetCropSaveGameData(const TArray<FCropSaveGameData>& InPlotCropSaveGameData)
+{
+	if (!CropManagerComponent)
+	{
+		return;
+	}
+	CropManagerComponent->SetCropSaveGameData(InPlotCropSaveGameData);
 }
 
 void AFarmlandActor::HandleLeftMouseClicked(const EEditMode EditMode, const FIntPoint PlowCoords) const

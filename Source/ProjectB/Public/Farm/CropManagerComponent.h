@@ -76,6 +76,14 @@ public:
     // 获取地块作物信息
     UFUNCTION(BlueprintPure, Category = "Crop Manager")
     FPlotCropInfo GetPlotCropInfo(FIntPoint Coords) const;
+
+    // 获取农作物保存数据
+    UFUNCTION(BlueprintCallable, Category = "Farmland")
+    TArray<FCropSaveGameData> GetCropSaveGameData();
+
+    // 设置农作物保存数据
+    UFUNCTION(BlueprintCallable, Category = "Farmland")
+    void SetCropSaveGameData(const TArray<FCropSaveGameData>& InCropSaveGameData){CropSaveGameData = InCropSaveGameData;}
 	
 protected:
     virtual void BeginPlay() override;
@@ -87,6 +95,7 @@ private:
     TObjectPtr<ABasePlayerController>  BasePlayerController;
     
     // 地块组件（弱引用，避免循环）
+    UPROPERTY()
     TWeakObjectPtr<UFarmlandComponent> FarmlandComponent;
 
     // 作物数据表
@@ -104,7 +113,14 @@ private:
     // 作物渲染组件映射
     UPROPERTY()
     TMap<FStaticMeshHISMKey, UInstancedStaticMeshComponent*> CropHISMComponentMap;
+    
+    // 农作物保存数据
+    UPROPERTY()
+    TArray<FCropSaveGameData> CropSaveGameData;
 
+    // 初始化农作物
+    void InitializeCrops();
+    
     // 更新所有作物（由 Tick 驱动）
     void UpdateCrops(float DeltaTime);
     
@@ -133,5 +149,8 @@ private:
     // 作物生长
     UFUNCTION()
     void OnCropGrownThisTime(FIntPoint Coords, float MoistureCost, float FertilityCost);
+
+    // 从保存数据初始化作物
+    void InitCropsFromSaveGameData();
 
 };

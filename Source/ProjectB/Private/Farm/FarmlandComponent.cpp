@@ -110,9 +110,9 @@ void UFarmlandComponent::PlowLand(const FIntPoint Coords)
 		return;
 	}
 
-	const int32 Index = LandCellRenderer->AddInstance(PlotInfo.Transform);
-	LandCellRenderer->SetCustomDataValue(Index, PlotCustomData::Opacity, 1.f);
+	LandCellRenderer->AddInstance(PlotInfo.Transform);
 	SetPlotState(Coords, EPlotState::Plowed, true);
+	UpdatePlotVisual(Coords);
 }
 
 void UFarmlandComponent::WetLand(const FIntPoint Coords)
@@ -134,10 +134,10 @@ void UFarmlandComponent::WetLand(const FIntPoint Coords)
 		UE_LOG(LogTemp, Error, TEXT("Plot not exists"));
 		return;
 	}
-	LandCellRenderer->SetCustomDataValue(PlotIndex, PlotCustomData::Wetness, 1.f);
 	PlotInfo.MoisturePercentage = FMath::Clamp(PlotInfo.MoisturePercentage + FarmlandConfig->IncreasedMoistureWithEachIrrigation, 0.f, 1.f);
 	OnPlotMoistureChanged.Broadcast(Coords, PlotInfo.MoisturePercentage);
 	SetPlotState(Coords, EPlotState::Watered, true);
+	UpdatePlotVisual(Coords);
 }
 
 void UFarmlandComponent::LandDried(const FIntPoint Coords)
@@ -164,8 +164,8 @@ void UFarmlandComponent::LandDried(const FIntPoint Coords)
 		UE_LOG(LogTemp, Error, TEXT("Plot not exists"));
 		return;
 	}
-	LandCellRenderer->SetCustomDataValue(PlotIndex, PlotCustomData::Wetness, 0.f);
 	SetPlotState(Coords, EPlotState::Watered, false);
+	UpdatePlotVisual(Coords);
 }
 
 void UFarmlandComponent::FertilizeLand(const FIntPoint Coords)
@@ -187,10 +187,10 @@ void UFarmlandComponent::FertilizeLand(const FIntPoint Coords)
 		UE_LOG(LogTemp, Error, TEXT("Plot not exists"));
 		return;
 	}
-	LandCellRenderer->SetCustomDataValue(PlotIndex, PlotCustomData::Fertility, 1.f);
 	PlotInfo.FertilityPercentage = FMath::Clamp(PlotInfo.FertilityPercentage + FarmlandConfig->IncreasedFertilityWithEachFertilization, 0.f, 1.f);
 	OnPlotFertilityChanged.Broadcast(Coords, PlotInfo.FertilityPercentage);
 	SetPlotState(Coords, EPlotState::Fertilized, true);
+	UpdatePlotVisual(Coords);
 }
 
 void UFarmlandComponent::ClearFertilize(const FIntPoint Coords)
@@ -217,8 +217,8 @@ void UFarmlandComponent::ClearFertilize(const FIntPoint Coords)
 		UE_LOG(LogTemp, Error, TEXT("Plot not exists"));
 		return;
 	}
-	LandCellRenderer->SetCustomDataValue(PlotIndex, PlotCustomData::Fertility, 0.f);
 	SetPlotState(Coords, EPlotState::Fertilized, false);
+	UpdatePlotVisual(Coords);
 }
 
 void UFarmlandComponent::GenerateWeeds(const FIntPoint Coords)
@@ -608,15 +608,13 @@ TArray<FFarmLandPlotSaveGameData> UFarmlandComponent::GetPlotSaveGameData()
 	PlotSaveGameData.Empty();
 	for (const auto& PlotInfoTuple : PlotInfoIndex)
 	{
+		// 创建保存数据项
 		FFarmLandPlotSaveGameData PlotSaveGameDataItem;
 		PlotSaveGameDataItem.Coords = PlotInfoTuple.Key;
 		PlotSaveGameDataItem.StateData = PlotInfoTuple.Value.StateData;
-		PlotSaveGameDataItem.Transform = PlotInfoTuple.Value.Transform;
 		PlotSaveGameDataItem.WeedsTransform = PlotInfoTuple.Value.WeedsTransform;
-		// if (PlotInfoTuple.Value.Crop)
-		// {
-		// 	PlotSaveGameDataItem.CropData = PlotInfoTuple.Value.Crop->GetCropData();
-		// }
+		PlotSaveGameDataItem.MoisturePercentage = PlotInfoTuple.Value.MoisturePercentage;
+		PlotSaveGameDataItem.FertilityPercentage = PlotInfoTuple.Value.FertilityPercentage;
 		PlotSaveGameData.Add(PlotSaveGameDataItem);
 	}
 	return PlotSaveGameData;
@@ -724,6 +722,73 @@ bool UFarmlandComponent::GetCellBounds(const FIntPoint& Coords, FBox& OutBounds)
 	return true;
 }
 
+void UFarmlandComponent::InitPlotFromSaveGameData()
+{
+	if (LandCellRenderer == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LandCellRenderer is nullptr"));
+		return;
+	}
+
+	if (PlotSaveGameData.Num() > 0)
+	{
+		for (auto& PlotSaveGameDataItem : PlotSaveGameData)
+		{
+			FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlotSaveGameDataItem.Coords);
+			PlotInfo.WeedsTransform = PlotSaveGameDataItem.WeedsTransform;
+			PlotInfo.MoisturePercentage = PlotSaveGameDataItem.MoisturePercentage;
+			PlotInfo.FertilityPercentage = PlotSaveGameDataItem.FertilityPercentage;
+			PlotInfo.StateData = PlotSaveGameDataItem.StateData;
+			if (PlotInfo.StateData.HasState(EPlotState::Plowed))
+			{
+				LandCellRenderer->AddInstance(PlotInfo.Transform);
+				UpdatePlotVisual(PlotSaveGameDataItem.Coords);
+			}
+			if (PlotSaveGameDataItem.StateData.HasState(EPlotState::WeedInfested))
+			{
+				GenerateWeeds(PlotSaveGameDataItem.Coords);
+			}
+			if (PlotSaveGameDataItem.StateData.HasState(EPlotState::PestInfested))
+			{
+				GeneratePest(PlotSaveGameDataItem.Coords);
+			}
+		}
+	}
+}
+
+void UFarmlandComponent::UpdatePlotVisual(const FIntPoint& PlotCoords)
+{
+	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlotCoords);
+	if (!LandCellRenderer)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LandCellRenderer is nullptr"));
+		return;
+	}
+	int32 Index;
+	if (!UISMTools::GetInstanceIndexByTransform(LandCellRenderer, PlotInfo.Transform, Index))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Can't find instance index by transform"));
+		return;
+	}
+
+	LandCellRenderer->SetCustomDataValue(
+		Index,
+		PlotCustomData::Opacity,
+		PlotInfo.StateData.HasState(EPlotState::Plowed) ? 1.0f : 0.0f
+	);
+	LandCellRenderer->SetCustomDataValue(
+		Index,
+		PlotCustomData::Wetness,
+		PlotInfo.StateData.HasState(EPlotState::Watered) ? 1.0f : 0.0f
+	);
+	LandCellRenderer->SetCustomDataValue(
+		Index,
+		PlotCustomData::Fertility,
+		PlotInfo.StateData.HasState(EPlotState::Fertilized) ? 1.0f : 0.0f
+	);
+	
+}
+
 void UFarmlandComponent::InitializeLandCells()
 {
 	ensure(FarmlandConfig);
@@ -745,50 +810,7 @@ void UFarmlandComponent::InitializeLandCells()
 	LandCellRenderer->SetNumCustomDataFloats(FarmlandConfig->NumCustomDataFloats);
 
 	CreateDefaultLandCells();
-	if (PlotSaveGameData.Num() > 0)
-	{
-		for (auto& PlotSaveGameDataItem : PlotSaveGameData)
-		{
-			FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlotSaveGameDataItem.Coords);
-			PlotInfo.WeedsTransform = PlotSaveGameDataItem.WeedsTransform;
-			if (PlotSaveGameDataItem.StateData.HasState(EPlotState::Plowed))
-			{
-				PlowLand(PlotSaveGameDataItem.Coords);
-				if (PlotSaveGameDataItem.StateData.HasState(EPlotState::Watered))
-				{
-					WetLand(PlotSaveGameDataItem.Coords);
-				}
-				if (PlotSaveGameDataItem.StateData.HasState(EPlotState::Fertilized))
-				{
-					FertilizeLand(PlotSaveGameDataItem.Coords);
-				}
-			}
-			if (PlotSaveGameDataItem.StateData.HasState(EPlotState::WeedInfested))
-			{
-				GenerateWeeds(PlotSaveGameDataItem.Coords);
-			}
-			if (PlotSaveGameDataItem.StateData.HasState(EPlotState::PestInfested))
-			{
-				GeneratePest(PlotSaveGameDataItem.Coords);
-			}
-
-			// if (PlotSaveGameDataItem.CropData.CropID != NAME_None)
-			// {
-			// 	const FCropTableRow* CropTableRow = CropDataTable->FindRow<FCropTableRow>(PlotSaveGameDataItem.CropData.CropID, TEXT("UFarmlandComponent::InitializeLandCells"));
-			// 	PlotInfo.CropMeshVariant = CropTableRow->MeshVariants[PlotSaveGameDataItem.CropData.VariantsIndex];
-			// 	PlotInfo.CropNumCustomDataFloats = CropTableRow->CropNumCustomDataFloats;
-			// 	UCropBase* Crop = NewObject<UCropBase>();
-			// 	PlotInfo.Crop = Crop;
-			// 	Crop->OnPlantGrowthStageChanged.AddDynamic(this, &ThisClass::OnCropGrowthStageChanged);
-			// 	Crop->InitializeCrop(this, PlotSaveGameDataItem.CropData);
-			// }
-		}
-		UE_LOG(LogTemp, Log, TEXT("Initialized %d land cells for %dx%d grid by PlotSaveGameData"), 
-		   LandCellRenderer->GetInstanceCount(), FarmlandConfig->GridSizeX, FarmlandConfig->GridSizeY);
-	}
-
-	
-	
+	InitPlotFromSaveGameData();
 }
 
 int32 UFarmlandComponent::GetPlotIndex(const FIntPoint& PlotCoords) const

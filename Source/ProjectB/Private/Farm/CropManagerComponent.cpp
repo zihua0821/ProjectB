@@ -56,6 +56,8 @@ void UCropManagerComponent::BeginPlay()
     Super::BeginPlay();
 
     BasePlayerController = Cast<ABasePlayerController>(GetWorld()->GetFirstPlayerController());
+
+    InitializeCrops();
 }
 
 void UCropManagerComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -196,6 +198,70 @@ bool UCropManagerComponent::HarvestCrop(FIntPoint Coords)
     return true;
 }
 
+void UCropManagerComponent::InitCropsFromSaveGameData()
+{
+    if (CropSaveGameData.Num() > 0)
+    {
+        for (auto& CurrentCropSaveGameData: CropSaveGameData)
+        {
+            if (!FarmlandComponent.IsValid()) return;
+
+            FIntPoint Coords = CurrentCropSaveGameData.Coords;
+
+            // 从数据表读取作物配置
+            FName CropID = CurrentCropSaveGameData.CropID;
+            const FCropTableRow* Row = CropDataTable->FindRow<FCropTableRow>(CropID, TEXT("PlantCrop"));
+            if (!Row) return;
+
+            // 创建作物实例
+            UCropBase* SaveCrop = NewObject<UCropBase>(this);
+
+            // 恢复作物数据
+            FCropData CropData;
+            CropData.CropID = CropID;
+            CropData.Coords = Coords;
+            CropData.CropGrowthStage = CurrentCropSaveGameData.CropGrowthStage;
+            CropData.CropQualityData = CurrentCropSaveGameData.CropQualityData;
+            CropData.CropStateData = CurrentCropSaveGameData.CropStateData;
+            CropData.TotalGrowthTime = CurrentCropSaveGameData.TotalGrowthTime;
+            CropData.CurrentStageGrowthTime = CurrentCropSaveGameData.CurrentStageGrowthTime;
+            CropData.VariantsIndex = CurrentCropSaveGameData.VariantsIndex;
+
+            // 根据数据表配置
+            CropData.GrowthSeedTime = Row->GrowthSeedTime;
+            CropData.GrowthSeedlingTime = Row->GrowthSeedlingTime;
+            CropData.MoistureConsumeRate = Row->MoistureConsumeRate;
+            CropData.FertilityConsumeRate = Row->FertilityConsumeRate;
+            CropData.GrowthRate_OverWatered = FarmlandConfig->GrowthRate_OverWatered;
+            CropData.GrowthRate_NutrientBurn = FarmlandConfig->GrowthRate_NutrientBurn;
+            CropData.GrowthRate_WeedInfested = FarmlandConfig->GrowthRate_WeedInfested;
+            CropData.GrowthRate_PestInfested = FarmlandConfig->GrowthRate_PestInfested;
+            
+            // 存储作物信息
+            auto& [Crop, CropTransform, CropMeshVariant, CropNumCustomDataFloats] = PlotCropMap.Add(Coords);
+            Crop = SaveCrop;
+            CropMeshVariant = Row->MeshVariants[CurrentCropSaveGameData.VariantsIndex];
+            CropNumCustomDataFloats = Row->CropNumCustomDataFloats;
+            CropTransform = CurrentCropSaveGameData.Transform;
+            
+            // 绑定作物自身的事件
+            SaveCrop->OnPlantGrowthStageChanged.AddDynamic(this, &ThisClass::OnCropGrowthStageChanged);
+            SaveCrop->OnCropGrownThisTime.BindDynamic(this, &ThisClass::OnCropGrownThisTime);
+            
+            // 初始化作物（传入本组件引用，以便作物能绑定地块事件）
+            SaveCrop->InitializeCrop(FarmlandComponent.Get(), CropData);
+
+            // 更新地块状态
+            FarmlandComponent->SetPlotState(Coords, EPlotState::CropPlanted, true);
+        }
+    }
+}
+
+void UCropManagerComponent::InitializeCrops()
+{
+    InitCropsFromSaveGameData();
+}
+
 void UCropManagerComponent::UpdateCrops(float DeltaTime)
 {
     for (auto& Pair : PlotCropMap)
@@ -221,6 +287,32 @@ FPlotCropInfo UCropManagerComponent::GetPlotCropInfo(FIntPoint Coords) const
         return *PlotCropMap.Find(Coords);
     }
     return FPlotCropInfo();
+}
+
+TArray<FCropSaveGameData> UCropManagerComponent::GetCropSaveGameData()
+{
+    CropSaveGameData.Empty();
+    for (auto& Pair : PlotCropMap)
+    {
+        const FPlotCropInfo& CropInfo = Pair.Value;
+        if (!CropInfo.Crop) continue;
+        const FCropData& CropData = CropInfo.Crop->GetCropData();
+
+        // 保存作物数据
+        FCropSaveGameData CurrentCropSaveGameData;
+        CurrentCropSaveGameData.CropID = CropData.CropID;
+        CurrentCropSaveGameData.Coords = Pair.Key;
+        CurrentCropSaveGameData.Transform = CropInfo.CropTransform;
+        CurrentCropSaveGameData.VariantsIndex = CropData.VariantsIndex;
+        CurrentCropSaveGameData.CropGrowthStage = CropData.CropGrowthStage;
+        CurrentCropSaveGameData.CropQualityData = CropData.CropQualityData;
+        CurrentCropSaveGameData.CropStateData = CropData.CropStateData;
+        CurrentCropSaveGameData.TotalGrowthTime = CropData.TotalGrowthTime;
+        CurrentCropSaveGameData.CurrentStageGrowthTime = CropData.CurrentStageGrowthTime;
+        
+        CropSaveGameData.Add(CurrentCropSaveGameData);
+    }
+    return CropSaveGameData;
 }
 
 void UCropManagerComponent::OnCropGrowthStageChanged(FIntPoint Coords, ECropGrowthStage NewGrowthStage)

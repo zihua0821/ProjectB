@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Crops/CropData.h"
 #include "GameFramework/PlayerController.h"
+#include "Game/ProjectBGameInstance.h"
 #include "BasePlayerController.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEditModeChanged, EEditMode, NewEditMode);
@@ -73,4 +74,7 @@ private:
 
 	UPROPERTY()
 	FString SelectedCropName;
+	
+	UPROPERTY()
+	TObjectPtr<UProjectBGameInstance> GameInstance;
 };

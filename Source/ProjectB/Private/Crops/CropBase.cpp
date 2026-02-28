@@ -11,12 +11,12 @@ UCropBase::UCropBase(): CropData()
 
 void UCropBase::InitializeCrop(UFarmlandComponent* InComponent, FCropData& InCropData)
 {
-	OwnerComponent = InComponent;
-	if (OwnerComponent.IsValid())
+	FarmlandComponent = InComponent;
+	if (FarmlandComponent.IsValid())
 	{
-		OwnerComponent->OnPlotStateChanged.AddDynamic(this, &ThisClass::HandlePlotStateChanged);
-		OwnerComponent->OnPlotMoistureChanged.AddDynamic(this, &ThisClass::HandlePlotMoistureChanged);
-		OwnerComponent->OnPlotFertilityChanged.AddDynamic(this, &ThisClass::HandlePlotFertilityChanged);
+		FarmlandComponent->OnPlotStateChanged.AddDynamic(this, &ThisClass::HandlePlotStateChanged);
+		FarmlandComponent->OnPlotMoistureChanged.AddDynamic(this, &ThisClass::HandlePlotMoistureChanged);
+		FarmlandComponent->OnPlotFertilityChanged.AddDynamic(this, &ThisClass::HandlePlotFertilityChanged);
 	}
 	CropData = InCropData;
 	OnPlantGrowthStageChanged.Broadcast(CropData.Coords, CropData.CropGrowthStage);
@@ -271,11 +271,11 @@ void UCropBase::HandleCropWeedInfested(bool bIsWeedInfested)
 
 void UCropBase::BeginDestroy()
 {
-	if (OwnerComponent.IsValid())
+	if (FarmlandComponent.IsValid())
 	{
-		OwnerComponent->OnPlotStateChanged.RemoveAll(this);
-		OwnerComponent->OnPlotMoistureChanged.RemoveAll(this);
-		OwnerComponent->OnPlotFertilityChanged.RemoveAll(this);
+		FarmlandComponent->OnPlotStateChanged.RemoveAll(this);
+		FarmlandComponent->OnPlotMoistureChanged.RemoveAll(this);
+		FarmlandComponent->OnPlotFertilityChanged.RemoveAll(this);
 	}
 	UObject::BeginDestroy();
 }
@@ -287,12 +287,12 @@ void UCropBase::HandlePlotStateChanged(FIntPoint Coords, FPlotStateData NewPlotS
 		UE_LOG(LogTemp, Error, TEXT("Crop is not in the same plot!"))
 		return;
 	}
-	if (!OwnerComponent.IsValid())
+	if (!FarmlandComponent.IsValid())
 	{
 		UE_LOG(LogTemp, Error, TEXT("Crop owner component is invalid!"))
 		return;
 	}
-	const FFarmLandPlotInfo& PlotInfo = OwnerComponent->GetPlotInfo(Coords);
+	const FFarmLandPlotInfo& PlotInfo = FarmlandComponent->GetPlotInfo(Coords);
 	HandleCropMoisture(PlotInfo.MoisturePercentage);
 	HandleCropFertility(PlotInfo.FertilityPercentage);
 	HandleCropPestInfested(NewPlotState.HasState(EPlotState::PestInfested));

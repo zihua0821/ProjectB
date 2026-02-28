@@ -48,10 +48,12 @@ public:
 	// 设置地块状态
 	void SetPlotState(const FIntPoint& PlotCoords, EPlotState State, bool bEnable = true);
 
+	// ==================== 保存接口 ====================
+	
 	// 获取地块信息保存数据
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	TArray<FFarmLandPlotSaveGameData> GetPlotSaveGameData();
-
+	
 	// 设置地块信息保存数据
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	void SetPlotSaveGameData(const TArray<FFarmLandPlotSaveGameData>& InPlotSaveGameData){PlotSaveGameData = InPlotSaveGameData;}
@@ -207,6 +209,11 @@ private:
 
 	// 获取相邻地块坐标（八邻域）
 	void GetNeighborCoords(FIntPoint Coords, TArray<FIntPoint>& OutNeighbors) const;
+
+	// 从保存数据初始化地块
+	void InitPlotFromSaveGameData();
+
+	void UpdatePlotVisual(const FIntPoint& PlotCoords);
 };
 
 

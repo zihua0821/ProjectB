@@ -85,7 +85,7 @@ protected:
 	virtual void BeginDestroy() override;
 private:
 	UPROPERTY()
-	TWeakObjectPtr<UFarmlandComponent> OwnerComponent;
+	TWeakObjectPtr<UFarmlandComponent> FarmlandComponent;
 	
 	UPROPERTY()
 	FCropData CropData;

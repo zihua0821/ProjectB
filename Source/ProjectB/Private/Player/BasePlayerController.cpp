@@ -28,6 +28,13 @@ void ABasePlayerController::BeginPlay()
 	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 	InputMode.SetHideCursorDuringCapture(false);
 	SetInputMode(InputMode);
+	
+	// 获取GameInstance并尝试加载存档
+	GameInstance = Cast<UProjectBGameInstance>(GetGameInstance());
+	if (GameInstance)
+	{
+		GameInstance->LoadGame();
+	}
 }
 
 void ABasePlayerController::Tick(float DeltaSeconds)

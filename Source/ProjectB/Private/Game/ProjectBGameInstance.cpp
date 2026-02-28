@@ -35,6 +35,7 @@ void UProjectBGameInstance::SaveGame(FString SlotName)
 			FarmlandData.CropDataTablePath = Farmland->CropDataTable;
 			FarmlandData.FarmlandConfigPath = Farmland->FarmlandConfig;
 			FarmlandData.Plots = Farmland->GetPlotSaveGameData();
+			FarmlandData.Crops = Farmland->GetCropSaveGameData();
 			CurrentSaveGame->Farmlands.Add(FarmlandData);
 		}
 	}
@@ -60,6 +61,18 @@ void UProjectBGameInstance::OnGameLoaded(const FString& SlotName, const int32 Us
 		CurrentSaveGame = Cast<UFarmSaveGame>(SaveGame);
 		if (CurrentSaveGame)
 		{
+			// 清除场景中已有的FarmlandActor
+			TArray<AActor*> ExistingFarmlandActors;
+			UGameplayStatics::GetAllActorsOfClass(GetWorld(), AFarmlandActor::StaticClass(), ExistingFarmlandActors);
+			for (AActor* Actor : ExistingFarmlandActors)
+			{
+				if (AFarmlandActor* FarmlandActor = Cast<AFarmlandActor>(Actor))
+				{
+					FarmlandActor->Destroy();
+				}
+			}
+
+			// 重建场景中的FarmlandActor
 			for (const FFarmlandSaveGameData& FarmlandData : CurrentSaveGame->Farmlands)
 			{
 				UFarmlandConfigDataAsset* LoadedConfig = FarmlandData.FarmlandConfigPath.LoadSynchronous();
@@ -72,6 +85,7 @@ void UProjectBGameInstance::OnGameLoaded(const FString& SlotName, const int32 Us
 				Farmland->FarmlandConfig = LoadedConfig;
 				Farmland->CropDataTable = LoadedDataTable;
 				Farmland->SetPlotSaveGameData(FarmlandData.Plots);
+				Farmland->SetCropSaveGameData(FarmlandData.Crops);
 				Farmland->FinishSpawning(FarmlandData.Transform);
 			}
 		}

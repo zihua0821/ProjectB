@@ -82,9 +82,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	TArray<FFarmLandPlotSaveGameData> GetPlotSaveGameData() const;
 
+	// 获取地块农作物保存数据
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	TArray<FCropSaveGameData> GetCropSaveGameData() const;
+
 	// 设置地块保存数据
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	void SetPlotSaveGameData(const TArray<FFarmLandPlotSaveGameData>& InPlotSaveGameData);
+
+	// 设置地块农作物保存数据
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void SetCropSaveGameData(const TArray<FCropSaveGameData>& InPlotCropSaveGameData);
 	
 	// ====================  农田交互 ====================
 	
