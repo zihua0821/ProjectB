@@ -2,6 +2,7 @@
 
 
 #include "Farm/FarmlandActor.h"
+#include "Farm/CropManagerComponent.h"
 
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Farm/FarmlandComponent.h"
@@ -20,6 +21,10 @@ AFarmlandActor::AFarmlandActor()
 	FarmlandComponent = CreateDefaultSubobject<UFarmlandComponent>(TEXT("FarmlandComponent"));
 	FarmlandComponent->SetupAttachment(RootSceneComponent);
 
+	// CropManagerComponent
+	CropManagerComponent = CreateDefaultSubobject<UCropManagerComponent>(TEXT("CropManagerComponent"));
+	CropManagerComponent->SetupAttachment(RootSceneComponent);
+
 	// GroundMeshComponent
 	GroundMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("GroundMesh"));
 	GroundMeshComponent->SetupAttachment(RootSceneComponent);
@@ -33,23 +38,27 @@ void AFarmlandActor::OnConstruction(const FTransform& Transform)
 	Super::OnConstruction(Transform);
 
 	// 初始化组件
-	InitializeComponents();
+	SetupComponents();
 }
 
 void AFarmlandActor::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
 
-	check(FarmlandConfig);
+	ensure(FarmlandConfig);
+	ensure(CropDataTable);
 	if (FarmlandComponent)
 	{
 		FarmlandComponent->SetFarmlandConfig(FarmlandConfig);
 	}
-
-	check(CropDataTable);
-	if (FarmlandComponent)
+	if (CropManagerComponent)
 	{
-		FarmlandComponent->SetCropDataTable(CropDataTable);
+		CropManagerComponent->SetFarmlandConfig(FarmlandConfig);
+		CropManagerComponent->SetCropDataTable(CropDataTable);
+	}
+	if (FarmlandComponent && CropManagerComponent)
+	{
+		CropManagerComponent->Initialize(FarmlandComponent);
 	}
 }
 
@@ -59,7 +68,7 @@ void AFarmlandActor::BeginPlay()
 	
 }
 
-FVector AFarmlandActor::GetCellWorldLocation(int32 CellX, int32 CellY) const
+FVector AFarmlandActor::GetCellWorldLocation(const FIntPoint& CellCoords) const
 {
 	if (!FarmlandComponent) return GetActorLocation();
     
@@ -71,8 +80,8 @@ FVector AFarmlandActor::GetCellWorldLocation(int32 CellX, int32 CellY) const
 	float TotalHeight = FarmlandConfig->GridSizeY * FarmlandConfig->CellSize.Y + (FarmlandConfig->GridSizeY - 1) * FarmlandConfig->CellSpacing;
     
 	// 从中心开始计算（0,0在中心）
-	float OffsetX = (CellX - (FarmlandConfig->GridSizeX - 1) * 0.5f) * (FarmlandConfig->CellSize.X + FarmlandConfig->CellSpacing);
-	float OffsetY = (CellY - (FarmlandConfig->GridSizeY - 1) * 0.5f) * (FarmlandConfig->CellSize.Y + FarmlandConfig->CellSpacing);
+	float OffsetX = (CellCoords.X - (FarmlandConfig->GridSizeX - 1) * 0.5f) * (FarmlandConfig->CellSize.X + FarmlandConfig->CellSpacing);
+	float OffsetY = (CellCoords.Y - (FarmlandConfig->GridSizeY - 1) * 0.5f) * (FarmlandConfig->CellSize.Y + FarmlandConfig->CellSpacing);
     
 	// 应用组件的旋转
 	FRotator ComponentRotation = FarmlandComponent->GetComponentRotation();
@@ -101,6 +110,15 @@ FFarmLandPlotInfo AFarmlandActor::GetPlotInfo(const FIntPoint& PlotCoords) const
 	return FarmlandComponent->GetPlotInfo(PlotCoords);
 }
 
+FPlotCropInfo AFarmlandActor::GetPlotCropInfo(const FIntPoint& PlotCoords) const
+{
+	if (!CropManagerComponent)
+	{
+		return FPlotCropInfo();
+	}
+	return CropManagerComponent->GetPlotCropInfo(PlotCoords);
+}
+
 TArray<FFarmLandPlotSaveGameData> AFarmlandActor::GetPlotSaveGameData() const
 {
 	if (!FarmlandComponent)
@@ -126,40 +144,11 @@ void AFarmlandActor::HandleLeftMouseClicked(const EEditMode EditMode, const FInt
 		return;
 	}
 	FarmlandComponent->HandleLeftMouseClicked(EditMode, PlowCoords);
-}
-
-void AFarmlandActor::PlantCrop(FIntPoint PlowCoords)
-{
-	if (!FarmlandComponent)
+	if (!CropManagerComponent)
 	{
 		return;
 	}
-	FarmlandComponent->PlantCrop(PlowCoords);
-}
-
-bool AFarmlandActor::HarvestCrop(FIntPoint Coords)
-{
-	if (!FarmlandComponent)
-	{
-		return false;
-	}
-	return FarmlandComponent->HarvestCrop(Coords);
-}
-
-void AFarmlandActor::SetCropDry(FIntPoint Coords, bool bDry)
-{
-	if (!FarmlandComponent)
-	{
-		return;
-	}
-	if (bDry)
-	{
-		FarmlandComponent->CropDried(Coords);
-	}
-	else
-	{
-		FarmlandComponent->UnCropDried(Coords);
-	}
+	CropManagerComponent->HandleLeftMouseClicked(EditMode, PlowCoords);
 }
 
 void AFarmlandActor::OutlinePlot(const FIntPoint Coords, const bool bOutline) const
@@ -178,7 +167,7 @@ void AFarmlandActor::OutlinePlot(const FIntPoint Coords, const bool bOutline) co
 	}
 }
 
-void AFarmlandActor::InitializeComponents()
+void AFarmlandActor::SetupComponents()
 {
 	ensure(FarmlandConfig);
 	ensure(FarmlandConfig->GroundMesh);
@@ -268,7 +257,7 @@ void AFarmlandActor::DrawDebugGrid() const
         {
             for (int32 Y = 0; Y < FarmlandConfig->GridSizeY; Y++)
             {
-                FVector CellCenter = GetCellWorldLocation(X, Y);
+                FVector CellCenter = GetCellWorldLocation(FIntPoint(X, Y));
                 FVector CellExtent = FVector(FarmlandConfig->CellSize.X * 0.5f, FarmlandConfig->CellSize.Y * 0.5f, GridHeight);
                 
                 // 绘制单元格边界框

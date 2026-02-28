@@ -9,13 +9,10 @@
 #include "Tools/FarmSaveGame.h"
 #include "FarmlandComponent.generated.h"
 
-
 class ABasePlayerController;
 class UInstancedStaticMeshComponent;
-class UCropBase;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlotStateChanged, FIntPoint, Coords, FPlotStateData, NewPlotState);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCropPlantedOrRemoved, FIntPoint, Coords);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlotParamChanged, FIntPoint, Coords, float, NewPlotParam);
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -24,7 +21,6 @@ class PROJECTB_API UFarmlandComponent : public USceneComponent
 	GENERATED_BODY()
 
 public:
-	// Sets default values for this component's properties
 	UFarmlandComponent();
 
 	// =================== 事件 ====================
@@ -32,27 +28,37 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Farmland|Events")
 	FOnPlotStateChanged OnPlotStateChanged;
 
-	// 农作物播种或移除
-	UPROPERTY(BlueprintAssignable, Category = "Farmland|Events")
-	FOnCropPlantedOrRemoved OnCropPlantedOrRemoved;
-
-	// 农作物参数湿度改变
+	// 地块参数湿度改变
 	UPROPERTY(BlueprintAssignable, Category = "Farmland|Events")
 	FOnPlotParamChanged OnPlotMoistureChanged;
 
-	// 农作物参数肥力改变
+	// 地块参数肥力改变
 	UPROPERTY(BlueprintAssignable, Category = "Farmland|Events")
 	FOnPlotParamChanged OnPlotFertilityChanged;
 	
 	// ==================== 配置接口 ====================
+	
 	// 设置地块配置数据
 	void SetFarmlandConfig(const TObjectPtr<UFarmlandConfigDataAsset>& InFarmlandConfig){FarmlandConfig = InFarmlandConfig;}
 
-	// 设置农作物数据表
-	void SetCropDataTable(const TObjectPtr<UDataTable>& InCropDataTable){CropDataTable = InCropDataTable;}
+	// 获取地块信息
+	UFUNCTION(BlueprintCallable, Category = "Farmland|Coordinate")
+	FFarmLandPlotInfo GetPlotInfo(const FIntPoint& PlotCoords) const;
 	
-	// =================== 种植接口 ====================
-	// 左键点击
+	// 设置地块状态
+	void SetPlotState(const FIntPoint& PlotCoords, EPlotState State, bool bEnable = true);
+
+	// 获取地块信息保存数据
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	TArray<FFarmLandPlotSaveGameData> GetPlotSaveGameData();
+
+	// 设置地块信息保存数据
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void SetPlotSaveGameData(const TArray<FFarmLandPlotSaveGameData>& InPlotSaveGameData){PlotSaveGameData = InPlotSaveGameData;}
+	
+	// =================== 地块操作 ====================
+	
+	// 处理左键点击
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	void HandleLeftMouseClicked(const EEditMode EditMode, const FIntPoint Coords);
 
@@ -100,26 +106,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	void ClearPest(FIntPoint Coords);
 
-	// 移除作物
-	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void RemoveCrop(FIntPoint Coords);
+	// =================== 绘制 ====================
 	
-	// 种植作物
-	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void PlantCrop(FIntPoint Coords);
-    
-	// 收获作物
-	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	bool HarvestCrop(FIntPoint Coords);
-
-	// 作物干枯
-	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void CropDried(FIntPoint Coords);
-
-	// 干枯恢复
-	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void UnCropDried(FIntPoint Coords);
-
 	// 创建轮廓
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	void CreateOutline(FIntPoint Coords);
@@ -128,13 +116,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	void RemoveOutline(FIntPoint Coords);
 	
-	// 获取作物
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Farmland")
-	UCropBase* GetCropAtPlot(int32 PlotX, int32 PlotY) const;
-    
-	// 更新所有作物生长
-	void UpdateCrops(float DeltaTime);
-
 	// 世界坐标转换为网格坐标
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Coordinate")
 	FIntPoint WorldToCellCoordinates(const FVector& WorldPosition) const;
@@ -146,25 +127,20 @@ public:
 	// 获取鼠标点击的网格坐标（用于蓝图）
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Coordinate")
 	bool GetClickedCellCoordinates(const FVector& ClickLocation, FIntPoint& OutCellCoords) const;
+	
+	// ==================== 其他方法 ====================
+	// 农作物每次生长
+	void OnCropGrownThisTime(FIntPoint Coords, float MoistureCost, float FertilityCost);
 
-	// 获取地块信息
-	UFUNCTION(BlueprintCallable, Category = "Farmland|Coordinate")
-	FFarmLandPlotInfo GetPlotInfo(const FIntPoint& PlotCoords) const;
-
-	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	TArray<FFarmLandPlotSaveGameData> GetPlotSaveGameData();
-
-	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void SetPlotSaveGameData(const TArray<FFarmLandPlotSaveGameData>& InPlotSaveGameData){PlotSaveGameData = InPlotSaveGameData;}
 protected:
 	virtual void BeginPlay() override;
 
 private:
-	// 地块网格配置
+	// 农田配置
 	UPROPERTY()
 	TObjectPtr<UFarmlandConfigDataAsset> FarmlandConfig;
 
-	// 地块信息索引
+	// 地块信息Map
 	UPROPERTY()
 	TMap<FIntPoint, FFarmLandPlotInfo> PlotInfoIndex;
 
@@ -176,53 +152,45 @@ private:
 	UPROPERTY()
 	TObjectPtr<UInstancedStaticMeshComponent> WeedsRenderer;
 
-	// 农作物数据表
-	UPROPERTY()
-	TObjectPtr<UDataTable> CropDataTable;
-
-	// 农作物渲染组件
-	UPROPERTY()
-	TMap<FStaticMeshHISMKey, UInstancedStaticMeshComponent*> CropHISMComponentMap;
-
 	// 轮廓渲染组件
 	UPROPERTY()
 	TObjectPtr<UInstancedStaticMeshComponent>  OutlineHISMComponent;
 
+	// 玩家控制器
 	UPROPERTY()
 	TObjectPtr<ABasePlayerController>  BasePlayerController;
 
+	// 地块信息保存数据
 	UPROPERTY()
 	TArray<FFarmLandPlotSaveGameData> PlotSaveGameData;
 
+	// 杂草扩散定时器
 	FTimerHandle WeedSpreadTimerHandle;
-	
+
+	// 害虫扩散定时器
 	FTimerHandle PestSpreadTimerHandle;
     
-	// 辅助方法
+	// ===================== 辅助方法 =====================
+	
+	// 初始化地块
 	void InitializeLandCells();
+	
+	// 获取地块坐标
 	int32 GetPlotIndex(const FIntPoint& PlotCoords) const;
-	FVector GetPlotWorldPosition(int32 X, int32 Y) const;
-	void UpdateCropVisual(int32 PlotIndex, UCropBase* Crop);
 
-	void SetCropDisease(FIntPoint Coords,bool bDisease, bool bLeafs = false);
-	void UpdateOutlineColor();
+	// 更新轮廓颜色
+	void UpdateOutlineColor() const;
+	
+	// 创建默认地块
 	void CreateDefaultLandCells();
-	bool GetCellBounds(int32 X, int32 Y, FBox& OutBounds) const;
+	
+	// 获取地块包围盒
+	bool GetCellBounds(const FIntPoint& Coords, FBox& OutBounds) const;
 
-	// 获取或创建渲染器
-	TObjectPtr<UInstancedStaticMeshComponent> GetOrCreateRenderer(FName CropID);
-
-	TObjectPtr<UInstancedStaticMeshComponent> GetOrCreateCropHISMC(const FFarmLandPlotInfo& PlotInfo);
-
-	UFUNCTION()
-	void OnCropGrowthStageChanged(FIntPoint Coords, ECropGrowthStage NewGrowthStage);
-
+	// 编辑模式事件响应
 	UFUNCTION()
 	void OnEditModeChanged(EEditMode NewEditMode);
-
-	UFUNCTION()
-	void OnCropGrownThisTime(FIntPoint Coords, float MoistureCost, float FertilityCost);
-
+	
 	// 开始杂草扩散定时器
 	void StartWeedsSpreadTimers();
 
@@ -239,11 +207,6 @@ private:
 
 	// 获取相邻地块坐标（八邻域）
 	void GetNeighborCoords(FIntPoint Coords, TArray<FIntPoint>& OutNeighbors) const;
-
-public:
-	// Called every frame
-	virtual void TickComponent(float DeltaTime, ELevelTick TickType,
-	                           FActorComponentTickFunction* ThisTickFunction) override;
 };
 
 

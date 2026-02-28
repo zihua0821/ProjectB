@@ -4,12 +4,12 @@
 
 #include "CoreMinimal.h"
 #include "FarmlandConfigDataAsset.h"
-#include "Crops/CropData.h"
 #include "GameFramework/Actor.h"
 #include "Tools/FarmSaveGame.h"
 #include "FarmlandActor.generated.h"
 
 class UFarmlandComponent;
+class UCropManagerComponent;
 
 UCLASS()
 class PROJECTB_API AFarmlandActor : public AActor
@@ -22,12 +22,16 @@ public:
 
 protected:
 	// 根
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Farmland|Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Farmland|Components")
 	TObjectPtr<USceneComponent> RootSceneComponent;
 
 	// 地块组件
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Farmland|Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Farmland|Components")
 	TObjectPtr<UFarmlandComponent> FarmlandComponent;
+
+	// 农作物管理组件
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Farmland|Components")
+	TObjectPtr<UCropManagerComponent> CropManagerComponent;
 
 	// 地面网格（整个农场的地面）
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Farmland|Components")
@@ -38,31 +42,29 @@ protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
 
 	virtual void PostInitializeComponents() override;
-
-// #if WITH_EDITOR
-// 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
-// 	virtual void PostEditMove(bool bFinished) override;
-// #endif
 	
 public:
-	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
 	// ==================== 配置属性 ====================
+
+	// 农田配置
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Farmland, meta = (DisplayName = "农田配置"))
 	TObjectPtr<UFarmlandConfigDataAsset> FarmlandConfig;
 
+	// 农作物配置表
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Farmland, meta = (DisplayName = "农作物配置表"))
 	TObjectPtr<UDataTable> CropDataTable;
 	
 	// ==================== 公开方法 ====================
+	
 	// 获取地块组件
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	UFarmlandComponent* GetFarmlandComponent() const { return FarmlandComponent; }
-    
-	// 获取指定单元格的世界位置
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Farmland")
-	FVector GetCellWorldLocation(int32 CellX, int32 CellY) const;
+
+	// 获取农作物管理组件
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	UCropManagerComponent* GetCropManagerComponent() const { return CropManagerComponent; }
 	
 	// 获取鼠标点击的单元格坐标（封装方法）
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
@@ -72,28 +74,24 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	FFarmLandPlotInfo GetPlotInfo(const FIntPoint& PlotCoords) const;
 
+	// 获取地块农作物信息
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	FPlotCropInfo GetPlotCropInfo(const FIntPoint& PlotCoords) const;
+
+	// 获取地块保存数据
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	TArray<FFarmLandPlotSaveGameData> GetPlotSaveGameData() const;
 
+	// 设置地块保存数据
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	void SetPlotSaveGameData(const TArray<FFarmLandPlotSaveGameData>& InPlotSaveGameData);
+	
 	// ====================  农田交互 ====================
+	
 	// 处理左键点击
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
 	void HandleLeftMouseClicked(const EEditMode EditMode, const FIntPoint PlowCoords) const;
-
-	// 种植作物
-	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
-	void PlantCrop(FIntPoint PlowCoords);
-
-	// 收获作物
-	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
-	bool HarvestCrop(FIntPoint Coords);
-
-	// 设置作物干旱
-	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
-	void SetCropDry(FIntPoint Coords,bool bDry);
-
+	
 	// 地块轮廓
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
 	void OutlinePlot(FIntPoint Coords, bool bOutline = true) const;
@@ -102,7 +100,7 @@ private:
 	// ==================== 私有方法 ====================
     
 	// 初始化组件
-	void InitializeComponents();
+	void SetupComponents();
     
 	// 更新地面网格大小
 	void UpdateGroundMeshSize() const;
@@ -113,7 +111,10 @@ private:
 	// 计算农场总大小
 	FVector2D CalculateFarmTotalSize() const;
 	
-	
+	// 获取指定单元格的世界位置
+	FVector GetCellWorldLocation(const FIntPoint& CellCoords) const;
+
+	// 组件是否初始化
 	bool bComponentsInitialized = false;
 };
 

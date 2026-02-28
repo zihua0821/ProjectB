@@ -1,0 +1,434 @@
+#include "Farm/CropManagerComponent.h"
+
+#include "Components/InstancedStaticMeshComponent.h"
+#include "Farm/FarmlandComponent.h"
+#include "Crops/CropBase.h"
+#include "Player/BasePlayerController.h"
+#include "Tools/ISMTools.h"
+
+UCropManagerComponent::UCropManagerComponent()
+{
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f;
+}
+
+void UCropManagerComponent::Initialize(UFarmlandComponent* InFarmlandComponent)
+{
+    FarmlandComponent = InFarmlandComponent;
+    if (FarmlandComponent.IsValid())
+    {
+        // 绑定地块事件
+        FarmlandComponent->OnPlotStateChanged.AddDynamic(this, &UCropManagerComponent::HandlePlotStateChanged);
+        FarmlandComponent->OnPlotMoistureChanged.AddDynamic(this, &UCropManagerComponent::HandlePlotMoistureChanged);
+        FarmlandComponent->OnPlotFertilityChanged.AddDynamic(this, &UCropManagerComponent::HandlePlotFertilityChanged);
+    }
+}
+
+void UCropManagerComponent::HandleLeftMouseClicked(const EEditMode EditMode, const FIntPoint Coords)
+{
+    if (!BasePlayerController)
+    {
+        return;
+    }
+    switch (EditMode) {
+    case EEditMode::PlantCrop:
+        PlantCrop(Coords, BasePlayerController->GetSelectedCropName());
+        break;
+    case EEditMode::HarvestCrop:
+        HarvestCrop(Coords);
+        break;
+    case EEditMode::CropDried:
+        CropDried(Coords);
+        break;
+    case EEditMode::UnCropDried:
+        RemoveCropDried(Coords);
+        break;
+    case EEditMode::RemoveCrop:
+        RemoveCrop(Coords);
+        break;
+    default:
+        break;
+    }
+}
+
+void UCropManagerComponent::BeginPlay()
+{
+    Super::BeginPlay();
+
+    BasePlayerController = Cast<ABasePlayerController>(GetWorld()->GetFirstPlayerController());
+}
+
+void UCropManagerComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    UpdateCrops(DeltaTime);
+}
+
+void UCropManagerComponent::CropDried(FIntPoint Coords)
+{
+    SetCropDisease(Coords, true, true);
+}
+
+void UCropManagerComponent::RemoveCropDried(FIntPoint Coords)
+{
+    SetCropDisease(Coords, false, false);
+}
+
+void UCropManagerComponent::RemoveCrop(FIntPoint Coords)
+{
+    if (!PlotCropMap.Contains(Coords)) return;
+    const FPlotCropInfo& CropInfo = PlotCropMap[Coords];
+    if (!CropInfo.Crop) return;
+
+    // 清理渲染实例
+    UStaticMesh* CurrentMesh = nullptr;
+    switch (CropInfo.Crop->GetCropData().CropGrowthStage)
+    {
+    case ECropGrowthStage::Seed:      CurrentMesh = CropInfo.CropMeshVariant.SeedMesh; break;
+    case ECropGrowthStage::Seedling:  CurrentMesh = CropInfo.CropMeshVariant.SeedlingMesh; break;
+    case ECropGrowthStage::Mature:    CurrentMesh = CropInfo.CropMeshVariant.MatureMesh; break;
+    case ECropGrowthStage::Harvested: CurrentMesh = CropInfo.CropMeshVariant.HarvestedMesh; break;
+    default: break;
+    }
+    if (CurrentMesh)
+    {
+        if (CropHISMComponentMap.Contains(FStaticMeshHISMKey(CurrentMesh)))
+        {
+            if (UInstancedStaticMeshComponent* CurrentInstanceHISMComponent = CropHISMComponentMap.FindChecked(FStaticMeshHISMKey(CurrentMesh)))
+            {
+                UISMTools::RemoveInstanceByTransform(CurrentInstanceHISMComponent, CropInfo.CropTransform);
+            }
+            else
+            {
+                UE_LOG(LogTemp, Log, TEXT("CurrentInstanceHISMComponent not found for %s"), *CurrentMesh->GetName());
+                return;
+            }
+        }
+    }
+
+    // 解绑事件
+    CropInfo.Crop->OnPlantGrowthStageChanged.RemoveAll(this);
+    CropInfo.Crop->OnCropGrownThisTime.Unbind();
+
+    // 移除实例
+    PlotCropMap.Remove(Coords);
+    
+    // 更新地块状态
+    FarmlandComponent->SetPlotState(Coords, EPlotState::CropPlanted, true);
+    
+    OnCropPlantedOrRemoved.Broadcast(Coords);
+}
+
+void UCropManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
+{
+    if (!FarmlandComponent.IsValid()) return;
+
+    // 检查地块是否可种植（已耕地、无作物）
+    FFarmLandPlotInfo PlotInfo = FarmlandComponent->GetPlotInfo(Coords);
+    if (PlotInfo.StateData.IsEmpty() || PlotCropMap.Contains(Coords)) return;
+
+    // 从数据表读取作物配置
+    FName CropID = FName(CropName);
+    const FCropTableRow* Row = CropDataTable->FindRow<FCropTableRow>(CropID, TEXT("PlantCrop"));
+    if (!Row) return;
+
+    // 创建作物实例
+    UCropBase* NewCrop = NewObject<UCropBase>(this);
+    int32 VariantIndex = FMath::RandRange(0, Row->MeshVariants.Num() - 1);
+
+    // 准备作物数据
+    FCropData CropData;
+    CropData.CropID = CropID;
+    CropData.Coords = Coords;
+    CropData.VariantsIndex = VariantIndex;
+    CropData.GrowthSeedTime = Row->GrowthSeedTime;
+    CropData.GrowthSeedlingTime = Row->GrowthSeedlingTime;
+    CropData.MoistureConsumeRate = Row->MoistureConsumeRate;
+    CropData.FertilityConsumeRate = Row->FertilityConsumeRate;
+    CropData.GrowthRate_OverWatered = FarmlandConfig->GrowthRate_OverWatered;
+    CropData.GrowthRate_NutrientBurn = FarmlandConfig->GrowthRate_NutrientBurn;
+    CropData.GrowthRate_WeedInfested = FarmlandConfig->GrowthRate_WeedInfested;
+    CropData.GrowthRate_PestInfested = FarmlandConfig->GrowthRate_PestInfested;
+    
+    // 根据地块初始状态调整作物状态
+    if (PlotInfo.StateData.HasState(EPlotState::Watered))
+        CropData.CropStateData.RemoveState(ECropState::NeedsWater);
+    if (PlotInfo.StateData.HasState(EPlotState::Fertilized))
+        CropData.CropStateData.RemoveState(ECropState::NeedsFertilizer);
+    if (PlotInfo.StateData.HasState(EPlotState::PestInfested))
+        CropData.CropStateData.AddState(ECropState::PestInfested);
+    if (PlotInfo.StateData.HasState(EPlotState::WeedInfested))
+        CropData.CropStateData.AddState(ECropState::WeedInfested);
+
+    // 存储作物信息
+    auto& [Crop, CropTransform, CropMeshVariant, CropNumCustomDataFloats] = PlotCropMap.Add(Coords);
+    Crop = NewCrop;
+    CropMeshVariant = Row->MeshVariants[VariantIndex];
+    CropNumCustomDataFloats = Row->CropNumCustomDataFloats;
+
+    // 计算作物世界位置（需要地块组件提供 Transform）
+    FTransform PlotCropTransform = PlotInfo.Transform;
+    PlotCropTransform.AddToTranslation(FarmlandConfig->CropOffset);
+    CropTransform = PlotCropTransform;
+    
+    // 绑定作物自身的事件
+    NewCrop->OnPlantGrowthStageChanged.AddDynamic(this, &ThisClass::OnCropGrowthStageChanged);
+    NewCrop->OnCropGrownThisTime.BindDynamic(this, &ThisClass::OnCropGrownThisTime);
+    
+    // 初始化作物（传入本组件引用，以便作物能绑定地块事件）
+    NewCrop->InitializeCrop(FarmlandComponent.Get(), CropData);
+
+    // 更新地块状态
+    FarmlandComponent->SetPlotState(Coords, EPlotState::CropPlanted, true);
+    
+    // 广播事件
+    OnCropPlantedOrRemoved.Broadcast(Coords);
+}
+
+bool UCropManagerComponent::HarvestCrop(FIntPoint Coords)
+{
+    if (!PlotCropMap.Contains(Coords)) return false;
+    FPlotCropInfo& CropInfo = PlotCropMap[Coords];
+    if (!CropInfo.Crop || CropInfo.Crop->GetCropData().CropGrowthStage != ECropGrowthStage::Mature)
+        return false;
+
+    CropInfo.Crop->HarvestCrop();
+    return true;
+}
+
+void UCropManagerComponent::UpdateCrops(float DeltaTime)
+{
+    for (auto& Pair : PlotCropMap)
+    {
+        if (Pair.Value.Crop)
+        {
+            Pair.Value.Crop->UpdateCrop(DeltaTime);
+        }
+    }
+}
+
+UCropBase* UCropManagerComponent::GetCropAt(FIntPoint Coords) const
+{
+    if (const FPlotCropInfo* Info = PlotCropMap.Find(Coords))
+        return Info->Crop;
+    return nullptr;
+}
+
+FPlotCropInfo UCropManagerComponent::GetPlotCropInfo(FIntPoint Coords) const
+{
+    if (PlotCropMap.Contains(Coords))
+    {
+        return *PlotCropMap.Find(Coords);
+    }
+    return FPlotCropInfo();
+}
+
+void UCropManagerComponent::OnCropGrowthStageChanged(FIntPoint Coords, ECropGrowthStage NewGrowthStage)
+{
+    if (!PlotCropMap.Contains(Coords)) return;
+    FPlotCropInfo& CropInfo = PlotCropMap[Coords];
+
+    // 确定旧网格和新网格
+    UStaticMesh* OldMesh = nullptr;
+    UStaticMesh* NewMesh = nullptr;
+
+    switch (NewGrowthStage)
+    {
+    case ECropGrowthStage::Seed:
+        NewMesh = CropInfo.CropMeshVariant.SeedMesh;
+        break;
+    case ECropGrowthStage::Seedling:
+        OldMesh = CropInfo.CropMeshVariant.SeedMesh;
+        NewMesh = CropInfo.CropMeshVariant.SeedlingMesh;
+        break;
+    case ECropGrowthStage::Mature:
+        OldMesh = CropInfo.CropMeshVariant.SeedlingMesh;
+        NewMesh = CropInfo.CropMeshVariant.MatureMesh;
+        break;
+    case ECropGrowthStage::Harvested:
+        OldMesh = CropInfo.CropMeshVariant.MatureMesh;
+        NewMesh = CropInfo.CropMeshVariant.HarvestedMesh;
+        break;
+    default:
+        break;
+    }
+
+    // 移除旧实例
+    if (OldMesh)
+    {
+        if (CropHISMComponentMap.Contains(FStaticMeshHISMKey(OldMesh)))
+        {
+            if (UInstancedStaticMeshComponent* OldInstanceHISMComponent = CropHISMComponentMap.FindChecked(FStaticMeshHISMKey(OldMesh)))
+            {
+                UISMTools::RemoveInstanceByTransform(OldInstanceHISMComponent, CropInfo.CropTransform);
+            }
+            else
+            {
+                UE_LOG(LogTemp, Log, TEXT("OldInstanceHISMComponent not found for %s"), *OldMesh->GetName());
+                return;
+            }
+        }
+    }
+
+    // 添加新实例
+    if (NewMesh)
+    {
+        if (UInstancedStaticMeshComponent* NewISM = GetOrCreateCropHISMComponent(CropInfo))
+        {
+            const int32 Index = NewISM->AddInstance(CropInfo.CropTransform);
+            // 设置自定义数据（如病害、叶片等）
+            const bool bWithers = CropInfo.Crop->GetCropData().CropStateData.HasState(ECropState::Withers);
+            NewISM->SetCustomDataValue(Index, CropCustomData::Disease, bWithers ? 1.f : 0.f);
+            NewISM->SetCustomDataValue(Index, CropCustomData::IsLeaf, bWithers ? 1.f : 0.f);
+        }
+    }
+}
+
+UInstancedStaticMeshComponent* UCropManagerComponent::GetOrCreateCropHISMComponent(const FPlotCropInfo& CropInfo)
+{
+    UStaticMesh* Mesh = nullptr;
+    if (!CropInfo.Crop)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Crop is null"))
+        return nullptr;
+    }
+    switch (CropInfo.Crop->GetCropData().CropGrowthStage) {
+    case ECropGrowthStage::None:
+        Mesh = nullptr;
+        break;
+    case ECropGrowthStage::Seed:
+        Mesh = CropInfo.CropMeshVariant.SeedMesh;
+        break;
+    case ECropGrowthStage::Seedling:
+        Mesh = CropInfo.CropMeshVariant.SeedlingMesh;
+        break;
+    case ECropGrowthStage::Mature:
+        Mesh = CropInfo.CropMeshVariant.MatureMesh;
+        break;
+    case ECropGrowthStage::Harvested:
+        Mesh = CropInfo.CropMeshVariant.HarvestedMesh;
+        break;
+    }
+    if (Mesh == nullptr)
+    {
+        return nullptr;
+    }
+    if (CropHISMComponentMap.Contains(FStaticMeshHISMKey(Mesh)))
+    {
+        return CropHISMComponentMap.FindChecked(FStaticMeshHISMKey(Mesh));
+    }
+    UInstancedStaticMeshComponent* TargetComponent = NewObject<UInstancedStaticMeshComponent>(GetOwner());
+    TargetComponent->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
+    TargetComponent->RegisterComponent();
+    TargetComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    TargetComponent->SetCollisionResponseToAllChannels(ECR_Block);
+    TargetComponent->SetStaticMesh(Mesh);
+    TargetComponent->SetNumCustomDataFloats(CropInfo.CropNumCustomDataFloats);
+    CropHISMComponentMap.Add(FStaticMeshHISMKey(Mesh), TargetComponent);
+    return TargetComponent;
+}
+
+void UCropManagerComponent::SetCropDisease(FIntPoint Coords, bool bDisease, bool bLeafs)
+{
+    if (!PlotCropMap.Contains(Coords)) return;
+    FPlotCropInfo& CropInfo = PlotCropMap[Coords];
+    if (!CropInfo.Crop)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Plot is not planted"))
+    }
+
+    UStaticMesh* Mesh = nullptr;
+    switch (CropInfo.Crop->GetCropData().CropGrowthStage) {
+    case ECropGrowthStage::None:
+        Mesh = nullptr;
+        break;
+    case ECropGrowthStage::Seed:
+        Mesh = CropInfo.CropMeshVariant.SeedMesh;
+        break;
+    case ECropGrowthStage::Seedling:
+        Mesh = CropInfo.CropMeshVariant.SeedlingMesh;
+        break;
+    case ECropGrowthStage::Mature:
+        Mesh = CropInfo.CropMeshVariant.MatureMesh;
+        break;
+    case ECropGrowthStage::Harvested:
+        Mesh = CropInfo.CropMeshVariant.HarvestedMesh;
+        break;
+    }
+    UInstancedStaticMeshComponent* CropRenderer = nullptr;
+    if (CropHISMComponentMap.Contains(FStaticMeshHISMKey(Mesh)))
+    {
+        CropRenderer = *CropHISMComponentMap.Find(FStaticMeshHISMKey(Mesh));
+    }
+    if (!CropRenderer)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Crop renderer not found"));
+        return;
+    }
+    int32 CropIndex;
+    UISMTools::GetInstanceIndexByTransform(CropRenderer, CropInfo.CropTransform, CropIndex);
+    if (bDisease)
+    {
+        CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::Disease, 1.f);
+        if (bLeafs)
+        {
+            CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::IsLeaf, 1.f);
+            CropInfo.Crop->GetCropDataRef().CropStateData.AddState(ECropState::NeedsWater);
+        }
+        else
+        {
+            CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::IsLeaf, 0.f);
+            CropInfo.Crop->GetCropDataRef().CropStateData.AddState(ECropState::NeedsWater);
+        }
+    }
+    else
+    {
+        CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::Disease, 0.f);
+        CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::IsLeaf, 0.f);
+        CropInfo.Crop->GetCropDataRef().CropStateData.RemoveState(ECropState::NeedsWater);
+    }
+	
+}
+
+void UCropManagerComponent::HandlePlotStateChanged(FIntPoint Coords, FPlotStateData NewPlotState)
+{
+    if (!PlotCropMap.Contains(Coords)) return;
+
+    // 移除农作物
+    if (NewPlotState.IsEmpty())
+    {
+        RemoveCrop(Coords);
+        return;
+    }
+
+    // 更新农作物
+    UCropBase* Crop = PlotCropMap[Coords].Crop;
+    if (!Crop) return;
+    Crop->HandleCropWeedInfested(NewPlotState.HasState(EPlotState::WeedInfested));
+    Crop->HandleCropPestInfested(NewPlotState.HasState(EPlotState::PestInfested));
+}
+
+void UCropManagerComponent::HandlePlotMoistureChanged(FIntPoint Coords, float NewMoisture)
+{
+    if (!PlotCropMap.Contains(Coords)) return;
+    if (UCropBase* Crop = PlotCropMap[Coords].Crop)
+    {
+        Crop->HandleCropMoisture(NewMoisture);
+    }
+}
+
+void UCropManagerComponent::HandlePlotFertilityChanged(FIntPoint Coords, float NewFertility)
+{
+    if (!PlotCropMap.Contains(Coords)) return;
+    if (UCropBase* Crop = PlotCropMap[Coords].Crop)
+    {
+        Crop->HandleCropFertility(NewFertility);
+    }
+}
+
+// ReSharper disable once CppMemberFunctionMayBeConst
+void UCropManagerComponent::OnCropGrownThisTime(FIntPoint Coords, float MoistureCost, float FertilityCost)
+{
+    if (!FarmlandComponent.IsValid()) return;
+    FarmlandComponent->OnCropGrownThisTime(Coords, MoistureCost, FertilityCost);
+}

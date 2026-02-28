@@ -333,10 +333,11 @@ enum class EPlotState : uint8
     // 基础状态
     Empty          = 0      UMETA(DisplayName = "空地"),        // 0000 0000
     Plowed         = 1 << 0 UMETA(DisplayName = "已耕地"),      // 0000 0001
-    Watered        = 1 << 1 UMETA(DisplayName = "已灌溉"),      // 0000 0010
-    Fertilized     = 1 << 2 UMETA(DisplayName = "已施肥"),      // 0000 0100
-    WeedInfested   = 1 << 3 UMETA(DisplayName = "有杂草"),      // 0000 1000
-    PestInfested   = 1 << 4 UMETA(DisplayName = "有虫害"),      // 0001 0000
+    CropPlanted    = 1 << 1 UMETA(DisplayName = "已种植"),      // 0000 0010
+    Watered        = 1 << 2 UMETA(DisplayName = "已灌溉"),      // 0000 0100
+    Fertilized     = 1 << 3 UMETA(DisplayName = "已施肥"),      // 0000 1000
+    WeedInfested   = 1 << 4 UMETA(DisplayName = "有杂草"),      // 0001 0000
+    PestInfested   = 1 << 5 UMETA(DisplayName = "有虫害"),      // 0010 0000
     
 };
 ENUM_CLASS_FLAGS(EPlotState); 
@@ -419,6 +420,7 @@ struct FPlotStateData
 
         TArray<FString> ActiveStates;
         if (HasState(EPlotState::Plowed))       ActiveStates.Add(TEXT("已耕地"));
+        if (HasState(EPlotState::CropPlanted))  ActiveStates.Add(TEXT("已种植"));
         if (HasState(EPlotState::Watered))      ActiveStates.Add(TEXT("已灌溉"));
         if (HasState(EPlotState::Fertilized))   ActiveStates.Add(TEXT("已施肥"));
         if (HasState(EPlotState::WeedInfested)) ActiveStates.Add(TEXT("有杂草"));
@@ -607,7 +609,7 @@ struct FCropMeshVariant
 
 };
 /**
- *  FarmLand 地块数据结构
+ *  地块数据结构
  */
 USTRUCT(BlueprintType)
 struct FFarmLandPlotInfo
@@ -638,8 +640,18 @@ struct FFarmLandPlotInfo
     // 虫害Niagara组件
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLand|PlotInfo")
     TObjectPtr<UNiagaraComponent> PestNiagaraComponent;
+};
 
+/**
+ * 地块农作物数据结构
+ */
+USTRUCT(BlueprintType)
+struct FPlotCropInfo
+{
+    GENERATED_BODY()
+    
     // ==================== 农作物信息 ====================
+    
     // 农作物
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLand|CropInfo")
     TObjectPtr<UCropBase> Crop;
@@ -655,9 +667,7 @@ struct FFarmLandPlotInfo
     // 农作物自定义数据数量
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLand|CropInfo")
     int32 CropNumCustomDataFloats;
-
 };
-
 
 
 /**
@@ -690,7 +700,17 @@ struct FCropTableRow : public FTableRowBase
 
     // 自定义数据数量
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 CropNumCustomDataFloats;
+    int32 CropNumCustomDataFloats = 2;
+
+    // 水分消耗
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource Consumption",
+              meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+    float MoistureConsumeRate = 0.001f;
+
+    // 肥力消耗
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource Consumption",
+              meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+    float FertilityConsumeRate = 0.002f;
 };
 
 // 使用网格的软引用路径作为键
@@ -777,5 +797,29 @@ struct FCropData
     // 农作物当前阶段生长时间
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float CurrentStageGrowthTime = 0.f;
+
+    // 水分消耗
+    UPROPERTY()
+    float MoistureConsumeRate = 0.001f;
+
+    // 肥力消耗
+    UPROPERTY()
+    float FertilityConsumeRate = 0.002f;
+
+    // 浇水过多倍率
+    UPROPERTY()
+    float GrowthRate_OverWatered = 0.5f;
+
+    // 肥料烧伤倍率
+    UPROPERTY()
+    float GrowthRate_NutrientBurn = 0.5f;
+
+    // 杂草倍率
+    UPROPERTY()
+    float GrowthRate_WeedInfested = 0.7f;
+
+    // 虫害倍率
+    UPROPERTY()
+    float GrowthRate_PestInfested = 0.6f;
     
 };

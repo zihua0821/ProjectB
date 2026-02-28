@@ -15,6 +15,8 @@ void UCropBase::InitializeCrop(UFarmlandComponent* InComponent, FCropData& InCro
 	if (OwnerComponent.IsValid())
 	{
 		OwnerComponent->OnPlotStateChanged.AddDynamic(this, &ThisClass::HandlePlotStateChanged);
+		OwnerComponent->OnPlotMoistureChanged.AddDynamic(this, &ThisClass::HandlePlotMoistureChanged);
+		OwnerComponent->OnPlotFertilityChanged.AddDynamic(this, &ThisClass::HandlePlotFertilityChanged);
 	}
 	CropData = InCropData;
 	OnPlantGrowthStageChanged.Broadcast(CropData.Coords, CropData.CropGrowthStage);
@@ -68,17 +70,60 @@ void UCropBase::UpdateCropQuality(float DeltaTime)
 
 void UCropBase::UpdateCrop(float DeltaTime)
 {
-	const bool bIsCropNotGrowth = CropData.CropGrowthStage == ECropGrowthStage::Mature ||
-								  CropData.CropGrowthStage == ECropGrowthStage::Harvested ||
-								  (CropData.CropGrowthStage == ECropGrowthStage::Seed && CropData.CropStateData.HasState(ECropState::NeedsWater)) ||
-								  (CropData.CropGrowthStage == ECropGrowthStage::Seedling && CropData.CropStateData.HasState(ECropState::NeedsFertilizer));
-	if (bIsCropNotGrowth)
+	// ===== 1. 收获后：既不更新品质，也不生长 =====
+	if (CropData.CropGrowthStage == ECropGrowthStage::Harvested)
 	{
 		return;
 	}
+
+	// ===== 2. 种子休眠：种子阶段同时缺水和缺肥时，不更新品质也不生长 =====
+	if (CropData.CropGrowthStage == ECropGrowthStage::Seed &&
+		CropData.CropStateData.HasState(ECropState::NeedsWater) &&
+		CropData.CropStateData.HasState(ECropState::NeedsFertilizer))
+	{
+		return;
+	}
+
+	// ===== 3. 更新品质数据（所有未收获的阶段都要更新，包括成熟）=====
 	UpdateCropQuality(DeltaTime);
+
+	// ===== 4. 成熟阶段：只更新品质，不生长，不消耗资源 =====
+	if (CropData.CropGrowthStage == ECropGrowthStage::Mature)
+	{
+		return;
+	}
+
+	// ===== 以下为生长逻辑（仅种子和幼苗阶段）=====
+
+	// 计算生长速率
+	float GrowthRate = 1.0f;
+
+	// 严重缺水或缺肥 → 完全停止生长（但品质已记录）
+	if (CropData.CropStateData.HasState(ECropState::NeedsWater) ||
+		CropData.CropStateData.HasState(ECropState::NeedsFertilizer))
+	{
+		GrowthRate = 0.0f;
+	}
+	else
+	{
+		// 其他负面状态按比例减慢生长
+		if (CropData.CropStateData.HasState(ECropState::OverWatered))
+			GrowthRate *= CropData.GrowthRate_OverWatered;
+		if (CropData.CropStateData.HasState(ECropState::NutrientBurn))
+			GrowthRate *= CropData.GrowthRate_NutrientBurn;
+		if (CropData.CropStateData.HasState(ECropState::WeedInfested))
+			GrowthRate *= CropData.GrowthRate_WeedInfested;
+		if (CropData.CropStateData.HasState(ECropState::PestInfested))
+			GrowthRate *= CropData.GrowthRate_PestInfested;
+	}
+
+	// 生长速率为0不生长
+	if (GrowthRate <= 0.f)
+	{
+		return;
+	}
 	
-	CropData.TotalGrowthTime += DeltaTime;
+	CropData.TotalGrowthTime += DeltaTime * GrowthRate;
 	switch (CropData.CropGrowthStage)
 	{
 	case ECropGrowthStage::Seed:
@@ -109,7 +154,7 @@ void UCropBase::UpdateCrop(float DeltaTime)
 
 	if (OnCropGrownThisTime.IsBound())
 	{
-		OnCropGrownThisTime.Execute(CropData.Coords, 0.001f, 0.002f);
+		OnCropGrownThisTime.Execute(CropData.Coords, CropData.MoistureConsumeRate, CropData.FertilityConsumeRate);
 	}
 }
 
@@ -229,6 +274,8 @@ void UCropBase::BeginDestroy()
 	if (OwnerComponent.IsValid())
 	{
 		OwnerComponent->OnPlotStateChanged.RemoveAll(this);
+		OwnerComponent->OnPlotMoistureChanged.RemoveAll(this);
+		OwnerComponent->OnPlotFertilityChanged.RemoveAll(this);
 	}
 	UObject::BeginDestroy();
 }
@@ -250,4 +297,16 @@ void UCropBase::HandlePlotStateChanged(FIntPoint Coords, FPlotStateData NewPlotS
 	HandleCropFertility(PlotInfo.FertilityPercentage);
 	HandleCropPestInfested(NewPlotState.HasState(EPlotState::PestInfested));
 	HandleCropWeedInfested(NewPlotState.HasState(EPlotState::WeedInfested));
+}
+
+void UCropBase::HandlePlotMoistureChanged(FIntPoint Coords, float NewMoisture)
+{
+	if (CropData.Coords != Coords) return; 
+	HandleCropMoisture(NewMoisture);
+}
+
+void UCropBase::HandlePlotFertilityChanged(FIntPoint Coords, float NewFertility)
+{
+	if (CropData.Coords != Coords) return;
+	HandleCropFertility(NewFertility);
 }

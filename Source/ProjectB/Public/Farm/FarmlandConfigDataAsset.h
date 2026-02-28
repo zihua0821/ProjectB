@@ -123,6 +123,24 @@ public:
 			  meta = (DisplayName = "虫害粒子半径"))
 	float PestRadius = 50.f;
 
+	// ==================== 生长倍率系数 ====================
+	// 当作物处于相应状态时，生长速度乘以该系数（0~1）
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth Rate Modifiers",
+			  meta = (DisplayName = "浇水过多倍率", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+	float GrowthRate_OverWatered = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth Rate Modifiers",
+			  meta = (DisplayName = "肥料烧伤倍率", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+	float GrowthRate_NutrientBurn = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth Rate Modifiers",
+			  meta = (DisplayName = "有杂草倍率", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+	float GrowthRate_WeedInfested = 0.7f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth Rate Modifiers",
+			  meta = (DisplayName = "有虫害倍率", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+	float GrowthRate_PestInfested = 0.6f;
+
 	// ==================== 操作配置 ====================
 
 	// 每次灌溉湿度增加

@@ -95,6 +95,11 @@ private:
 	UFUNCTION()
 	void HandlePlotStateChanged(FIntPoint Coords, FPlotStateData NewPlotState);
 
+	UFUNCTION()
+	void HandlePlotMoistureChanged(FIntPoint Coords, float NewMoisture);
+
+	UFUNCTION()
+	void HandlePlotFertilityChanged(FIntPoint Coords, float NewFertility);
 };
 
 
