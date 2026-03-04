@@ -198,10 +198,16 @@ private:
 
 	// 开始虫害扩散定时器
 	void StartPestsSpreadTimers();
-	
+
+	// 停止杂草扩散定时器
+	bool TryStopWeedSpreadTimer();
+
 	// 杂草扩散逻辑
 	UFUNCTION()
 	void SpreadWeeds();
+
+	// 停止虫害扩散定时器
+	bool TryStopPestSpreadTimer();
 
 	// 虫害扩散逻辑
 	UFUNCTION()

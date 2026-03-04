@@ -330,6 +330,8 @@ void UFarmlandComponent::ClearWeeds(const FIntPoint Coords)
 	}
 	PlotInfo.WeedsTransform.Empty();
 	SetPlotState(Coords, EPlotState::WeedInfested, false);
+	
+	TryStopWeedSpreadTimer();
 }
 
 void UFarmlandComponent::GeneratePest(const FIntPoint Coords)
@@ -355,6 +357,7 @@ void UFarmlandComponent::GeneratePest(const FIntPoint Coords)
 	PestParticle->SetFloatParameter("PestRadius", FarmlandConfig->PestRadius);
 	PlotInfo.PestNiagaraComponent = PestParticle;
 	SetPlotState(Coords, EPlotState::PestInfested, true);
+	
 	StartPestsSpreadTimers();
 }
 
@@ -374,6 +377,8 @@ void UFarmlandComponent::ClearPest(const FIntPoint Coords)
 	PlotInfo.PestNiagaraComponent->DestroyComponent();  // 销毁组件
 	PlotInfo.PestNiagaraComponent = nullptr;  // 置空指针
 	SetPlotState(Coords, EPlotState::PestInfested, false);
+
+	TryStopPestSpreadTimer();
 }
 
 void UFarmlandComponent::UpdateOutlineColor() const
@@ -893,10 +898,8 @@ void UFarmlandComponent::StartPestsSpreadTimers()
 	}
 }
 
-void UFarmlandComponent::SpreadWeeds()
+bool UFarmlandComponent::TryStopWeedSpreadTimer()
 {
-	if (!FarmlandConfig) return;
-
 	// 收集当前所有有杂草的地块
 	TArray<FIntPoint> InfectedPlots;
 	for (const auto& Pair : PlotInfoIndex)
@@ -911,9 +914,26 @@ void UFarmlandComponent::SpreadWeeds()
 	if (InfectedPlots.Num() == 0)
 	{
 		GetWorld()->GetTimerManager().ClearTimer(WeedSpreadTimerHandle);
-		return;
+		return true;
 	}
+	return false;
+}
 
+void UFarmlandComponent::SpreadWeeds()
+{
+	if (!FarmlandConfig) return;
+
+	if (TryStopWeedSpreadTimer()) return;
+
+	// 获取所有被感染的地块
+	TArray<FIntPoint> InfectedPlots;
+	for (const auto& Pair : PlotInfoIndex)
+	{
+		if (Pair.Value.StateData.HasState(EPlotState::WeedInfested))
+		{
+			InfectedPlots.Add(Pair.Key);
+		}
+	}
 	// 随机顺序处理，避免偏向性
 	Algo::RandomShuffle(InfectedPlots);
 	
@@ -948,10 +968,8 @@ void UFarmlandComponent::SpreadWeeds()
 	}
 }
 
-void UFarmlandComponent::SpreadPests()
+bool UFarmlandComponent::TryStopPestSpreadTimer()
 {
-	if (!FarmlandConfig) return;
-
 	// 收集所有有虫害的地块
 	TArray<FIntPoint> InfestedPlots;
 	for (const auto& Pair : PlotInfoIndex)
@@ -966,9 +984,26 @@ void UFarmlandComponent::SpreadPests()
 	if (InfestedPlots.Num() == 0)
 	{
 		GetWorld()->GetTimerManager().ClearTimer(PestSpreadTimerHandle);
-		return;
+		return true;
 	}
-	
+	return false;
+}
+
+void UFarmlandComponent::SpreadPests()
+{
+	if (!FarmlandConfig) return;
+
+	if (TryStopPestSpreadTimer()) return;
+
+	// 收集所有有虫害的地块
+	TArray<FIntPoint> InfestedPlots;
+	for (const auto& Pair : PlotInfoIndex)
+	{
+		if (Pair.Value.StateData.HasState(EPlotState::PestInfested))
+		{
+			InfestedPlots.Add(Pair.Key);
+		}
+	}
 	// 随机顺序处理，避免偏向性
 	Algo::RandomShuffle(InfestedPlots);
 
