@@ -154,7 +154,7 @@ void UCropBase::UpdateCrop(float DeltaTime)
 
 	if (OnCropGrownThisTime.IsBound())
 	{
-		OnCropGrownThisTime.Execute(CropData.Coords, CropData.MoistureConsumeRate, CropData.FertilityConsumeRate);
+		OnCropGrownThisTime.Execute(CropData.Coords, CropData.MoistureConsumePerSecond * DeltaTime, CropData.FertilityConsumePerSecond * DeltaTime);
 	}
 }
 

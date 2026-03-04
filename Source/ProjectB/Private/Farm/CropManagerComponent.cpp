@@ -145,8 +145,8 @@ void UCropManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
     CropData.VariantsIndex = VariantIndex;
     CropData.GrowthSeedTime = Row->GrowthSeedTime;
     CropData.GrowthSeedlingTime = Row->GrowthSeedlingTime;
-    CropData.MoistureConsumeRate = Row->MoistureConsumeRate;
-    CropData.FertilityConsumeRate = Row->FertilityConsumeRate;
+    CropData.MoistureConsumePerSecond = Row->MoistureConsumePerSecond;
+    CropData.FertilityConsumePerSecond = Row->FertilityConsumePerSecond;
     CropData.GrowthRate_OverWatered = FarmlandConfig->GrowthRate_OverWatered;
     CropData.GrowthRate_NutrientBurn = FarmlandConfig->GrowthRate_NutrientBurn;
     CropData.GrowthRate_WeedInfested = FarmlandConfig->GrowthRate_WeedInfested;
@@ -230,8 +230,8 @@ void UCropManagerComponent::InitCropsFromSaveGameData()
             // 根据数据表配置
             CropData.GrowthSeedTime = Row->GrowthSeedTime;
             CropData.GrowthSeedlingTime = Row->GrowthSeedlingTime;
-            CropData.MoistureConsumeRate = Row->MoistureConsumeRate;
-            CropData.FertilityConsumeRate = Row->FertilityConsumeRate;
+            CropData.MoistureConsumePerSecond = Row->MoistureConsumePerSecond;
+            CropData.FertilityConsumePerSecond = Row->FertilityConsumePerSecond;
             CropData.GrowthRate_OverWatered = FarmlandConfig->GrowthRate_OverWatered;
             CropData.GrowthRate_NutrientBurn = FarmlandConfig->GrowthRate_NutrientBurn;
             CropData.GrowthRate_WeedInfested = FarmlandConfig->GrowthRate_WeedInfested;

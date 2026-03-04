@@ -13,8 +13,8 @@
 
 UFarmlandComponent::UFarmlandComponent()
 {
-	PrimaryComponentTick.bCanEverTick = false;
-	
+	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.TickInterval = 0.1f;
 }
 
 void UFarmlandComponent::HandleLeftMouseClicked(const EEditMode EditMode, const FIntPoint Coords)
@@ -640,6 +640,63 @@ void UFarmlandComponent::BeginPlay()
 	StartWeedsSpreadTimers();
 }
 
+void UFarmlandComponent::UpdatePlotLoss(float DeltaTime)
+{
+	if (!FarmlandConfig)
+	{
+		return;
+	}
+
+	// 计算本帧的自然流失量
+	const float MoistureLoss = FarmlandConfig->NaturalMoistureLossPerSecond * DeltaTime;
+	const float FertilityLoss = FarmlandConfig->NaturalFertilityLossPerSecond * DeltaTime;
+
+	if (FMath::IsNearlyZero(MoistureLoss) && FMath::IsNearlyZero(FertilityLoss))
+	{
+		return;
+	}
+
+	for (auto& PlotInfoTuple : PlotInfoIndex)
+	{
+		FFarmLandPlotInfo& PlotInfo = PlotInfoTuple.Value;
+		const FIntPoint Coords = PlotInfoTuple.Key;
+		
+		// 更新水分
+		if (PlotInfo.MoisturePercentage > 0.f)
+		{
+			float OldMoisture = PlotInfo.MoisturePercentage;
+			PlotInfo.MoisturePercentage = FMath::Clamp(PlotInfo.MoisturePercentage - MoistureLoss, 0.f, 1.f);
+			
+			if (!FMath::IsNearlyEqual(OldMoisture, PlotInfo.MoisturePercentage))
+			{
+				OnPlotMoistureChanged.Broadcast(Coords, PlotInfo.MoisturePercentage);
+				HandlePlotMoistureChanged(Coords);
+			}
+		}
+
+		// 更新肥力
+		if (PlotInfo.FertilityPercentage > 0.f)
+		{
+			float OldFertility = PlotInfo.FertilityPercentage;
+			PlotInfo.FertilityPercentage = FMath::Clamp(PlotInfo.FertilityPercentage - FertilityLoss, 0.f, 1.f);
+
+			if (!FMath::IsNearlyEqual(OldFertility, PlotInfo.FertilityPercentage))
+			{
+				OnPlotFertilityChanged.Broadcast(Coords, PlotInfo.FertilityPercentage);
+				HandlePlotFertilityChanged(Coords);
+			}
+		}
+	}
+}
+
+void UFarmlandComponent::TickComponent(float DeltaTime, enum ELevelTick TickType,
+                                       FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	UpdatePlotLoss(DeltaTime);
+}
+
 void UFarmlandComponent::CreateDefaultLandCells()
 {
 	// 计算缩放因子
@@ -833,14 +890,9 @@ void UFarmlandComponent::OnEditModeChanged(EEditMode NewEditMode)
 	UpdateOutlineColor();
 }
 
-void UFarmlandComponent::OnCropGrownThisTime(FIntPoint Coords, float MoistureCost, float FertilityCost)
+void UFarmlandComponent::HandlePlotMoistureChanged(FIntPoint Coords)
 {
-	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(Coords);
-	PlotInfo.MoisturePercentage = FMath::Clamp(PlotInfo.MoisturePercentage - MoistureCost, 0.f, 1.f);
-	PlotInfo.FertilityPercentage = FMath::Clamp(PlotInfo.FertilityPercentage - FertilityCost, 0.f, 1.f);
-	OnPlotMoistureChanged.Broadcast(Coords, PlotInfo.MoisturePercentage);
-	OnPlotFertilityChanged.Broadcast(Coords, PlotInfo.FertilityPercentage);
-
+	const FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(Coords);
 	// 判断水分状态
 	if (PlotInfo.MoisturePercentage >= 0.2f && PlotInfo.MoisturePercentage <= 0.8f)// 正常
 	{
@@ -855,7 +907,11 @@ void UFarmlandComponent::OnCropGrownThisTime(FIntPoint Coords, float MoistureCos
 		UE_LOG(LogTemp, Log, TEXT("Moisture level is insufficient: %.2f"), PlotInfo.MoisturePercentage);
 		LandDried(Coords);
 	}
+}
 
+void UFarmlandComponent::HandlePlotFertilityChanged(FIntPoint Coords)
+{
+	const FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(Coords);
 	// 判断肥力状态
 	if (PlotInfo.FertilityPercentage >= 0.2f && PlotInfo.FertilityPercentage <= 0.8f)// 正常
 	{
@@ -870,6 +926,17 @@ void UFarmlandComponent::OnCropGrownThisTime(FIntPoint Coords, float MoistureCos
 		UE_LOG(LogTemp, Log, TEXT("Fertility level is insufficient: %.2f"), PlotInfo.FertilityPercentage);
 		ClearFertilize(Coords);
 	}
+}
+
+void UFarmlandComponent::OnCropGrownThisTime(FIntPoint Coords, float MoistureCost, float FertilityCost)
+{
+	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(Coords);
+	PlotInfo.MoisturePercentage = FMath::Clamp(PlotInfo.MoisturePercentage - MoistureCost, 0.f, 1.f);
+	PlotInfo.FertilityPercentage = FMath::Clamp(PlotInfo.FertilityPercentage - FertilityCost, 0.f, 1.f);
+	OnPlotMoistureChanged.Broadcast(Coords, PlotInfo.MoisturePercentage);
+	OnPlotFertilityChanged.Broadcast(Coords, PlotInfo.FertilityPercentage);
+	HandlePlotMoistureChanged(Coords);
+	HandlePlotFertilityChanged(Coords);
 }
 
 void UFarmlandComponent::StartWeedsSpreadTimers()

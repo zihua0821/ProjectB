@@ -137,6 +137,8 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
+	virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
 private:
 	// 农田配置
 	UPROPERTY()
@@ -176,7 +178,10 @@ private:
 	
 	// 初始化地块
 	void InitializeLandCells();
-	
+
+	// 更新地块流失
+	void UpdatePlotLoss(float DeltaTime);
+
 	// 获取地块坐标
 	int32 GetPlotIndex(const FIntPoint& PlotCoords) const;
 
@@ -192,7 +197,13 @@ private:
 	// 编辑模式事件响应
 	UFUNCTION()
 	void OnEditModeChanged(EEditMode NewEditMode);
-	
+
+	// 处理地块水分变化
+	void HandlePlotMoistureChanged(FIntPoint Coords);
+
+	// 处理地块肥力变化
+	void HandlePlotFertilityChanged(FIntPoint Coords);
+
 	// 开始杂草扩散定时器
 	void StartWeedsSpreadTimers();
 
@@ -219,6 +230,7 @@ private:
 	// 从保存数据初始化地块
 	void InitPlotFromSaveGameData();
 
+	// 更新地块可视化
 	void UpdatePlotVisual(const FIntPoint& PlotCoords);
 };
 

@@ -80,6 +80,18 @@ public:
 			  meta = (DisplayName = "单元格z偏移"))
 	float CellOffsetZ;
 
+	// ==================== 地块配置 ================
+
+	// 地块每秒水分流失
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Land Cell",
+		meta = (DisplayName = "地块每秒水分流失", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+	float NaturalMoistureLossPerSecond = 0.001f;
+
+	// 地块每秒肥力流失
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Land Cell",
+		meta = (DisplayName = "地块每秒肥力流失", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+	float NaturalFertilityLossPerSecond = 0.001f;
+
 	// ============== 作物配置 ==============
 	// 作物z偏移
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crop",

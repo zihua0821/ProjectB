@@ -702,15 +702,15 @@ struct FCropTableRow : public FTableRowBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     int32 CropNumCustomDataFloats = 2;
 
-    // 水分消耗
+    // 水分消耗每秒
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource Consumption",
               meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
-    float MoistureConsumeRate = 0.001f;
+    float MoistureConsumePerSecond = 0.01f;
 
-    // 肥力消耗
+    // 肥力消耗每秒
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource Consumption",
               meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
-    float FertilityConsumeRate = 0.002f;
+    float FertilityConsumePerSecond = 0.02f;
 };
 
 // 使用网格的软引用路径作为键
@@ -800,11 +800,11 @@ struct FCropData
 
     // 水分消耗
     UPROPERTY()
-    float MoistureConsumeRate = 0.001f;
+    float MoistureConsumePerSecond = 0.01f;
 
     // 肥力消耗
     UPROPERTY()
-    float FertilityConsumeRate = 0.002f;
+    float FertilityConsumePerSecond = 0.02f;
 
     // 浇水过多倍率
     UPROPERTY()
