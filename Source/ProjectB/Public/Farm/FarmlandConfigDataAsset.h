@@ -33,10 +33,7 @@ public:
 			  meta = (DisplayName = "单元格间距", ClampMin = "-100.0", ClampMax = "100.0", UIMin = "-100.0", UIMax = "100.0"))
 	float CellSpacing = 20.0f;
     
-	// 土地网格高度偏移（相对于地面）
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration",
-			  meta = (DisplayName = "土地高度", ClampMin = "-100.0", ClampMax = "100.0", UIMin = "-100.0", UIMax = "100.0"))
-	float LandHeightOffset = 30.0f;
+	
 
 	// 地面扩展
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration",
@@ -72,13 +69,19 @@ public:
 	
 	// 单元格大小
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Cell",
-			  meta = (DisplayName = "单元格大小", ClampMin = "10.0", ClampMax = "500.0", UIMin = "10.0", UIMax = "500.0"))
-	FVector2D CellSize = FVector2D(200.f, 200.f);
+			  meta = (DisplayName = "单元格大小"))
+	FVector2D CellSize = FVector2D(400.f, 400.f);
 
-	// 作物z偏移
+	// z偏移
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Cell",
 			  meta = (DisplayName = "单元格z偏移"))
 	float CellOffsetZ;
+
+	// 单元格高度
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Cell",
+			  meta = (DisplayName = "单元格高度"))
+	float LandHeightOffset = 30.0f;
+	
 
 	// ==================== 地块配置 ================
 

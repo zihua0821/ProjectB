@@ -7,6 +7,7 @@
 #include "NiagaraFunctionLibrary.h"
 #include "Algo/RandomShuffle.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Planet/PlanetConfigDataAsset.h"
 #include "Player/BasePlayerController.h"
 #include "Tools/ISMTools.h"
 
@@ -577,6 +578,62 @@ bool UFarmlandComponent::GetClickedCellCoordinates(const FVector& ClickLocation,
 	return false;
 }
 
+bool UFarmlandComponent::GetPlotByRaycast(const FVector& RayStart, const FVector& RayDirection,
+	FIntPoint& OutCellCoords, float& OutHitDistance) const
+{
+	if (!LandCellRenderer || !FarmlandConfig)
+	{
+		return false;
+	}
+	const float TraceDistance = 10000.f;
+	const FVector TraceEnd = RayStart + RayDirection * TraceDistance;
+	DrawDebugLine(
+		GetWorld(),
+		RayStart,
+		TraceEnd,
+		FColor::Red,
+		true,
+		-1.f,  
+		0,
+		2.f   // 线宽
+	);
+	// 使用 ISM 的 HitTest 进行精确检测
+	FHitResult HitResult;
+	const FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FarmlandClick), false);
+    
+	// 执行射线检测（针对 ISM 组件）
+	if (LandCellRenderer->LineTraceComponent(HitResult, RayStart, TraceEnd, QueryParams))
+	{
+		OutHitDistance = HitResult.Distance;
+        
+		// 从 HitResult 获取实例索引
+		if (HitResult.Item != INDEX_NONE)
+		{
+			// 通过实例索引反查坐标
+			// 需要遍历 PlotInfoIndex 找到匹配的 Transform
+			FTransform InstanceTransform;
+			if (!LandCellRenderer->GetInstanceTransform(HitResult.Item, InstanceTransform))
+			{
+				return false;
+			}
+            
+			for (const auto& PlotInfoTuple : PlotInfoIndex)
+			{
+				const FTransform& PlotTransform = PlotInfoTuple.Value.Transform;
+                
+				// 比较位置（允许小误差）
+				if (FVector::DistSquared(InstanceTransform.GetLocation(), PlotTransform.GetLocation()) < 1.f)
+				{
+					OutCellCoords = PlotInfoTuple.Key;
+					return true;
+				}
+			}
+		}
+	}
+    
+	return false;
+}
+
 FFarmLandPlotInfo UFarmlandComponent::GetPlotInfo(const FIntPoint& PlotCoords) const
 {
 	if (PlotInfoIndex.Contains(PlotCoords))
@@ -699,58 +756,84 @@ void UFarmlandComponent::TickComponent(float DeltaTime, enum ELevelTick TickType
 
 void UFarmlandComponent::CreateDefaultLandCells()
 {
-	// 计算缩放因子
-	// 获取土地网格的原始边界
+    // 计算缩放因子
 	const FBoxSphereBounds CellBounds = FarmlandConfig->LandCellMesh->GetBounds();
 	const FVector CellExtent = CellBounds.BoxExtent;
-	// 计算需要的缩放
-	const float ScaleFactorX = FarmlandConfig->CellSize.X / (CellExtent.X * 2.f);
+	const float BaseScaleFactorX = FarmlandConfig->CellSize.X / (CellExtent.X * 2.f);
 	const float ScaleFactorY = FarmlandConfig->CellSize.Y / (CellExtent.Y * 2.f);
 	const float ScaleFactorZ = FarmlandConfig->LandHeightOffset / (CellExtent.Z * 2.f);
-	const FVector InstanceScale(ScaleFactorX, ScaleFactorY, ScaleFactorZ);
-    
-	// 计算总偏移（从中心开始）
-	const float TotalWidth = FarmlandConfig->GridSizeX * FarmlandConfig->CellSize.X + (FarmlandConfig->GridSizeX - 1) * FarmlandConfig->CellSpacing;
-	const float TotalHeight = FarmlandConfig->GridSizeY * FarmlandConfig->CellSize.Y + (FarmlandConfig->GridSizeY - 1) * FarmlandConfig->CellSpacing;
-	const float StartX = -TotalWidth * 0.5f + FarmlandConfig->CellSize.X * 0.5f;
-	const float StartY = -TotalHeight * 0.5f + FarmlandConfig->CellSize.Y * 0.5f;
-    
-	// 创建所有土地单元格实例
-	for (int32 Y = 0; Y < FarmlandConfig->GridSizeY; Y++)
-	{
-		for (int32 X = 0; X < FarmlandConfig->GridSizeX; X++)
-		{
-			// 计算位置
-			const float PosX = StartX + X * (FarmlandConfig->CellSize.X + FarmlandConfig->CellSpacing);
-			const float PosY = StartY + Y * (FarmlandConfig->CellSize.Y + FarmlandConfig->CellSpacing);
-			float PosZ = FarmlandConfig->LandHeightOffset / 2.0f;
-			// if (FarmlandConfig->bUseGround)
-			// {
-			// 	PosZ = FarmlandConfig->LandHeightOffset / 2.0f;
-			// }
-			
-			// 创建变换
-			FTransform CellTransform;
-			CellTransform.SetLocation(FVector(PosX, PosY, PosZ));
-			CellTransform.SetScale3D(InstanceScale);
-			
-			// 创建信息
-			FFarmLandPlotInfo PlotInfo;
-			PlotInfo.Transform = CellTransform;
-			
-			// 记录映射
-			PlotInfoIndex.Add(FIntPoint(X, Y), PlotInfo);
-			
-			// 初始化所有地块
-			if (FarmlandConfig->bInitAllLandCells && PlotSaveGameData.Num() == 0)
-			{
-				PlowLand(FIntPoint(X, Y));
-			}
-		}
-	}
+
+	// 纬度收缩参数
+	const float MinLatitudeScale = 0.5f;  // 边缘最小缩放系数（Y 轴缩到 70%）
+
+    // 自动计算经纬度步长
+    const float LatStep = (PlanetConfig->MaxLat - PlanetConfig->MinLat) / (PlanetConfig->NumLat - 1);
+    const float LonStep = 360.0f / PlanetConfig->NumLon;
+
+	const int32 NumLatCells = PlanetConfig->NumLat - 1;  
+	const int32 NumLonCells = PlanetConfig->NumLon;       
 	
-	UE_LOG(LogTemp, Log, TEXT("Initialized %d land cells for %dx%d grid by Default"), 
-	       LandCellRenderer->GetInstanceCount(), FarmlandConfig->GridSizeX, FarmlandConfig->GridSizeY);
+    // 遍历经纬度网格生成地块
+    for (int32 LatIdx = 0; LatIdx <NumLatCells; LatIdx++)
+    {
+        for (int32 LonIdx = 0; LonIdx < NumLonCells; LonIdx++)
+        {
+            // 将索引转换为弧度
+        	const float LatRad = FMath::DegreesToRadians(PlanetConfig->MinLat + (LatIdx + 0.5f) * LatStep);
+        	const float LonRad = FMath::DegreesToRadians((LonIdx + 0.5f) * LonStep);
+
+            // 球面坐标转世界坐标（Z 轴向上）
+            const float CosLat = FMath::Cos(LatRad);
+            const float SinLat = FMath::Sin(LatRad);
+            const float CosLon = FMath::Cos(LonRad);
+            const float SinLon = FMath::Sin(LonRad);
+
+            FVector PlotLocation(
+                PlanetConfig->Radius * CosLat * CosLon,
+                PlanetConfig->Radius * CosLat * SinLon,
+                PlanetConfig->Radius * SinLat
+            );
+
+        	// 计算地块朝向：让 Z 轴指向球心外（径向）
+        	const FVector NormalDirection = PlotLocation.GetSafeNormal();
+        	PlotLocation += NormalDirection * FarmlandConfig->CellOffsetZ;
+        	const FRotator PlotRotation = FRotationMatrix::MakeFromZ(NormalDirection).Rotator();
+
+        	// 计算纬度缩放系数（基于纬度角，Z 轴是上下方向）
+        	const float CurrentLatDeg = PlanetConfig->MinLat + (LatIdx + 0.5f) * LatStep;
+        	const float AbsLatFromEquator = FMath::Abs(CurrentLatDeg);  // 距离赤道的纬度
+        	const float MaxLatFromEquator = FMath::Max(FMath::Abs(PlanetConfig->MinLat), FMath::Abs(PlanetConfig->MaxLat));
+        	const float LatitudeFactor = FMath::Clamp(AbsLatFromEquator / MaxLatFromEquator, 0.f, 1.f);
+        	const float LatitudeScale = FMath::Lerp(1.0f, MinLatitudeScale, LatitudeFactor);
+
+        	// 应用纬度收缩（只缩 Y 轴）
+        	FTransform PlotTransform;
+        	PlotTransform.SetLocation(PlotLocation);
+        	PlotTransform.SetRotation(PlotRotation.Quaternion());
+        	PlotTransform.SetScale3D(FVector(BaseScaleFactorX * LatitudeScale, ScaleFactorY, ScaleFactorZ));
+
+            // 记录地块信息
+            FFarmLandPlotInfo PlotInfo;
+            PlotInfo.Transform = PlotTransform;
+            PlotInfoIndex.Add(FIntPoint(LatIdx, LonIdx), PlotInfo);
+
+        	// FVector WorldLocation = GetComponentTransform().TransformPosition(PlotLocation);
+        	// WorldLocation += NormalDirection * 100.f;
+        	// DrawDebugPoint(GetWorld(), WorldLocation, 15.f, FColor::Emerald, true, -1.f, 0);
+        	// const FString DebugText = FString::Printf(TEXT("(%d,%d)"), LatIdx, LonIdx);
+        	// DrawDebugString(GetWorld(), WorldLocation, DebugText, nullptr, FColor::White, -1.f, false, 2.f);
+
+
+            // 初始化耕地状态
+            if (FarmlandConfig->bInitAllLandCells && PlotSaveGameData.Num() == 0)
+            {
+                PlowLand(FIntPoint(LatIdx, LonIdx));
+            }
+        }
+    }
+	
+	UE_LOG(LogTemp, Log, TEXT("Initialized %d land cells on sphere (%dx%d grid, total %d)"),
+	   LandCellRenderer->GetInstanceCount(), NumLatCells, NumLonCells, NumLatCells * NumLonCells);
 }
 
 bool UFarmlandComponent::GetCellBounds(const FIntPoint& Coords, FBox& OutBounds) const
@@ -866,6 +949,7 @@ void UFarmlandComponent::InitializeLandCells()
 	LandCellRenderer->RegisterComponent();
 	LandCellRenderer->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	LandCellRenderer->SetCollisionResponseToAllChannels(ECR_Block);
+	LandCellRenderer->SetCollisionObjectType(ECC_WorldDynamic);
 	check(FarmlandConfig->LandCellMesh);
 	LandCellRenderer->SetStaticMesh(FarmlandConfig->LandCellMesh);
 	// 设置自定义数据数量 你必须告诉 ISM 组件：“每个实例需要占用多少个浮点位？”

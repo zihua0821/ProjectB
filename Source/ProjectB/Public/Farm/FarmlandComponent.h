@@ -9,8 +9,10 @@
 #include "Tools/FarmSaveGame.h"
 #include "FarmlandComponent.generated.h"
 
+class UPlanetConfigDataAsset;
 class ABasePlayerController;
 class UInstancedStaticMeshComponent;
+
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlotStateChanged, FIntPoint, Coords, FPlotStateData, NewPlotState);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlotParamChanged, FIntPoint, Coords, float, NewPlotParam);
@@ -37,9 +39,16 @@ public:
 	FOnPlotParamChanged OnPlotFertilityChanged;
 	
 	// ==================== 配置接口 ====================
+
+	// 设置星球配置数据
+	void SetPlanetConfig(const TObjectPtr<UPlanetConfigDataAsset>& InPlanetConfig) {PlanetConfig = InPlanetConfig;}
 	
 	// 设置地块配置数据
-	void SetFarmlandConfig(const TObjectPtr<UFarmlandConfigDataAsset>& InFarmlandConfig){FarmlandConfig = InFarmlandConfig;}
+	void SetFarmlandConfig(const TObjectPtr<UFarmlandConfigDataAsset>& InFarmlandConfig) {FarmlandConfig = InFarmlandConfig;}
+
+	// 获取所有地块的 ISM 组件
+	UFUNCTION(BlueprintCallable, Category = "Farmland|Debug")
+	UInstancedStaticMeshComponent* GetLandCellRenderer() const { return LandCellRenderer; }
 
 	// 获取地块信息
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Coordinate")
@@ -126,9 +135,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Coordinate")
 	FVector CellToWorldCoordinates(int32 CellX, int32 CellY) const;
     
-	// 获取鼠标点击的网格坐标（用于蓝图）
+	// 获取鼠标点击的网格坐标
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Coordinate")
 	bool GetClickedCellCoordinates(const FVector& ClickLocation, FIntPoint& OutCellCoords) const;
+
+	// ==================== 重构后的点击检测 ====================
+	// 通过射线与地块 ISM 碰撞检测获取坐标
+	bool GetPlotByRaycast(const FVector& RayStart, const FVector& RayDirection, 
+								  FIntPoint& OutCellCoords, float& OutHitDistance) const;
 	
 	// ==================== 其他方法 ====================
 	// 农作物每次生长
@@ -140,6 +154,11 @@ protected:
 	virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
+	
+	// 星球配置
+	UPROPERTY()
+	TObjectPtr<UPlanetConfigDataAsset> PlanetConfig;
+
 	// 农田配置
 	UPROPERTY()
 	TObjectPtr<UFarmlandConfigDataAsset> FarmlandConfig;

@@ -8,6 +8,7 @@
 #include "Game/ProjectBGameInstance.h"
 #include "BasePlayerController.generated.h"
 
+class APlanetActor;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEditModeChanged, EEditMode, NewEditMode);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHoveredPlot, AFarmlandActor*, HoveredFarmlandActor, FIntPoint, HoveredPlotCoords);
 
@@ -62,7 +63,7 @@ private:
 	// 编辑模式
 	EEditMode EditMode = EEditMode::None;
 	// 射线检测获取点击的农场和单元格
-	bool TraceForFarmlandAndCell(FVector& OutHitLocation, AFarmlandActor*& OutFarmland, FIntPoint& OutCellCoords);
+	bool TraceForFarmlandAndCell(FVector& OutHitLocation, APlanetActor*& OutPlanetActor, FIntPoint& OutCellCoords);
 
 	void UpdateHoveredPlot();
 

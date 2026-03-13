@@ -3,6 +3,8 @@
 
 #include "Planet/PlanetActor.h"
 
+#include "Farm/FarmlandComponent.h"
+
 
 APlanetActor::APlanetActor()
 {
@@ -15,40 +17,54 @@ APlanetActor::APlanetActor()
 	// 创建球体网格组件
 	SphereMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("SphereMeshComponent"));
 	SphereMeshComponent->SetupAttachment(RootSceneComponent);
-	SphereMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SphereMeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	// SphereMeshComponent->SetCastShadow(false); // 可选：球体本身不投射阴影
 
-	
+	// FarmlandComponent
+	FarmlandComponent = CreateDefaultSubobject<UFarmlandComponent>(TEXT("FarmlandComponent"));
+	FarmlandComponent->SetupAttachment(RootSceneComponent);
 }
 
 void APlanetActor::BeginPlay()
 {
 	Super::BeginPlay();
 
-	
+	SetupComponents();
 }
 
-void APlanetActor::OnConstruction(const FTransform& Transform)
+void APlanetActor::PostInitializeComponents()
 {
-	Super::OnConstruction(Transform);
+	Super::PostInitializeComponents();
 
-	// 设置球体网格
-	if (SphereMesh)
+	ensure(FarmlandConfig);
+	if (FarmlandComponent)
 	{
-		SphereMeshComponent->SetStaticMesh(SphereMesh);
+		FarmlandComponent->SetFarmlandConfig(FarmlandConfig);
+	}
+	ensure(PlanetConfig);
+	if (FarmlandComponent)
+	{
+		FarmlandComponent->SetPlanetConfig(PlanetConfig);
+	}
+}
 
-		// 获取球体网格的半径
-		const float SphereMeshRadius =  SphereMesh->GetBounds().SphereRadius;
-		
-		// 设置球体缩放
-		const float Scale = Radius / SphereMeshRadius; 
-		SphereMeshComponent->SetWorldScale3D(FVector(Scale));
 
-		// 设置材质
-		if (SurfaceMaterial)
-		{
-			SphereMeshComponent->SetMaterial(0, SurfaceMaterial);
-		}
+void APlanetActor::SetupComponents()
+{
+	ensure(PlanetConfig);
+	ensure(PlanetConfig->SphereMesh);
+	// 设置球体网格
+	SphereMeshComponent->SetStaticMesh(PlanetConfig->SphereMesh);
+	// 获取球体网格的半径
+	const float SphereMeshRadius = PlanetConfig->SphereMesh->GetBounds().SphereRadius;
+	// 设置球体缩放
+	const float Scale = PlanetConfig->Radius / SphereMeshRadius; 
+	SphereMeshComponent->SetWorldScale3D(FVector(Scale));
+	// 设置材质
+	ensure(PlanetConfig->SurfaceMaterial);
+	if (PlanetConfig->SurfaceMaterial)
+	{
+		SphereMeshComponent->SetMaterial(0, PlanetConfig->SurfaceMaterial);
 	}
 
 	GenerateGridLines();
@@ -56,16 +72,16 @@ void APlanetActor::OnConstruction(const FTransform& Transform)
 	// GeneratePlots();
 }
 
-void APlanetActor::Tick(float DeltaTime)
-{
-	Super::Tick(DeltaTime);
-}
-
 void APlanetActor::GenerateGridLines()
 {
+	ensure(PlanetConfig);
+	const float MaxLat = PlanetConfig->MaxLat;
+	const float MinLat = PlanetConfig->MinLat;
+	const int32 NumLat = PlanetConfig->NumLat;
+	const int32 NumLon = PlanetConfig->NumLon;
 	// 自动计算纬度步长
 	LatStep = (MaxLat - MinLat) / (NumLat - 1);
-
+	
 	// 自动计算经度步长
 	LonStep = 360.0f / NumLon;
 
@@ -125,8 +141,9 @@ void APlanetActor::GenerateGridLines()
 
 FVector APlanetActor::LatLonToWorldCoordinates(int32 LatIdx, int32 LonIdx) const
 {
+	ensure(PlanetConfig);
 	// 将索引转换为弧度
-	float LatRad = FMath::DegreesToRadians(MinLat) + LatIdx * FMath::DegreesToRadians(LatStep);
+	float LatRad = FMath::DegreesToRadians(PlanetConfig->MinLat) + LatIdx * FMath::DegreesToRadians(LatStep);
 	float LonRad = LonIdx * FMath::DegreesToRadians(LonStep);
 
 	// Z 轴向上的球面坐标公式
@@ -135,9 +152,9 @@ FVector APlanetActor::LatLonToWorldCoordinates(int32 LatIdx, int32 LonIdx) const
 	float CosLon = FMath::Cos(LonRad);
 	float SinLon = FMath::Sin(LonRad);
 
-	float X = Radius * CosLat * CosLon;
-	float Y = Radius * CosLat * SinLon;
-	float Z = Radius * SinLat; 
+	float X = PlanetConfig->Radius * CosLat * CosLon;
+	float Y = PlanetConfig->Radius * CosLat * SinLon;
+	float Z = PlanetConfig->Radius * SinLat; 
 
 	return FVector(X, Y, Z);
 }

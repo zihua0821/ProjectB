@@ -5,6 +5,8 @@
 
 #include "Crops/CropBase.h"
 #include "Farm/FarmlandActor.h"
+#include "Farm/FarmlandComponent.h"
+#include "Planet/PlanetActor.h"
 #include "ProjectB/Public/TimeSync/TimeSyncComponent.h"
 
 ABasePlayerController::ABasePlayerController()
@@ -48,13 +50,14 @@ void ABasePlayerController::OnLeftMouseClick()
 {
 	// 执行射线检测
 	FVector HitLocation;
-	AFarmlandActor* HitFarmland = nullptr;
+	APlanetActor* HitPlanet = nullptr;
 	FIntPoint CellCoords;
-	if (TraceForFarmlandAndCell(HitLocation, HitFarmland, CellCoords))
+	if (TraceForFarmlandAndCell(HitLocation, HitPlanet, CellCoords))
 	{
 		// DrawDebugSphere(GetWorld(), HitLocation, 10.f, 12, FColor::Red, false, 3.f);
 		// const FFarmLandPlotInfo& PlotInfo = HitFarmland->GetPlotInfo(CellCoords);
-		HitFarmland->HandleLeftMouseClicked(EditMode, CellCoords);
+		
+		// HitPlanet->HandleLeftMouseClicked(EditMode, CellCoords);
 		
 		// GEngine->AddOnScreenDebugMessage(-1,
 		// 		3.f,
@@ -63,7 +66,7 @@ void ABasePlayerController::OnLeftMouseClick()
 	}
 }
 
-bool ABasePlayerController::TraceForFarmlandAndCell(FVector& OutHitLocation, AFarmlandActor*& OutFarmland,
+bool ABasePlayerController::TraceForFarmlandAndCell(FVector& OutHitLocation, APlanetActor*& OutPlanetActor,
 	FIntPoint& OutCellCoords)
 {
 	// 获取鼠标位置
@@ -99,24 +102,30 @@ bool ABasePlayerController::TraceForFarmlandAndCell(FVector& OutHitLocation, AFa
             if (GetWorld()->LineTraceSingleByObjectType(HitResult, TraceStart, TraceEnd, ObjectQueryParams, QueryParams))
             {
                 OutHitLocation = HitResult.Location;
-                
                 // 检查是否击中了FarmlandActor或其子组件
                 AActor* HitActor = HitResult.GetActor();
                 if (HitActor)
                 {
-                    // 检查是否是FarmlandActor
-                    OutFarmland = Cast<AFarmlandActor>(HitActor);
+                    // 检查是否是PlanetActor
+                    OutPlanetActor = Cast<APlanetActor>(HitActor);
                     
-                    // 如果不是直接击中FarmlandActor，检查是否是它的组件
-                    if (!OutFarmland)
+                    // 如果不是直接击中PlanetActor，检查是否是它的组件
+                    if (!OutPlanetActor)
                     {
-                        OutFarmland = Cast<AFarmlandActor>(HitActor->GetOwner());
+                        OutPlanetActor = Cast<APlanetActor>(HitActor->GetOwner());
                     }
                     
                     // 如果找到了FarmlandActor，计算单元格坐标
-                    if (OutFarmland && OutFarmland->GetFarmlandComponent())
+                    if (OutPlanetActor && OutPlanetActor->GetFarmlandComponent())
                     {
-                        return OutFarmland->GetCellCoordinatesFromClick(OutHitLocation, OutCellCoords);
+                        // 直接使用 ISM 碰撞结果
+                        UFarmlandComponent* FarmlandComp = OutPlanetActor->GetFarmlandComponent();
+                        float HitDistance;
+                        
+                        if (FarmlandComp->GetPlotByRaycast(TraceStart, WorldDirection, OutCellCoords, HitDistance))
+                        {
+                            return true;
+                        }
                     }
                 }
             }
@@ -128,30 +137,30 @@ bool ABasePlayerController::TraceForFarmlandAndCell(FVector& OutHitLocation, AFa
 
 void ABasePlayerController::UpdateHoveredPlot()
 {
-	// 执行射线检测
+	/*// 执行射线检测
 	FVector HitLocation;
-	AFarmlandActor* HitFarmland = nullptr;
+	APlanetActor* HitPlanet = nullptr;
 	FIntPoint CellCoords = FIntPoint(-1, -1);
 
-	if (TraceForFarmlandAndCell(HitLocation, HitFarmland, CellCoords))
+	if (TraceForFarmlandAndCell(HitLocation, HitPlanet, CellCoords))
 	{
 		// DrawDebugSphere(GetWorld(), HitLocation, 5.f, 12, FColor::Red, false, 3.f);
 		if (PreHoveredPlotCoords == CellCoords)
 		{
 			return;
 		}
-		OnHoveredPlot.Broadcast(HitFarmland, CellCoords);
-		if (PreHoveredFarmland && PreHoveredFarmland != HitFarmland)
+		OnHoveredPlot.Broadcast(HitPlanet, CellCoords);
+		if (PreHoveredFarmland && PreHoveredFarmland != HitPlanet)
 		{
 			PreHoveredFarmland->OutlinePlot(PreHoveredPlotCoords, false);
 		}
 		else
 		{
-			HitFarmland->OutlinePlot(PreHoveredPlotCoords, false);
+			HitPlanet->OutlinePlot(PreHoveredPlotCoords, false);
 		}
-		HitFarmland->OutlinePlot(CellCoords, true);
+		HitPlanet->OutlinePlot(CellCoords, true);
 		PreHoveredPlotCoords = CellCoords;
-		PreHoveredFarmland = HitFarmland;
+		PreHoveredFarmland = HitPlanet;
 	}
 	else
 	{
@@ -162,7 +171,7 @@ void ABasePlayerController::UpdateHoveredPlot()
 			PreHoveredPlotCoords = FIntPoint(-1, -1);
 			PreHoveredFarmland = nullptr;
 		}
-	}
+	}*/
 }
 
 // 切换到下一个编辑模式（正向循环）

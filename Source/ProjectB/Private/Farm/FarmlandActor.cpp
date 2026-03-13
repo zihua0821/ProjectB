@@ -283,7 +283,7 @@ void AFarmlandActor::DrawDebugGrid() const
                 
                 // 在单元格中心显示坐标
                 FString CoordText = FString::Printf(TEXT("(%d,%d)"), X, Y);
-                DrawDebugString(GetWorld(), CellCenter + FVector(0, 0, 20), CoordText, nullptr, FColor::White, FarmlandConfig->DebugDuration, true);
+                DrawDebugString(GetWorld(), CellCenter, CoordText, nullptr, FColor::White, FarmlandConfig->DebugDuration, true);
             }
         }
     }
