@@ -77,3 +77,6 @@ Plugins/*/Intermediate/*
 DerivedDataCache/*
 Packed/
 *.user
+
+# OpenClaw Cron 任务文件
+.last-commit
