@@ -382,15 +382,37 @@ void UFarmlandComponent::ClearPest(const FIntPoint Coords)
 	TryStopPestSpreadTimer();
 }
 
+void UFarmlandComponent::UpdateOutline(FIntPoint Coords, bool bEnable)
+{
+	if (!PlotInfoIndex.Contains(Coords))
+	{
+		return;
+	}
+	const FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(Coords);
+	FTransform InstanceTransform = PlotInfo.Transform;
+	InstanceTransform.AddToTranslation(FVector(0.f, 0.f, FarmlandConfig->OutlineOffsetZ));
+	int32 InstanceIndex;
+	UISMTools::GetInstanceIndexByTransform(LandCellOutlineRenderer,InstanceTransform, InstanceIndex);
+	if (bEnable)
+	{
+		LandCellOutlineRenderer->SetCustomDataValue(InstanceIndex, PlotCustomData::Opacity, 0.1f);
+		UpdateOutlineColor();
+	}
+	else
+	{
+		LandCellOutlineRenderer->SetCustomDataValue(InstanceIndex, PlotCustomData::Opacity, 0.f);
+	}
+}
+
 void UFarmlandComponent::UpdateOutlineColor() const
 {
-	if (!OutlineHISMComponent)
+	if (!LandCellOutlineRenderer)
 	{
 		UE_LOG(LogTemp, Error, TEXT("OutlineHISMComponent is nullptr"))
 		return;
 	}
 	check(FarmlandConfig->OutlineMaterial);
-	UMaterialInstanceDynamic* DynamicOutlineMaterialInstance = OutlineHISMComponent->CreateDynamicMaterialInstance(0, FarmlandConfig->OutlineMaterial);
+	UMaterialInstanceDynamic* DynamicOutlineMaterialInstance = LandCellOutlineRenderer->CreateDynamicMaterialInstance(0, FarmlandConfig->OutlineMaterial);
 	FLinearColor OutlineColor = FLinearColor::Green;
 	switch (BasePlayerController->GetEditMode()) {
 	case None:
@@ -448,55 +470,27 @@ void UFarmlandComponent::UpdateOutlineColor() const
 		break;
 	}
 	DynamicOutlineMaterialInstance->SetVectorParameterValue("SelfLuminousColor", OutlineColor);
-	OutlineHISMComponent->SetMaterial(0,DynamicOutlineMaterialInstance);
+	LandCellOutlineRenderer->SetMaterial(0,DynamicOutlineMaterialInstance);
 }
 
-void UFarmlandComponent::CreateOutline(FIntPoint Coords)
+void UFarmlandComponent::InitLandCellOutlineRenderer()
 {
-	if (!PlotInfoIndex.Contains(Coords))
+	if (LandCellOutlineRenderer != nullptr)
 	{
-		UE_LOG(LogTemp, Error, TEXT("PlotInfo not found"))
+		UE_LOG(LogTemp, Error, TEXT("LandCellOutlineRenderer have been Initialized"));
 		return;
 	}
-	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(Coords);
-	if (OutlineHISMComponent == nullptr)
-	{
-		OutlineHISMComponent = NewObject<UInstancedStaticMeshComponent>(GetOwner());
-		OutlineHISMComponent->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
-		OutlineHISMComponent->RegisterComponent();
-		OutlineHISMComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		OutlineHISMComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
-		check(FarmlandConfig->LandCellMesh);
-		OutlineHISMComponent->SetStaticMesh(FarmlandConfig->LandCellMesh);
-		OutlineHISMComponent->bDisallowNanite = true;
-		
-	}
-	FTransform InstanceTransform = PlotInfo.Transform;
-	InstanceTransform.AddToTranslation(FVector(0.f, 0.f, FarmlandConfig->OutlineOffsetZ));
-	OutlineHISMComponent->AddInstance(InstanceTransform);
-	UpdateOutlineColor();
-}
-
-void UFarmlandComponent::RemoveOutline(FIntPoint Coords)
-{
-	if (!PlotInfoIndex.Contains(Coords))
-	{
-		return;
-	}
-	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(Coords);
-	if (OutlineHISMComponent == nullptr)
-	{
-		UE_LOG(LogTemp, Error, TEXT("OutlineHISMComponent is null"))
-		return;
-	}
-
-	FTransform InstanceTransform = PlotInfo.Transform;
-	InstanceTransform.AddToTranslation(FVector(0.f, 0.f, FarmlandConfig->OutlineOffsetZ));
-	if (!UISMTools::RemoveInstanceByTransform(OutlineHISMComponent,InstanceTransform))
-	{
-		UE_LOG(LogTemp, Error, TEXT("无法移除实例"))
-	}
-	
+	LandCellOutlineRenderer = NewObject<UInstancedStaticMeshComponent>(GetOwner());
+	LandCellOutlineRenderer->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
+	LandCellOutlineRenderer->RegisterComponent();
+	LandCellOutlineRenderer->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	LandCellOutlineRenderer->SetCollisionResponseToAllChannels(ECR_Ignore);
+	ensure(FarmlandConfig);
+	ensure(FarmlandConfig->LandCellMesh);
+	LandCellOutlineRenderer->SetStaticMesh(FarmlandConfig->LandCellMesh);
+	LandCellOutlineRenderer->SetNumCustomDataFloats(1);
+	LandCellOutlineRenderer->bDisallowNanite = true;
+	LandCellOutlineRenderer->SetCastShadow(false);
 }
 
 FIntPoint UFarmlandComponent::WorldToCellCoordinates(const FVector& WorldPosition) const
@@ -578,31 +572,21 @@ bool UFarmlandComponent::GetClickedCellCoordinates(const FVector& ClickLocation,
 	return false;
 }
 
-bool UFarmlandComponent::GetPlotByRaycast(const FVector& RayStart, const FVector& RayDirection,
+bool UFarmlandComponent::GetPlotByRaycast(const FVector& RayStart, const FVector& RayEnd,
 	FIntPoint& OutCellCoords, float& OutHitDistance) const
 {
-	if (!LandCellRenderer || !FarmlandConfig)
+	if (!LandCellOutlineRenderer)
 	{
 		return false;
 	}
-	const float TraceDistance = 10000.f;
-	const FVector TraceEnd = RayStart + RayDirection * TraceDistance;
-	DrawDebugLine(
-		GetWorld(),
-		RayStart,
-		TraceEnd,
-		FColor::Red,
-		true,
-		-1.f,  
-		0,
-		2.f   // 线宽
-	);
+
+	const FVector NewRayEnd = FMath::Lerp(RayStart, RayEnd, 1.1f);
 	// 使用 ISM 的 HitTest 进行精确检测
 	FHitResult HitResult;
 	const FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FarmlandClick), false);
     
 	// 执行射线检测（针对 ISM 组件）
-	if (LandCellRenderer->LineTraceComponent(HitResult, RayStart, TraceEnd, QueryParams))
+	if (LandCellOutlineRenderer->LineTraceComponent(HitResult, RayStart, NewRayEnd, QueryParams))
 	{
 		OutHitDistance = HitResult.Distance;
         
@@ -612,7 +596,7 @@ bool UFarmlandComponent::GetPlotByRaycast(const FVector& RayStart, const FVector
 			// 通过实例索引反查坐标
 			// 需要遍历 PlotInfoIndex 找到匹配的 Transform
 			FTransform InstanceTransform;
-			if (!LandCellRenderer->GetInstanceTransform(HitResult.Item, InstanceTransform))
+			if (!LandCellOutlineRenderer->GetInstanceTransform(HitResult.Item, InstanceTransform))
 			{
 				return false;
 			}
@@ -824,6 +808,12 @@ void UFarmlandComponent::CreateDefaultLandCells()
         	// DrawDebugString(GetWorld(), WorldLocation, DebugText, nullptr, FColor::White, -1.f, false, 2.f);
 
 
+        	// 创建轮廓
+        	FTransform OutlineInstanceTransform = PlotInfo.Transform;
+        	OutlineInstanceTransform.AddToTranslation(FVector(0.f, 0.f, FarmlandConfig->OutlineOffsetZ));
+        	int32 OutlineInstanceIdx = LandCellOutlineRenderer->AddInstance(OutlineInstanceTransform);
+        	LandCellOutlineRenderer->SetCustomDataValue(OutlineInstanceIdx, PlotCustomData::Opacity, 0.f);
+        	
             // 初始化耕地状态
             if (FarmlandConfig->bInitAllLandCells && PlotSaveGameData.Num() == 0)
             {
@@ -934,26 +924,30 @@ void UFarmlandComponent::UpdatePlotVisual(const FIntPoint& PlotCoords)
 	
 }
 
-void UFarmlandComponent::InitializeLandCells()
+void UFarmlandComponent::InitLandCellRenderer()
 {
-	ensure(FarmlandConfig);
-	ensure(FarmlandConfig->LandCellMesh);
-
 	if (LandCellRenderer != nullptr)
 	{
-		UE_LOG(LogTemp, Error, TEXT("LandCells have been Initialized"));
+		UE_LOG(LogTemp, Error, TEXT("LandCellRenderer have been Initialized"));
 		return;
 	}
 	LandCellRenderer = NewObject<UInstancedStaticMeshComponent>(GetOwner());
 	LandCellRenderer->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
 	LandCellRenderer->RegisterComponent();
-	LandCellRenderer->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	LandCellRenderer->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	LandCellRenderer->SetCollisionResponseToAllChannels(ECR_Block);
 	LandCellRenderer->SetCollisionObjectType(ECC_WorldDynamic);
-	check(FarmlandConfig->LandCellMesh);
+	ensure(FarmlandConfig);
+	ensure(FarmlandConfig->LandCellMesh);
 	LandCellRenderer->SetStaticMesh(FarmlandConfig->LandCellMesh);
 	// 设置自定义数据数量 你必须告诉 ISM 组件：“每个实例需要占用多少个浮点位？”
 	LandCellRenderer->SetNumCustomDataFloats(FarmlandConfig->NumCustomDataFloats);
+}
+
+void UFarmlandComponent::InitializeLandCells()
+{
+	InitLandCellRenderer();
+	InitLandCellOutlineRenderer();
 
 	CreateDefaultLandCells();
 	InitPlotFromSaveGameData();

@@ -57,12 +57,12 @@ void ABasePlayerController::OnLeftMouseClick()
 		// DrawDebugSphere(GetWorld(), HitLocation, 10.f, 12, FColor::Red, false, 3.f);
 		// const FFarmLandPlotInfo& PlotInfo = HitFarmland->GetPlotInfo(CellCoords);
 		
-		// HitPlanet->HandleLeftMouseClicked(EditMode, CellCoords);
+		HitPlanet->HandleLeftMouseClicked(EditMode, CellCoords);
 		
 		// GEngine->AddOnScreenDebugMessage(-1,
 		// 		3.f,
 		// 		FColor::Red,
-		// 		FString::Printf(TEXT("Hit Farmland: %s (%d,%d) %s"), *HitFarmland->GetName(), CellCoords.X, CellCoords.Y, *PlotInfo.StateData.ToString()));
+		// 		FString::Printf(TEXT("Hit :(%d,%d)"), CellCoords.X, CellCoords.Y));
 	}
 }
 
@@ -122,7 +122,7 @@ bool ABasePlayerController::TraceForFarmlandAndCell(FVector& OutHitLocation, APl
                         UFarmlandComponent* FarmlandComp = OutPlanetActor->GetFarmlandComponent();
                         float HitDistance;
                         
-                        if (FarmlandComp->GetPlotByRaycast(TraceStart, WorldDirection, OutCellCoords, HitDistance))
+                        if (FarmlandComp->GetPlotByRaycast(TraceStart, HitResult.Location, OutCellCoords, HitDistance))
                         {
                             return true;
                         }
@@ -137,7 +137,7 @@ bool ABasePlayerController::TraceForFarmlandAndCell(FVector& OutHitLocation, APl
 
 void ABasePlayerController::UpdateHoveredPlot()
 {
-	/*// 执行射线检测
+	// 执行射线检测
 	FVector HitLocation;
 	APlanetActor* HitPlanet = nullptr;
 	FIntPoint CellCoords = FIntPoint(-1, -1);
@@ -150,9 +150,9 @@ void ABasePlayerController::UpdateHoveredPlot()
 			return;
 		}
 		OnHoveredPlot.Broadcast(HitPlanet, CellCoords);
-		if (PreHoveredFarmland && PreHoveredFarmland != HitPlanet)
+		if (PreHoveredPlanetActor && PreHoveredPlanetActor != HitPlanet)
 		{
-			PreHoveredFarmland->OutlinePlot(PreHoveredPlotCoords, false);
+			PreHoveredPlanetActor->OutlinePlot(PreHoveredPlotCoords, false);
 		}
 		else
 		{
@@ -160,18 +160,18 @@ void ABasePlayerController::UpdateHoveredPlot()
 		}
 		HitPlanet->OutlinePlot(CellCoords, true);
 		PreHoveredPlotCoords = CellCoords;
-		PreHoveredFarmland = HitPlanet;
+		PreHoveredPlanetActor = HitPlanet;
 	}
 	else
 	{
 		OnHoveredPlot.Broadcast(nullptr, FIntPoint(-1, -1));
-		if (PreHoveredFarmland)
+		if (PreHoveredPlanetActor)
 		{
-			PreHoveredFarmland->OutlinePlot(PreHoveredPlotCoords, false);
+			PreHoveredPlanetActor->OutlinePlot(PreHoveredPlotCoords, false);
 			PreHoveredPlotCoords = FIntPoint(-1, -1);
-			PreHoveredFarmland = nullptr;
+			PreHoveredPlanetActor = nullptr;
 		}
-	}*/
+	}
 }
 
 // 切换到下一个编辑模式（正向循环）

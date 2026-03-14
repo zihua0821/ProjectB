@@ -48,6 +48,47 @@ void APlanetActor::PostInitializeComponents()
 	}
 }
 
+void APlanetActor::HandleLeftMouseClicked(const EEditMode EditMode, const FIntPoint PlowCoords) const
+{
+	if (!FarmlandComponent)
+	{
+		return;
+	}
+	FarmlandComponent->HandleLeftMouseClicked(EditMode, PlowCoords);
+	// if (!CropManagerComponent)
+	// {
+	// 	return;
+	// }
+	// CropManagerComponent->HandleLeftMouseClicked(EditMode, PlowCoords);
+}
+
+void APlanetActor::OutlinePlot(FIntPoint Coords, bool bOutline) const
+{
+	if (!FarmlandComponent)
+	{
+		return;
+	}
+	FarmlandComponent->UpdateOutline(Coords, bOutline);
+}
+
+FFarmLandPlotInfo APlanetActor::GetPlotInfo(const FIntPoint& PlotCoords) const
+{
+	if (!FarmlandComponent)
+	{
+		return FFarmLandPlotInfo();
+	}
+	return FarmlandComponent->GetPlotInfo(PlotCoords);
+}
+
+FPlotCropInfo APlanetActor::GetPlotCropInfo(const FIntPoint& PlotCoords) const
+{
+	return FPlotCropInfo();
+	// if (!CropManagerComponent)
+	// {
+	// 	return FPlotCropInfo();
+	// }
+	// return CropManagerComponent->GetPlotCropInfo(PlotCoords);
+}
 
 void APlanetActor::SetupComponents()
 {

@@ -4,9 +4,11 @@
 
 #include "CoreMinimal.h"
 #include "PlanetConfigDataAsset.h"
+#include "Crops/CropData.h"
 #include "GameFramework/Actor.h"
 #include "PlanetActor.generated.h"
 
+class UCropManagerComponent;
 class UFarmlandConfigDataAsset;
 class UFarmlandComponent;
 
@@ -27,6 +29,26 @@ public:
 	// 获取地块组件
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	UFarmlandComponent* GetFarmlandComponent() const { return FarmlandComponent; }
+	
+	// 处理左键点击
+	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
+	void HandleLeftMouseClicked(const EEditMode EditMode, const FIntPoint PlowCoords) const;
+
+	// 地块轮廓
+	UFUNCTION(BlueprintCallable, Category = "Farmland|Interaction")
+	void OutlinePlot(FIntPoint Coords, bool bOutline = true) const;
+
+	// 获取农作物管理组件
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	UCropManagerComponent* GetCropManagerComponent() const { return nullptr; }
+	
+	// 获取地块信息
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	FFarmLandPlotInfo GetPlotInfo(const FIntPoint& PlotCoords) const;
+
+	// 获取地块农作物信息
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	FPlotCropInfo GetPlotCropInfo(const FIntPoint& PlotCoords) const;
 	
 	// 根组件
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")

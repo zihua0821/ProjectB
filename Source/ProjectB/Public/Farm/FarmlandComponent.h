@@ -118,14 +118,10 @@ public:
 	void ClearPest(FIntPoint Coords);
 
 	// =================== 绘制 ====================
-	
-	// 创建轮廓
-	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void CreateOutline(FIntPoint Coords);
 
-	// 移除轮廓
+	// 更新轮廓
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	void RemoveOutline(FIntPoint Coords);
+	void UpdateOutline(FIntPoint Coords, bool bEnable);
 	
 	// 世界坐标转换为网格坐标
 	UFUNCTION(BlueprintCallable, Category = "Farmland|Coordinate")
@@ -141,7 +137,7 @@ public:
 
 	// ==================== 重构后的点击检测 ====================
 	// 通过射线与地块 ISM 碰撞检测获取坐标
-	bool GetPlotByRaycast(const FVector& RayStart, const FVector& RayDirection, 
+	bool GetPlotByRaycast(const FVector& RayStart, const FVector& RayEnd, 
 								  FIntPoint& OutCellCoords, float& OutHitDistance) const;
 	
 	// ==================== 其他方法 ====================
@@ -177,7 +173,7 @@ private:
 
 	// 轮廓渲染组件
 	UPROPERTY()
-	TObjectPtr<UInstancedStaticMeshComponent>  OutlineHISMComponent;
+	TObjectPtr<UInstancedStaticMeshComponent>  LandCellOutlineRenderer;
 
 	// 玩家控制器
 	UPROPERTY()
@@ -206,7 +202,7 @@ private:
 
 	// 更新轮廓颜色
 	void UpdateOutlineColor() const;
-	
+
 	// 创建默认地块
 	void CreateDefaultLandCells();
 	
@@ -251,6 +247,13 @@ private:
 
 	// 更新地块可视化
 	void UpdatePlotVisual(const FIntPoint& PlotCoords);
+
+	// 初始化地块渲染组件
+	void InitLandCellRenderer();
+
+	// 初始化轮廓渲染组件
+	void InitLandCellOutlineRenderer();
+
 };
 
 

@@ -175,14 +175,7 @@ void AFarmlandActor::OutlinePlot(const FIntPoint Coords, const bool bOutline) co
 	{
 		return;
 	}
-	if (bOutline)
-	{
-		FarmlandComponent->CreateOutline(Coords);
-	}
-	else
-	{
-		FarmlandComponent->RemoveOutline(Coords);
-	}
+	FarmlandComponent->UpdateOutline(Coords, bOutline);
 }
 
 void AFarmlandActor::SetupComponents()

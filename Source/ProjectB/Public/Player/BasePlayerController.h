@@ -10,7 +10,7 @@
 
 class APlanetActor;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEditModeChanged, EEditMode, NewEditMode);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHoveredPlot, AFarmlandActor*, HoveredFarmlandActor, FIntPoint, HoveredPlotCoords);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHoveredPlot, APlanetActor*, HoveredPlanetActor, FIntPoint, HoveredPlotCoords);
 
 
 class AFarmlandActor;
@@ -68,7 +68,7 @@ private:
 	void UpdateHoveredPlot();
 
 	UPROPERTY()
-	TObjectPtr<AFarmlandActor> PreHoveredFarmland;
+	TObjectPtr<APlanetActor> PreHoveredPlanetActor;
 	
 	UPROPERTY()
 	FIntPoint PreHoveredPlotCoords = FIntPoint(-1, -1);
