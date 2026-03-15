@@ -256,52 +256,73 @@ void UFarmlandComponent::GenerateWeeds(const FIntPoint Coords)
 	}
 	else
 	{
+		FBoxSphereBounds CellBounds = FarmlandConfig->LandCellMesh->GetBounds();
+		const FVector2D PlotSize = FVector2D(CellBounds.BoxExtent.X * 2.f, CellBounds.BoxExtent.Y * 2.f);      // 地块尺寸
+
 		const int32 WeedNum = FarmlandConfig->WeedNum;
-		const FVector PlotLocation = PlotInfo.Transform.GetLocation();
-		const FVector2D PlotSize = FarmlandConfig->CellSize;
-		// 中心原点
-		const float HalfWidth = PlotSize.X * 0.5f;
-		const float HalfHeight = PlotSize.Y * 0.5f;
-		// 计算地块实际边界
-		const float MinX = PlotLocation.X - HalfWidth;
-		const float MaxX = PlotLocation.X + HalfWidth;
-		const float MinY = PlotLocation.Y - HalfHeight;
-		const float MaxY = PlotLocation.Y + HalfHeight;
-    
-		// 1. 计算网格划分
-		const int32 GridSize = FMath::CeilToInt(FMath::Sqrt(static_cast<float>(WeedNum)));
-		const float CellWidth = (MaxX - MinX) / GridSize;
-		const float CellHeight = (MaxY - MinY) / GridSize;
-    
-		// 2. 在每个网格内生成一个杂草
-		for (int32 i = 0; i < WeedNum; i++)
-		{
-			// 计算网格索引
-			const int32 GridX = i % GridSize;
-			const int32 GridY = i / GridSize;
+	    const float WeedsScale = FarmlandConfig->WeedsScale;
+	    const float WeedsOffsetZ = FarmlandConfig->WeedsOffsetZ;
 
-			const float GridCenterX = MinX + (GridX + 0.5f) * CellWidth;
-			const float GridCenterY = MinY + (GridY + 0.5f) * CellHeight;
-        
-			// 随机偏移
-			const float OffsetX = FMath::FRandRange(-CellWidth * 0.4f, CellWidth * 0.4f);
-			const float OffsetY = FMath::FRandRange(-CellHeight * 0.4f, CellHeight * 0.4f);
+	    const FTransform& PlotTransform = PlotInfo.Transform;     // 相对于当前组件的变换
+	    const FMatrix PlotMatrix = PlotTransform.ToMatrixWithScale();
+	    const FVector SurfaceNormal = PlotTransform.GetUnitAxis(EAxis::Z);
 
-			const float FinalX = FMath::Clamp(GridCenterX + OffsetX, MinX, MaxX);
-			const float FinalY = FMath::Clamp(GridCenterY + OffsetY, MinY, MaxY);
+	    // 计算网格划分
+	    const int32 GridSize = FMath::CeilToInt(FMath::Sqrt(static_cast<float>(WeedNum)));
+	    const float CellWidth = PlotSize.X / GridSize;
+	    const float CellHeight = PlotSize.Y / GridSize;
 
-			FVector WeedLocation(FinalX, FinalY, PlotLocation.Z);
-		
-			FTransform InstanceLocalTransform;
-			InstanceLocalTransform.SetLocation(WeedLocation);
-			InstanceLocalTransform.SetScale3D(FVector::One() * FarmlandConfig->WeedsScale);
-			InstanceLocalTransform.AddToTranslation(FVector(0.f, 0.f, FarmlandConfig->WeedsOffsetZ));
-			FTransform WorldTransform = InstanceLocalTransform * GetComponentTransform();
-			UISMTools::AdjustTransformToGround(WorldTransform, GetWorld(), nullptr, true);
-			FTransform NewLocalTransform = WorldTransform.GetRelativeTransform(GetComponentTransform());
-			WeedsRenderer->AddInstance(NewLocalTransform);
-			PlotInfo.WeedsTransform.Add(NewLocalTransform);
-		}
+	    for (int32 i = 0; i < WeedNum; i++)
+	    {
+	        // 网格索引
+	        const int32 GridX = i % GridSize;
+	        const int32 GridY = i / GridSize;
+
+	        // 网格中心在地块局部坐标（地块中心为原点，Z=0）
+	        const float LocalCenterX = -PlotSize.X * 0.5f + (GridX + 0.5f) * CellWidth;
+	        const float LocalCenterY = -PlotSize.Y * 0.5f + (GridY + 0.5f) * CellHeight;
+
+	        // 动态偏移限制（确保不超出地块局部边界）
+	        const float LeftDist  = LocalCenterX + PlotSize.X * 0.5f;
+	        const float RightDist = PlotSize.X * 0.5f - LocalCenterX;
+	        const float MaxOffsetX = FMath::Min(CellWidth * 0.4f, FMath::Min(LeftDist, RightDist));
+
+	        const float BottomDist = LocalCenterY + PlotSize.Y * 0.5f;
+	        const float TopDist    = PlotSize.Y * 0.5f - LocalCenterY;
+	        const float MaxOffsetY = FMath::Min(CellHeight * 0.4f, FMath::Min(BottomDist, TopDist));
+
+	        const float OffsetX = (MaxOffsetX > 0.0f) ? FMath::FRandRange(-MaxOffsetX, MaxOffsetX) : 0.0f;
+	        const float OffsetY = (MaxOffsetY > 0.0f) ? FMath::FRandRange(-MaxOffsetY, MaxOffsetY) : 0.0f;
+
+	        const float LocalX = LocalCenterX + OffsetX;
+	        const float LocalY = LocalCenterY + OffsetY;
+	        const FVector LocalWeedPos(LocalX, LocalY, 0.0f);
+
+	        // 转换到当前组件空间（应用地块的旋转、平移、缩放）
+	        FVector ComponentLocation = PlotMatrix.TransformPosition(LocalWeedPos);
+	        // 沿法线抬升
+	        ComponentLocation += SurfaceNormal * WeedsOffsetZ;
+
+	        // 构建在当前组件空间的变换
+	        FTransform ComponentTransform;
+	        ComponentTransform.SetLocation(ComponentLocation);
+	        ComponentTransform.SetScale3D(FVector::One() * WeedsScale);
+
+	        // 旋转：先使Z轴对齐地块法线，再绕法线随机旋转
+	        FQuat BaseRotation = PlotTransform.GetRotation();
+	        const float RandomYaw = FMath::FRandRange(0.0f, 360.0f);
+	        FQuat RandomYawQuat(SurfaceNormal, FMath::DegreesToRadians(RandomYaw));
+	        ComponentTransform.SetRotation(RandomYawQuat * BaseRotation);
+
+	    	// 在杂草生成循环中
+	    	FTransform WorldTransform = ComponentTransform * GetComponentTransform();
+	    	UISMTools::AdjustTransformToGroundWithNormal(WorldTransform, GetWorld(), 1000.0f, true);
+	    	ComponentTransform = WorldTransform.GetRelativeTransform(GetComponentTransform());
+	    	
+	        // 直接添加到 WeedsRenderer（假设其与当前组件共享空间）
+	        WeedsRenderer->AddInstance(ComponentTransform);
+	        PlotInfo.WeedsTransform.Add(ComponentTransform);
+	    }
 	}
 	
 	SetPlotState(Coords, EPlotState::WeedInfested, true);
@@ -350,10 +371,26 @@ void UFarmlandComponent::GeneratePest(const FIntPoint Coords)
 	}
 
 	check(FarmlandConfig->PestNiagaraSystem)
-	const FVector PestLocation = PlotInfo.Transform.GetLocation() + FVector(0.f, 0.f, FarmlandConfig->PestHeight);
+	
+	// 获取地块位置和法线方向
+	const FTransform& PlotTransform = PlotInfo.Transform;
+	const FVector PlotLocation = PlotTransform.GetLocation();
+	const FVector SurfaceNormal = PlotTransform.GetUnitAxis(EAxis::Z); // 地块 Z 轴即法线方向
+	
+	// 沿法线方向偏移（而非世界 Z 轴）
+	const FVector PestLocation = PlotLocation + SurfaceNormal * FarmlandConfig->PestHeight;
+	
+	// 计算粒子朝向（让粒子系统 Z 轴与地块法线对齐）
+	const FRotator PestRotation = FRotationMatrix::MakeFromZ(SurfaceNormal).Rotator();
+	
 	UNiagaraComponent* PestParticle = UNiagaraFunctionLibrary::SpawnSystemAttached(
-		FarmlandConfig->PestNiagaraSystem,this, NAME_None,
-		PestLocation, FRotator::ZeroRotator, EAttachLocation::SnapToTarget, false);
+		FarmlandConfig->PestNiagaraSystem,
+		this,
+		NAME_None,
+		PestLocation,
+		PestRotation,  // 使用计算出的朝向
+		EAttachLocation::SnapToTarget,
+		false);
 	
 	PestParticle->SetFloatParameter("PestRadius", FarmlandConfig->PestRadius);
 	PlotInfo.PestNiagaraComponent = PestParticle;

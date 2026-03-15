@@ -50,64 +50,44 @@ bool UISMTools::GetInstanceIndexByTransform(UInstancedStaticMeshComponent* ISMCo
 	return false;
 }
 
-bool UISMTools::AdjustTransformToGround(FTransform& InOutTransform, UWorld* World, AActor* IgnoredActor,
-	bool bAlignToNormal)
+bool UISMTools::AdjustTransformToGroundWithNormal(FTransform& InOutWorldTransform, UWorld* World,
+	float TraceDistance, bool bAlignRotation)
 {
 	if (!World) return false;
 
-	// 获取原始位置
-	FVector OriginalLocation = InOutTransform.GetLocation();
+	FVector Start = InOutWorldTransform.GetLocation();
+	FVector Down = -InOutWorldTransform.GetUnitAxis(EAxis::Z); // 物体自身的向下方向
+	// 也可以使用 HintNormal 的反方向作为向下方向，或者取重力方向（FVector::DownVector）
 
-	// 设置射线起点（在原始位置上方足够高处）和终点（向下足够深处）
-	const float UpOffset = 1000.0f;
-	const float DownOffset = 2000.0f;
-	FVector TraceStart = OriginalLocation + FVector(0, 0, UpOffset);
-	FVector TraceEnd = OriginalLocation - FVector(0, 0, DownOffset);
+	FVector End = Start + Down * TraceDistance;
 
-	// 设置碰撞查询参数
-	FCollisionQueryParams QueryParams;
-	QueryParams.bTraceComplex = true;                // 使用复杂碰撞检测
-	QueryParams.AddIgnoredActor(IgnoredActor);       // 忽略自身
+	FHitResult Hit;
+	FCollisionQueryParams Params;
+	Params.bTraceComplex = true;
 
-	// 使用对象类型查询（只检测 WorldDynamic 类型）
-	FCollisionObjectQueryParams ObjectQueryParams;
-	ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
-
-	FHitResult HitResult;
-	if (World->LineTraceSingleByObjectType(HitResult, TraceStart, TraceEnd, ObjectQueryParams, QueryParams))
+	// DrawDebugLine(World, Start, End, FColor::Blue, true, -1.f);
+	if (World->LineTraceSingleByChannel(Hit, Start, End, ECC_WorldDynamic, Params))
 	{
-		// 可选：绘制调试线
-		// DrawDebugLine(World, TraceStart, HitResult.Location, FColor::Green, false, 2.0f);
-		// DrawDebugPoint(World, HitResult.Location, 10.0f, FColor::Red, false, 20.0f);
-		// DrawDebugSphere(World, HitResult.Location, 10.0f, 10.f, FColor::Red, false, 20.0f);
+		// DrawDebugSphere(World, Hit.Location, 10.f, 12, FColor::Green, true, -1.f);
+		// DrawDebugLine(World, Start, Hit.Location, FColor::Red, true, -1.f);
+		// 更新位置
+		InOutWorldTransform.SetLocation(Hit.Location);
 
-		// 调整位置 Z 值为命中点
-		FVector NewLocation = OriginalLocation;
-		NewLocation.Z = HitResult.Location.Z;
-		InOutTransform.SetLocation(NewLocation);
-
-		if (bAlignToNormal)
+		// 如果需要调整旋转
+		if (bAlignRotation)
 		{
-			// 获取地面法线
-			FVector Normal = HitResult.Normal;
-
-			// 原旋转
-			FQuat OriginalRotation = InOutTransform.GetRotation();
-
-			// 计算从原向上向量 (0,0,1) 到法线的旋转增量
-			FQuat DeltaRotation = FQuat::FindBetweenNormals(FVector::UpVector, Normal);
-
-			// 新旋转 = 增量旋转 * 原旋转，这样物体的局部方向保持不变，但整体 Z 轴对齐法线
-			FQuat NewRotation = DeltaRotation * OriginalRotation;
-			InOutTransform.SetRotation(NewRotation);
+			// 获取当前旋转
+			FQuat OldRot = InOutWorldTransform.GetRotation();
+			// 新旋转：使 Z 轴对齐地面法线
+			FQuat AlignRot = FRotationMatrix::MakeFromZX(Hit.Normal, OldRot.GetAxisX()).ToQuat();
+			// 也可以保留原有的绕法线旋转（偏航），这里简单实现：
+			InOutWorldTransform.SetRotation(AlignRot);
 		}
-
 		return true;
 	}
-
-	// 未命中地面，返回 false，Transform 保持不变
 	return false;
 }
+
 
 bool UISMTools::CompareTransforms(
 	const FTransform& A,
