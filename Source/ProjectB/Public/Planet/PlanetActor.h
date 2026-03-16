@@ -40,7 +40,7 @@ public:
 
 	// 获取农作物管理组件
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
-	UCropManagerComponent* GetCropManagerComponent() const { return nullptr; }
+	UCropManagerComponent* GetCropManagerComponent() const { return CropManagerComponent; }
 	
 	// 获取地块信息
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
@@ -61,6 +61,10 @@ public:
 	// 地块组件
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UFarmlandComponent> FarmlandComponent;
+
+	// 农作物管理组件
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Farmland|Components")
+	TObjectPtr<UCropManagerComponent> CropManagerComponent;
 
 	// ==================== 配置属性 ====================
 

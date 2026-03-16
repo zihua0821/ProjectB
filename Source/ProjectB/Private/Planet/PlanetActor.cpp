@@ -3,6 +3,7 @@
 
 #include "Planet/PlanetActor.h"
 
+#include "Farm/CropManagerComponent.h"
 #include "Farm/FarmlandComponent.h"
 
 
@@ -23,6 +24,10 @@ APlanetActor::APlanetActor()
 	// FarmlandComponent
 	FarmlandComponent = CreateDefaultSubobject<UFarmlandComponent>(TEXT("FarmlandComponent"));
 	FarmlandComponent->SetupAttachment(RootSceneComponent);
+
+	// CropManagerComponent
+	CropManagerComponent = CreateDefaultSubobject<UCropManagerComponent>(TEXT("CropManagerComponent"));
+	CropManagerComponent->SetupAttachment(RootSceneComponent);
 }
 
 void APlanetActor::BeginPlay()
@@ -46,6 +51,16 @@ void APlanetActor::PostInitializeComponents()
 	{
 		FarmlandComponent->SetPlanetConfig(PlanetConfig);
 	}
+	ensure(CropDataTable);
+	if (CropManagerComponent)
+	{
+		CropManagerComponent->SetFarmlandConfig(FarmlandConfig);
+		CropManagerComponent->SetCropDataTable(CropDataTable);
+	}
+	if (FarmlandComponent && CropManagerComponent)
+	{
+		CropManagerComponent->Initialize(FarmlandComponent);
+	}
 }
 
 void APlanetActor::HandleLeftMouseClicked(const EEditMode EditMode, const FIntPoint PlowCoords) const
@@ -55,11 +70,11 @@ void APlanetActor::HandleLeftMouseClicked(const EEditMode EditMode, const FIntPo
 		return;
 	}
 	FarmlandComponent->HandleLeftMouseClicked(EditMode, PlowCoords);
-	// if (!CropManagerComponent)
-	// {
-	// 	return;
-	// }
-	// CropManagerComponent->HandleLeftMouseClicked(EditMode, PlowCoords);
+	if (!CropManagerComponent)
+	{
+		return;
+	}
+	CropManagerComponent->HandleLeftMouseClicked(EditMode, PlowCoords);
 }
 
 void APlanetActor::OutlinePlot(FIntPoint Coords, bool bOutline) const
@@ -82,12 +97,11 @@ FFarmLandPlotInfo APlanetActor::GetPlotInfo(const FIntPoint& PlotCoords) const
 
 FPlotCropInfo APlanetActor::GetPlotCropInfo(const FIntPoint& PlotCoords) const
 {
-	return FPlotCropInfo();
-	// if (!CropManagerComponent)
-	// {
-	// 	return FPlotCropInfo();
-	// }
-	// return CropManagerComponent->GetPlotCropInfo(PlotCoords);
+	if (!CropManagerComponent)
+	{
+		return FPlotCropInfo();
+	}
+	return CropManagerComponent->GetPlotCropInfo(PlotCoords);
 }
 
 void APlanetActor::SetupComponents()
