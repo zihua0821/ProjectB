@@ -5,6 +5,7 @@
 
 #include "Farm/FarmlandActor.h"
 #include "Kismet/GameplayStatics.h"
+#include "Planet/PlanetActor.h"
 #include "Tools/FarmSaveGame.h"
 
 void UProjectBGameInstance::SaveGame(FString SlotName)
@@ -20,23 +21,24 @@ void UProjectBGameInstance::SaveGame(FString SlotName)
 	// 1. 收集全局数据（从你的全局管理器获取）
 	CurrentSaveGame->GlobalData.GameTime=  FDateTime::UtcNow();
 
-	// 2. 收集所有地块数据
-	CurrentSaveGame->Farmlands.Empty();
+	// 2. 收集所有数据
+	CurrentSaveGame->Planets.Empty();
 
-	// 找到场景中的 FarmlandActor
+	// 找到场景中的 PlanetActor
 	TArray<AActor*> FindActors;
-	UGameplayStatics::GetAllActorsOfClass(GetWorld(), AFarmlandActor::StaticClass(), FindActors);
+	UGameplayStatics::GetAllActorsOfClass(GetWorld(), APlanetActor::StaticClass(), FindActors);
 	for (AActor* FindActor : FindActors)
 	{
-		if (AFarmlandActor* Farmland = Cast<AFarmlandActor>(FindActor))
+		if (APlanetActor* Planet = Cast<APlanetActor>(FindActor))
 		{
-			FFarmlandSaveGameData FarmlandData;
-			FarmlandData.Transform = Farmland->GetActorTransform();
-			FarmlandData.CropDataTablePath = Farmland->CropDataTable;
-			FarmlandData.FarmlandConfigPath = Farmland->FarmlandConfig;
-			FarmlandData.Plots = Farmland->GetPlotSaveGameData();
-			FarmlandData.Crops = Farmland->GetCropSaveGameData();
-			CurrentSaveGame->Farmlands.Add(FarmlandData);
+			FPlanetSaveGameData PlanetSaveGameData;
+			PlanetSaveGameData.Transform = Planet->GetActorTransform();
+			PlanetSaveGameData.PlanetConfigPath = Planet->PlanetConfig;
+			PlanetSaveGameData.FarmlandConfigPath = Planet->FarmlandConfig;
+			PlanetSaveGameData.CropDataTablePath = Planet->CropDataTable;
+			PlanetSaveGameData.Plots = Planet->GetPlotSaveGameData();
+			PlanetSaveGameData.Crops = Planet->GetCropSaveGameData();
+			CurrentSaveGame->Planets.Add(PlanetSaveGameData);
 		}
 	}
 
@@ -61,32 +63,36 @@ void UProjectBGameInstance::OnGameLoaded(const FString& SlotName, const int32 Us
 		CurrentSaveGame = Cast<UFarmSaveGame>(SaveGame);
 		if (CurrentSaveGame)
 		{
-			// 清除场景中已有的FarmlandActor
+			// 清除场景中已有的 PlanetActor
 			TArray<AActor*> ExistingFarmlandActors;
-			UGameplayStatics::GetAllActorsOfClass(GetWorld(), AFarmlandActor::StaticClass(), ExistingFarmlandActors);
+			UGameplayStatics::GetAllActorsOfClass(GetWorld(), APlanetActor::StaticClass(), ExistingFarmlandActors);
 			for (AActor* Actor : ExistingFarmlandActors)
 			{
-				if (AFarmlandActor* FarmlandActor = Cast<AFarmlandActor>(Actor))
+				if (APlanetActor* PlanetActor = Cast<APlanetActor>(Actor))
 				{
-					FarmlandActor->Destroy();
+					PlanetActor->Destroy();
 				}
 			}
 
-			// 重建场景中的FarmlandActor
-			for (const FFarmlandSaveGameData& FarmlandData : CurrentSaveGame->Farmlands)
+			// 重建场景中的 PlanetActor
+			for (const FPlanetSaveGameData& PlanetSaveGameData : CurrentSaveGame->Planets)
 			{
-				UFarmlandConfigDataAsset* LoadedConfig = FarmlandData.FarmlandConfigPath.LoadSynchronous();
-				UDataTable* LoadedDataTable = FarmlandData.CropDataTablePath.LoadSynchronous();
-				if (!LoadedConfig || !LoadedDataTable)
+				UPlanetConfigDataAsset* LoadedPlanetConfig = PlanetSaveGameData.PlanetConfigPath.LoadSynchronous();
+				UFarmlandConfigDataAsset* LoadedConfig = PlanetSaveGameData.FarmlandConfigPath.LoadSynchronous();
+				UDataTable* LoadedDataTable = PlanetSaveGameData.CropDataTablePath.LoadSynchronous();
+				
+				if (!LoadedConfig || !LoadedPlanetConfig || !LoadedDataTable)
 				{
 					UE_LOG(LogTemp, Error, TEXT("Load game %s: Failed to load config or datatable"), *SlotName)
 				}
-				AFarmlandActor* Farmland = GetWorld()->SpawnActorDeferred<AFarmlandActor>(AFarmlandActor::StaticClass(), FarmlandData.Transform);
-				Farmland->FarmlandConfig = LoadedConfig;
-				Farmland->CropDataTable = LoadedDataTable;
-				Farmland->SetPlotSaveGameData(FarmlandData.Plots);
-				Farmland->SetCropSaveGameData(FarmlandData.Crops);
-				Farmland->FinishSpawning(FarmlandData.Transform);
+				
+				APlanetActor* Planet = GetWorld()->SpawnActorDeferred<APlanetActor>(APlanetActor::StaticClass(), PlanetSaveGameData.Transform);
+				Planet->FarmlandConfig = LoadedConfig;
+				Planet->CropDataTable = LoadedDataTable;
+				Planet->PlanetConfig = LoadedPlanetConfig;
+				Planet->SetPlotSaveGameData(PlanetSaveGameData.Plots);
+				Planet->SetCropSaveGameData(PlanetSaveGameData.Crops);
+				Planet->FinishSpawning(PlanetSaveGameData.Transform);
 			}
 		}
 		

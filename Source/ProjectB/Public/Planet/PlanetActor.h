@@ -6,6 +6,7 @@
 #include "PlanetConfigDataAsset.h"
 #include "Crops/CropData.h"
 #include "GameFramework/Actor.h"
+#include "Tools/FarmSaveGame.h"
 #include "PlanetActor.generated.h"
 
 class UCropManagerComponent;
@@ -49,6 +50,23 @@ public:
 	// 获取地块农作物信息
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	FPlotCropInfo GetPlotCropInfo(const FIntPoint& PlotCoords) const;
+
+	// 获取地块保存数据
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	TArray<FFarmLandPlotSaveGameData> GetPlotSaveGameData() const;
+
+	// 获取地块农作物保存数据
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	TArray<FCropSaveGameData> GetCropSaveGameData() const;
+
+	// 设置地块保存数据
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void SetPlotSaveGameData(const TArray<FFarmLandPlotSaveGameData>& InPlotSaveGameData);
+
+	// 设置地块农作物保存数据
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	void SetCropSaveGameData(const TArray<FCropSaveGameData>& InPlotCropSaveGameData);
+	
 	
 	// 根组件
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -98,5 +116,6 @@ private:
 	// 总地块数量 - 自动计算
 	int32 TotalPlots = 0;
 };
+
 
 

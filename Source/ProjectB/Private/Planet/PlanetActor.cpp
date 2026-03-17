@@ -104,6 +104,42 @@ FPlotCropInfo APlanetActor::GetPlotCropInfo(const FIntPoint& PlotCoords) const
 	return CropManagerComponent->GetPlotCropInfo(PlotCoords);
 }
 
+TArray<FFarmLandPlotSaveGameData> APlanetActor::GetPlotSaveGameData() const
+{
+	if (!FarmlandComponent)
+	{
+		return TArray<FFarmLandPlotSaveGameData>();
+	}
+	return FarmlandComponent->GetPlotSaveGameData();
+}
+
+TArray<FCropSaveGameData> APlanetActor::GetCropSaveGameData() const
+{
+	if (!CropManagerComponent)
+	{
+		return TArray<FCropSaveGameData>();
+	}
+	return CropManagerComponent->GetCropSaveGameData();
+}
+
+void APlanetActor::SetPlotSaveGameData(const TArray<FFarmLandPlotSaveGameData>& InPlotSaveGameData)
+{
+	if (!FarmlandComponent)
+	{
+		return;
+	}
+	FarmlandComponent->SetPlotSaveGameData(InPlotSaveGameData);
+}
+
+void APlanetActor::SetCropSaveGameData(const TArray<FCropSaveGameData>& InPlotCropSaveGameData)
+{
+	if (!CropManagerComponent)
+	{
+		return;
+	}
+	CropManagerComponent->SetCropSaveGameData(InPlotCropSaveGameData);
+}
+
 void APlanetActor::SetupComponents()
 {
 	ensure(PlanetConfig);
@@ -123,8 +159,7 @@ void APlanetActor::SetupComponents()
 	}
 
 	GenerateGridLines();
-	// 生成地块
-	// GeneratePlots();
+	
 }
 
 void APlanetActor::GenerateGridLines()

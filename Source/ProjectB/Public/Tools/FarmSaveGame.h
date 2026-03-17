@@ -7,6 +7,7 @@
 #include "GameFramework/SaveGame.h"
 #include "FarmSaveGame.generated.h"
 
+class UPlanetConfigDataAsset;
 class UFarmlandConfigDataAsset;
 
 /**
@@ -87,13 +88,16 @@ struct FCropSaveGameData
  * 农田数据结构
  */
 USTRUCT(BlueprintType)
-struct FFarmlandSaveGameData
+struct FPlanetSaveGameData
 {
 	GENERATED_BODY()
 
 	UPROPERTY()
 	FTransform Transform;
 
+	UPROPERTY()
+	TSoftObjectPtr<UPlanetConfigDataAsset> PlanetConfigPath;
+	
 	UPROPERTY()
 	TSoftObjectPtr<UFarmlandConfigDataAsset> FarmlandConfigPath;
 
@@ -133,5 +137,5 @@ public:
 	FGlobalSaveData GlobalData;
 
 	UPROPERTY()
-	TArray<FFarmlandSaveGameData> Farmlands;  // 所有地块的数据
+	TArray<FPlanetSaveGameData> Planets; 
 };
