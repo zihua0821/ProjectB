@@ -97,8 +97,8 @@ bool AFarmlandActor::GetCellCoordinatesFromClick(const FVector& ClickLocation, F
 	{
 		return false;
 	}
-    
-	return FarmlandComponent->GetClickedCellCoordinates(ClickLocation, OutCellCoords);
+    return true;
+	// return FarmlandComponent->GetClickedCellCoordinates(ClickLocation, OutCellCoords);
 }
 
 FFarmLandPlotInfo AFarmlandActor::GetPlotInfo(const FIntPoint& PlotCoords) const

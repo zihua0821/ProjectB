@@ -430,7 +430,7 @@ void UFarmlandComponent::UpdateOutline(FIntPoint Coords, bool bEnable)
 	InstanceTransform.AddToTranslation(FVector(0.f, 0.f, FarmlandConfig->OutlineOffsetZ));
 	int32 InstanceIndex;
 	UISMTools::GetInstanceIndexByTransform(LandCellOutlineRenderer,InstanceTransform, InstanceIndex);
-	if (bEnable)
+	if (bEnable && BasePlayerController->GetEditMode() != EEditMode::None)
 	{
 		LandCellOutlineRenderer->SetCustomDataValue(InstanceIndex, PlotCustomData::Opacity, 0.1f);
 		UpdateOutlineColor();
@@ -528,85 +528,6 @@ void UFarmlandComponent::InitLandCellOutlineRenderer()
 	LandCellOutlineRenderer->SetNumCustomDataFloats(1);
 	LandCellOutlineRenderer->bDisallowNanite = true;
 	LandCellOutlineRenderer->SetCastShadow(false);
-}
-
-FIntPoint UFarmlandComponent::WorldToCellCoordinates(const FVector& WorldPosition) const
-{
-	// 将世界坐标转换到组件的本地空间
-	const FVector LocalPosition = GetComponentTransform().InverseTransformPosition(WorldPosition);
-    
-	// 计算农场总大小（考虑间距+拓展）
-	const float TotalWidth = FarmlandConfig->GridSizeX * FarmlandConfig->CellSize.X + (FarmlandConfig->GridSizeX - 1) * FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension * 2.f;
-	const float TotalHeight = FarmlandConfig->GridSizeY * FarmlandConfig->CellSize.Y + (FarmlandConfig->GridSizeY - 1) * FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension * 2.f;
-    
-	// 计算本地坐标相对于农场边界的偏移
-	const float HalfWidth = TotalWidth * 0.5f;
-	const float HalfHeight = TotalHeight * 0.5f;
-    
-	// 计算归一化坐标 [0, 1]
-	const float NormX = (LocalPosition.X + HalfWidth) / TotalWidth;
-	const float NormY = (LocalPosition.Y + HalfHeight) / TotalHeight;
-    
-	// 转换为网格坐标
-	const int32 CellX = FMath::FloorToInt(NormX * FarmlandConfig->GridSizeX);
-	const int32 CellY = FMath::FloorToInt(NormY * FarmlandConfig->GridSizeY);
-    
-	// 边界检查
-	if (CellX >= 0 && CellX < FarmlandConfig->GridSizeX && CellY >= 0 && CellY < FarmlandConfig->GridSizeY)
-	{
-		return FIntPoint(CellX, CellY);
-	}
-    
-	// 返回无效坐标
-	return FIntPoint(INDEX_NONE, INDEX_NONE);
-}
-
-FVector UFarmlandComponent::CellToWorldCoordinates(const int32 CellX, const int32 CellY) const
-{
-	// 计算农场总大小
-	const float TotalWidth = FarmlandConfig->GridSizeX * FarmlandConfig->CellSize.X + (FarmlandConfig->GridSizeX - 1) * FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension * 2.f;
-	const float TotalHeight = FarmlandConfig->GridSizeY * FarmlandConfig->CellSize.Y + (FarmlandConfig->GridSizeY - 1) * FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension * 2.f;
-    
-	// 计算从中心开始的偏移
-	const float StartX = -TotalWidth * 0.5f + FarmlandConfig->CellSize.X * 0.5f;
-	const float StartY = -TotalHeight * 0.5f + FarmlandConfig->CellSize.Y * 0.5f;
-    
-	// 计算本地位置
-	const float LocalX = StartX + CellX * (FarmlandConfig->CellSize.X + FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension);
-	const float LocalY = StartY + CellY * (FarmlandConfig->CellSize.Y + FarmlandConfig->CellSpacing + FarmlandConfig->GroundExtension);
-
-	const FVector LocalPosition(LocalX, LocalY, 0);
-    
-	// 转换到世界空间
-	return GetComponentTransform().TransformPosition(LocalPosition);
-}
-
-bool UFarmlandComponent::GetClickedCellCoordinates(const FVector& ClickLocation, FIntPoint& OutCellCoords) const
-{
-	// 先通过网格计算获得候选索引
-	FIntPoint Candidate = WorldToCellCoordinates(ClickLocation);
-	if (Candidate.X == INDEX_NONE || Candidate.Y == INDEX_NONE)
-	{
-		return false; // 超出农场范围
-	}
-
-	// 将世界坐标转换到组件本地空间
-	const FVector LocalPos = GetComponentTransform().InverseTransformPosition(ClickLocation);
-
-	// 获取候选地块的边界
-	FBox CellBounds;
-	if (GetCellBounds(Candidate, CellBounds))
-	{
-		// 检查点是否在地块内部（包括边界，可根据需求使用 IsInside 或 IsInsideOrOn）
-		if (CellBounds.IsInside(LocalPos))
-		{
-			OutCellCoords = Candidate;
-			return true;
-		}
-	}
-
-	// 点击在间隙中
-	return false;
 }
 
 bool UFarmlandComponent::GetPlotByRaycast(const FVector& RayStart, const FVector& RayEnd,
@@ -863,37 +784,6 @@ void UFarmlandComponent::CreateDefaultLandCells()
 	   LandCellRenderer->GetInstanceCount(), NumLatCells, NumLonCells, NumLatCells * NumLonCells);
 }
 
-bool UFarmlandComponent::GetCellBounds(const FIntPoint& Coords, FBox& OutBounds) const
-{
-	if (!FarmlandConfig || Coords.X < 0 || Coords.X >= FarmlandConfig->GridSizeX || Coords.Y < 0 || Coords.Y >= FarmlandConfig->GridSizeY)
-	{
-		return false;
-	}
-
-	// 计算农场总尺寸
-	const float TotalWidth = FarmlandConfig->GridSizeX * FarmlandConfig->CellSize.X + 
-							 (FarmlandConfig->GridSizeX - 1) * FarmlandConfig->CellSpacing + 
-							 FarmlandConfig->GroundExtension * 2.f;
-	const float TotalHeight = FarmlandConfig->GridSizeY * FarmlandConfig->CellSize.Y + 
-							  (FarmlandConfig->GridSizeY - 1) * FarmlandConfig->CellSpacing + 
-							  FarmlandConfig->GroundExtension * 2.f;
-	const float HalfWidth = TotalWidth * 0.5f;
-	const float HalfHeight = TotalHeight * 0.5f;
-
-	// 计算地块左下角（本地坐标）
-	float Left = -HalfWidth + FarmlandConfig->GroundExtension + 
-				 Coords.X * (FarmlandConfig->CellSize.X + FarmlandConfig->CellSpacing);
-	float Bottom = -HalfHeight + FarmlandConfig->GroundExtension + 
-				   Coords.Y * (FarmlandConfig->CellSize.Y + FarmlandConfig->CellSpacing); // 假设 Y 向上
-
-	float Right = Left + FarmlandConfig->CellSize.X;
-	float Top = Bottom + FarmlandConfig->CellSize.Y;
-
-	// 返回包围盒（Z 轴范围放宽，假设地块在 Z=0 附近）
-	OutBounds = FBox(FVector(Left, Bottom, -100.f), FVector(Right, Top, 100.f));
-	return true;
-}
-
 void UFarmlandComponent::InitPlotFromSaveGameData()
 {
 	if (LandCellRenderer == nullptr)
@@ -992,11 +882,23 @@ void UFarmlandComponent::InitializeLandCells()
 
 int32 UFarmlandComponent::GetPlotIndex(const FIntPoint& PlotCoords) const
 {
-	if (PlotCoords.X < 0 || PlotCoords.X >= FarmlandConfig->GridSizeX || PlotCoords.Y < 0 || PlotCoords.Y >= FarmlandConfig->GridSizeY)
+	if (!PlanetConfig)
 	{
 		return INDEX_NONE;
 	}
-	return PlotCoords.Y * FarmlandConfig->GridSizeX + PlotCoords.X;
+    
+	const int32 NumLatCells = PlanetConfig->NumLat - 1;  // 纬度地块数
+	const int32 NumLonCells = PlanetConfig->NumLon;       // 经度地块数
+    
+	// 边界检查
+	if (PlotCoords.X < 0 || PlotCoords.X >= NumLatCells || 
+		PlotCoords.Y < 0 || PlotCoords.Y >= NumLonCells)
+	{
+		return INDEX_NONE;
+	}
+    
+	// 行优先索引（纬度为行，经度为列）
+	return PlotCoords.X * NumLonCells + PlotCoords.Y;
 }
 
 // ReSharper disable once CppMemberFunctionMayBeConst
@@ -1226,15 +1128,24 @@ void UFarmlandComponent::GetNeighborCoords(FIntPoint Coords, TArray<FIntPoint>& 
 		FIntPoint(1, 1), FIntPoint(1, -1), FIntPoint(-1, 1), FIntPoint(-1, -1) // 对角线
 	};
 
+	// 从 PlanetConfig 获取网格尺寸
+	const int32 NumLatCells = PlanetConfig->NumLat - 1;  // 地块行数（格点数 -1）
+	const int32 NumLonCells = PlanetConfig->NumLon;       // 地块列数
+
 	for (const FIntPoint& Dir : Directions)
 	{
 		FIntPoint Neighbor = Coords + Dir;
-		// 边界检查
-		if (Neighbor.X >= 0 && Neighbor.X < FarmlandConfig->GridSizeX &&
-			Neighbor.Y >= 0 && Neighbor.Y < FarmlandConfig->GridSizeY)
+        
+		// 纬度边界检查（不环绕，有南北边界）
+		if (Neighbor.X < 0 || Neighbor.X >= NumLatCells)
 		{
-			OutNeighbors.Add(Neighbor);
+			continue;
 		}
+        
+		// 经度环绕处理（东西方向相连）
+		Neighbor.Y = (Neighbor.Y % NumLonCells + NumLonCells) % NumLonCells;
+        
+		OutNeighbors.Add(Neighbor);
 	}
 }
 

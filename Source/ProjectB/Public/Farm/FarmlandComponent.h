@@ -123,24 +123,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	void UpdateOutline(FIntPoint Coords, bool bEnable);
 	
-	// 世界坐标转换为网格坐标
-	UFUNCTION(BlueprintCallable, Category = "Farmland|Coordinate")
-	FIntPoint WorldToCellCoordinates(const FVector& WorldPosition) const;
-    
-	// 网格坐标转换为世界坐标
-	UFUNCTION(BlueprintCallable, Category = "Farmland|Coordinate")
-	FVector CellToWorldCoordinates(int32 CellX, int32 CellY) const;
-    
-	// 获取鼠标点击的网格坐标
-	UFUNCTION(BlueprintCallable, Category = "Farmland|Coordinate")
-	bool GetClickedCellCoordinates(const FVector& ClickLocation, FIntPoint& OutCellCoords) const;
-
-	// ==================== 重构后的点击检测 ====================
 	// 通过射线与地块 ISM 碰撞检测获取坐标
-	bool GetPlotByRaycast(const FVector& RayStart, const FVector& RayEnd, 
-								  FIntPoint& OutCellCoords, float& OutHitDistance) const;
+	bool GetPlotByRaycast(const FVector& RayStart, const FVector& RayEnd, FIntPoint& OutCellCoords, float& OutHitDistance) const;
 	
 	// ==================== 其他方法 ====================
+	
 	// 农作物每次生长
 	void OnCropGrownThisTime(FIntPoint Coords, float MoistureCost, float FertilityCost);
 
@@ -205,9 +192,6 @@ private:
 
 	// 创建默认地块
 	void CreateDefaultLandCells();
-	
-	// 获取地块包围盒
-	bool GetCellBounds(const FIntPoint& Coords, FBox& OutBounds) const;
 
 	// 编辑模式事件响应
 	UFUNCTION()

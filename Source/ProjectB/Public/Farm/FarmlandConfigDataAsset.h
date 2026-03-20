@@ -18,17 +18,21 @@ class PROJECTB_API UFarmlandConfigDataAsset : public UPrimaryDataAsset
 
 public:
 	// ==================== 网格配置 ====================
+	
 	// X方向单元格数量
+	UE_DEPRECATED("0.2", "已废弃")
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration",
 			  meta = (DisplayName = "X方向数量", ClampMin = "1", ClampMax = "50", UIMin = "1", UIMax = "50"))
 	int32 GridSizeX = 5;
     
 	// Y方向单元格数量
+	UE_DEPRECATED("0.2", "已废弃")
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration",
 			  meta = (DisplayName = "Y方向数量", ClampMin = "1", ClampMax = "50", UIMin = "1", UIMax = "50"))
 	int32 GridSizeY = 5;
     
 	// 单元格间距（单元格之间的空隙）
+	UE_DEPRECATED("0.2", "已废弃")
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration",
 			  meta = (DisplayName = "单元格间距", ClampMin = "-100.0", ClampMax = "100.0", UIMin = "-100.0", UIMax = "100.0"))
 	float CellSpacing = 20.0f;
@@ -36,6 +40,7 @@ public:
 	
 
 	// 地面扩展
+	UE_DEPRECATED("0.2", "已废弃")
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration",
 			  meta = (DisplayName = "地面扩展", ClampMin = "-500.0", ClampMax = "500.0", UIMin = "-500.0", UIMax = "500.0"))
 	float GroundExtension = 100.0f;
@@ -52,11 +57,13 @@ public:
 
 	// ==================== 地面配置 ====================
 	// 是否使用地面
+	UE_DEPRECATED("0.2", "已废弃")
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Ground",
 			  meta = (DisplayName = "是否使用地面"))
 	bool bUseGround = true;
 	
 	// 地面网格模型（整个农场的基础地面）
+	UE_DEPRECATED("0.2", "已废弃")
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Ground",
 			  meta = (DisplayName = "地面网格模型"))
 	TObjectPtr<UStaticMesh> GroundMesh;
