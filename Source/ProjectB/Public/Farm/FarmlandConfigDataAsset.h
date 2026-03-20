@@ -163,6 +163,28 @@ public:
 			  meta = (DisplayName = "有虫害倍率", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
 	float GrowthRate_PestInfested = 0.6f;
 
+	// ==================== 作物售价倍率 ====================
+
+	// 劣质作物价格倍率
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sale Price Modifiers",
+			  meta = (DisplayName = "劣质作物价格倍率", ClampMin = "0.0", ClampMax = "5.0", UIMin = "0.0", UIMax = "5.0"))
+	float SalePriceMultiplier_Poor = 0.1f;
+	
+	// 普通作物价格倍率
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sale Price Modifiers",
+			  meta = (DisplayName = "普通作物价格倍率", ClampMin = "0.0", ClampMax = "5.0", UIMin = "0.0", UIMax = "5.0"))
+	float SalePriceMultiplier_Normal = 1.f;
+
+	// 良好作物价格倍率
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sale Price Modifiers",
+			  meta = (DisplayName = "良好作物价格倍率", ClampMin = "0.0", ClampMax = "5.0", UIMin = "0.0", UIMax = "5.0"))
+	float SalePriceMultiplier_Good = 1.5f;
+
+	// 优质作物价格倍率
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sale Price Modifiers",
+			  meta = (DisplayName = "优质作物价格倍率", ClampMin = "0.0", ClampMax = "5.0", UIMin = "0.0", UIMax = "5.0"))
+	float SalePriceMultiplier_Excellent = 2.f;
+
 	// ==================== 操作配置 ====================
 
 	// 每次灌溉湿度增加

@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "PlanetConfigDataAsset.h"
+#include "PlanetData.h"
+#include "PlanetInterface.h"
 #include "Crops/CropData.h"
 #include "GameFramework/Actor.h"
 #include "Tools/FarmSaveGame.h"
@@ -13,8 +15,10 @@ class UCropManagerComponent;
 class UFarmlandConfigDataAsset;
 class UFarmlandComponent;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlanetInfoChanged, FPlanetInfo, PlanetInfo);
+
 UCLASS()
-class PROJECTB_API APlanetActor : public AActor
+class PROJECTB_API APlanetActor : public AActor, public IPlanetInterface
 {
 	GENERATED_BODY()
 
@@ -50,6 +54,18 @@ public:
 	// 获取地块农作物信息
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	FPlotCropInfo GetPlotCropInfo(const FIntPoint& PlotCoords) const;
+
+	// 设置星球数据
+	virtual void SetPlanetInfo_Implementation(const FPlanetInfo& InPlanetData) override { PlanetData = InPlanetData; };
+
+	// 获取星球数据
+	virtual FPlanetInfo GetPlanetInfo_Implementation() const override { return PlanetData; }
+
+	// 获取星球数据 (引用)
+	virtual FPlanetInfo& GetPlanetInfoRef() override { return PlanetData; };
+
+	// 通知数据已改变
+	virtual void CallPlanetInfoChanged_Implementation() override;
 
 	// 获取地块保存数据
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
@@ -98,13 +114,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Farmland, meta = (DisplayName = "农作物配置表"))
 	TObjectPtr<UDataTable> CropDataTable;
 
-
+	UPROPERTY(BlueprintAssignable)
+	FOnPlanetInfoChanged OnPlanetInfoChanged;
 private:
 	// 初始化组件
 	void SetupComponents();
 	void GenerateGridLines();
 	FVector LatLonToWorldCoordinates(int32 LatIdx, int32 LonIdx) const;
 
+	FPlanetInfo PlanetData;
 	// ==================== 自动计算的参数（只读） ====================
 
 	// 纬度步长（度）- 自动计算

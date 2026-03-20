@@ -104,6 +104,11 @@ FPlotCropInfo APlanetActor::GetPlotCropInfo(const FIntPoint& PlotCoords) const
 	return CropManagerComponent->GetPlotCropInfo(PlotCoords);
 }
 
+void APlanetActor::CallPlanetInfoChanged_Implementation()
+{
+	OnPlanetInfoChanged.Broadcast(PlanetData);
+}
+
 TArray<FFarmLandPlotSaveGameData> APlanetActor::GetPlotSaveGameData() const
 {
 	if (!FarmlandComponent)

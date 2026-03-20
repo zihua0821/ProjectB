@@ -90,6 +90,11 @@ protected:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
+
+    // 父级Actor
+    UPROPERTY()
+    TWeakObjectPtr<AActor> OwnerActor;
+    
     // 玩家控制器
     UPROPERTY()
     TObjectPtr<ABasePlayerController>  BasePlayerController;

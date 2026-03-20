@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Crops/CropData.h"
 #include "GameFramework/SaveGame.h"
+#include "Planet/PlanetData.h"
 #include "FarmSaveGame.generated.h"
 
 class UPlanetConfigDataAsset;
@@ -109,6 +110,9 @@ struct FPlanetSaveGameData
 	
 	UPROPERTY()
 	TArray<FCropSaveGameData> Crops;
+
+	UPROPERTY()
+	FPlanetInfo PlanetInfo;
 };
 
 // 全局数据（如金币、时间等）

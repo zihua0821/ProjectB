@@ -711,6 +711,14 @@ struct FCropTableRow : public FTableRowBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resource Consumption",
               meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
     float FertilityConsumePerSecond = 0.02f;
+
+    // 种子价格
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float SeedPrice = 1.f;
+
+    // 基础出售价格
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float BaseSalePrice = 10.f;
 };
 
 // 使用网格的软引用路径作为键

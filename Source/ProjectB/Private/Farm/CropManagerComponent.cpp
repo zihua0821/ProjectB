@@ -3,6 +3,8 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Farm/FarmlandComponent.h"
 #include "Crops/CropBase.h"
+#include "Planet/PlanetData.h"
+#include "Planet/PlanetInterface.h"
 #include "Player/BasePlayerController.h"
 #include "Tools/ISMTools.h"
 
@@ -55,6 +57,8 @@ void UCropManagerComponent::BeginPlay()
 {
     Super::BeginPlay();
 
+    OwnerActor = GetOwner();
+    
     BasePlayerController = Cast<ABasePlayerController>(GetWorld()->GetFirstPlayerController());
 
     InitializeCrops();
@@ -123,6 +127,7 @@ void UCropManagerComponent::RemoveCrop(FIntPoint Coords)
 
 void UCropManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
 {
+    if (!OwnerActor.IsValid()) return;
     if (!FarmlandComponent.IsValid()) return;
 
     // 检查地块是否可种植（已耕地、无作物）
@@ -133,6 +138,13 @@ void UCropManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
     FName CropID = FName(CropName);
     const FCropTableRow* Row = CropDataTable->FindRow<FCropTableRow>(CropID, TEXT("PlantCrop"));
     if (!Row) return;
+
+    // 处理星球能量消耗
+    IPlanetInterface* PlanetInterface = Cast<IPlanetInterface>(OwnerActor.Get());
+    auto& [PlanetPower] = PlanetInterface->GetPlanetInfoRef();
+    if (PlanetPower < Row->SeedPrice) return;
+    PlanetPower -= Row->SeedPrice;
+    IPlanetInterface::Execute_CallPlanetInfoChanged(OwnerActor.Get());
 
     // 创建作物实例
     UCropBase* NewCrop = NewObject<UCropBase>(this);
@@ -189,12 +201,40 @@ void UCropManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
 
 bool UCropManagerComponent::HarvestCrop(FIntPoint Coords)
 {
+    if (!OwnerActor.IsValid()) return  false;
     if (!PlotCropMap.Contains(Coords)) return false;
     FPlotCropInfo& CropInfo = PlotCropMap[Coords];
     if (!CropInfo.Crop || CropInfo.Crop->GetCropData().CropGrowthStage != ECropGrowthStage::Mature)
         return false;
-
+    
+    const FCropTableRow* Row = CropDataTable->FindRow<FCropTableRow>(CropInfo.Crop->GetCropData().CropID, TEXT("HarvestCrop"));
+    if (!Row) return false;
     CropInfo.Crop->HarvestCrop();
+
+    FCropData CropData = CropInfo.Crop->GetCropData();
+
+    float SalePriceMultiplier = 1.0f;
+    switch (CropData.CropQualityData.GetQuality(CropData.TotalGrowthTime)) {
+    case ECropQuality::Poor:
+        SalePriceMultiplier = FarmlandConfig->SalePriceMultiplier_Poor;
+        break;
+    case ECropQuality::Normal:
+        SalePriceMultiplier = FarmlandConfig->SalePriceMultiplier_Normal;
+        break;
+    case ECropQuality::Good:
+        SalePriceMultiplier = FarmlandConfig->SalePriceMultiplier_Good;
+        break;
+    case ECropQuality::Excellent:
+        SalePriceMultiplier = FarmlandConfig->SalePriceMultiplier_Excellent;
+        break;
+    }
+    const int32 CropSalePrice = FMath::RoundToInt32(Row->BaseSalePrice * SalePriceMultiplier);
+    // 处理星球能量增加
+    IPlanetInterface* PlanetInterface = Cast<IPlanetInterface>(OwnerActor.Get());
+    auto& [PlanetPower] = PlanetInterface->GetPlanetInfoRef();
+    PlanetPower += CropSalePrice;
+    IPlanetInterface::Execute_CallPlanetInfoChanged(OwnerActor.Get());
+    
     return true;
 }
 
@@ -210,7 +250,7 @@ void UCropManagerComponent::InitCropsFromSaveGameData()
 
             // 从数据表读取作物配置
             FName CropID = CurrentCropSaveGameData.CropID;
-            const FCropTableRow* Row = CropDataTable->FindRow<FCropTableRow>(CropID, TEXT("PlantCrop"));
+            const FCropTableRow* Row = CropDataTable->FindRow<FCropTableRow>(CropID, TEXT("InitCropsFromSaveGameData"));
             if (!Row) return;
 
             // 创建作物实例

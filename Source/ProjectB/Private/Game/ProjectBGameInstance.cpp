@@ -38,6 +38,8 @@ void UProjectBGameInstance::SaveGame(FString SlotName)
 			PlanetSaveGameData.CropDataTablePath = Planet->CropDataTable;
 			PlanetSaveGameData.Plots = Planet->GetPlotSaveGameData();
 			PlanetSaveGameData.Crops = Planet->GetCropSaveGameData();
+			PlanetSaveGameData.PlanetInfo = IPlanetInterface::Execute_GetPlanetInfo(Planet);
+			
 			CurrentSaveGame->Planets.Add(PlanetSaveGameData);
 		}
 	}
@@ -92,6 +94,7 @@ void UProjectBGameInstance::OnGameLoaded(const FString& SlotName, const int32 Us
 				Planet->PlanetConfig = LoadedPlanetConfig;
 				Planet->SetPlotSaveGameData(PlanetSaveGameData.Plots);
 				Planet->SetCropSaveGameData(PlanetSaveGameData.Crops);
+				IPlanetInterface::Execute_SetPlanetInfo(Planet, PlanetSaveGameData.PlanetInfo);
 				Planet->FinishSpawning(PlanetSaveGameData.Transform);
 			}
 		}
