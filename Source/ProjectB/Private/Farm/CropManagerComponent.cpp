@@ -98,9 +98,9 @@ void UCropManagerComponent::RemoveCrop(FIntPoint Coords)
     }
     if (CurrentMesh)
     {
-        if (CropHISMComponentMap.Contains(FStaticMeshHISMKey(CurrentMesh)))
+        if (CropHISMComponentMap.Contains(FStaticMeshKey(CurrentMesh)))
         {
-            if (UInstancedStaticMeshComponent* CurrentInstanceHISMComponent = CropHISMComponentMap.FindChecked(FStaticMeshHISMKey(CurrentMesh)))
+            if (UInstancedStaticMeshComponent* CurrentInstanceHISMComponent = CropHISMComponentMap.FindChecked(FStaticMeshKey(CurrentMesh)))
             {
                 UISMTools::RemoveInstanceByTransform(CurrentInstanceHISMComponent, CropInfo.CropTransform);
             }
@@ -388,9 +388,9 @@ void UCropManagerComponent::OnCropGrowthStageChanged(FIntPoint Coords, ECropGrow
     // 移除旧实例
     if (OldMesh)
     {
-        if (CropHISMComponentMap.Contains(FStaticMeshHISMKey(OldMesh)))
+        if (CropHISMComponentMap.Contains(FStaticMeshKey(OldMesh)))
         {
-            if (UInstancedStaticMeshComponent* OldInstanceHISMComponent = CropHISMComponentMap.FindChecked(FStaticMeshHISMKey(OldMesh)))
+            if (UInstancedStaticMeshComponent* OldInstanceHISMComponent = CropHISMComponentMap.FindChecked(FStaticMeshKey(OldMesh)))
             {
                 UISMTools::RemoveInstanceByTransform(OldInstanceHISMComponent, CropInfo.CropTransform);
             }
@@ -445,9 +445,9 @@ UInstancedStaticMeshComponent* UCropManagerComponent::GetOrCreateCropHISMCompone
     {
         return nullptr;
     }
-    if (CropHISMComponentMap.Contains(FStaticMeshHISMKey(Mesh)))
+    if (CropHISMComponentMap.Contains(FStaticMeshKey(Mesh)))
     {
-        return CropHISMComponentMap.FindChecked(FStaticMeshHISMKey(Mesh));
+        return CropHISMComponentMap.FindChecked(FStaticMeshKey(Mesh));
     }
     UInstancedStaticMeshComponent* TargetComponent = NewObject<UInstancedStaticMeshComponent>(GetOwner());
     TargetComponent->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
@@ -456,7 +456,7 @@ UInstancedStaticMeshComponent* UCropManagerComponent::GetOrCreateCropHISMCompone
     TargetComponent->SetCollisionResponseToAllChannels(ECR_Block);
     TargetComponent->SetStaticMesh(Mesh);
     TargetComponent->SetNumCustomDataFloats(CropInfo.CropNumCustomDataFloats);
-    CropHISMComponentMap.Add(FStaticMeshHISMKey(Mesh), TargetComponent);
+    CropHISMComponentMap.Add(FStaticMeshKey(Mesh), TargetComponent);
     return TargetComponent;
 }
 
@@ -488,9 +488,9 @@ void UCropManagerComponent::SetCropDisease(FIntPoint Coords, bool bDisease, bool
         break;
     }
     UInstancedStaticMeshComponent* CropRenderer = nullptr;
-    if (CropHISMComponentMap.Contains(FStaticMeshHISMKey(Mesh)))
+    if (CropHISMComponentMap.Contains(FStaticMeshKey(Mesh)))
     {
-        CropRenderer = *CropHISMComponentMap.Find(FStaticMeshHISMKey(Mesh));
+        CropRenderer = *CropHISMComponentMap.Find(FStaticMeshKey(Mesh));
     }
     if (!CropRenderer)
     {

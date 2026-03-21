@@ -723,7 +723,7 @@ struct FCropTableRow : public FTableRowBase
 
 // 使用网格的软引用路径作为键
 USTRUCT(BlueprintType)
-struct FStaticMeshHISMKey
+struct FStaticMeshKey
 {
     GENERATED_BODY()
     
@@ -732,13 +732,13 @@ struct FStaticMeshHISMKey
     FSoftObjectPath MeshPath;
     
     // 默认构造函数
-    FStaticMeshHISMKey(){};
+    FStaticMeshKey(){};
 
-    FStaticMeshHISMKey(const UStaticMesh* Mesh)
+    FStaticMeshKey(const UStaticMesh* Mesh)
         : MeshPath(Mesh)
     {}
 
-    FStaticMeshHISMKey(const FSoftObjectPath& InMeshPath)
+    FStaticMeshKey(const FSoftObjectPath& InMeshPath)
         : MeshPath(InMeshPath)
     {}
     
@@ -749,13 +749,13 @@ struct FStaticMeshHISMKey
     }
     
     // 比较操作符
-    bool operator==(const FStaticMeshHISMKey& Other) const
+    bool operator==(const FStaticMeshKey& Other) const
     {
         return MeshPath == Other.MeshPath;
     }
     
     // 哈希函数
-    friend uint32 GetTypeHash(const FStaticMeshHISMKey& Key)
+    friend uint32 GetTypeHash(const FStaticMeshKey& Key)
     {
         return GetTypeHash(Key.MeshPath);
     }

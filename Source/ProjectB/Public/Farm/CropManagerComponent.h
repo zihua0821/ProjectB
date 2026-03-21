@@ -117,7 +117,7 @@ private:
 
     // 作物渲染组件映射
     UPROPERTY()
-    TMap<FStaticMeshHISMKey, UInstancedStaticMeshComponent*> CropHISMComponentMap;
+    TMap<FStaticMeshKey, UInstancedStaticMeshComponent*> CropHISMComponentMap;
     
     // 农作物保存数据
     UPROPERTY()
