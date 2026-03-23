@@ -67,6 +67,9 @@ public:
 	// 通知数据已改变
 	virtual void CallPlanetInfoChanged_Implementation() override;
 
+	// 更新旋转
+	virtual void UpdateRotation_Implementation(float NewAngle) override;
+
 	// 获取地块保存数据
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	TArray<FFarmLandPlotSaveGameData> GetPlotSaveGameData() const;

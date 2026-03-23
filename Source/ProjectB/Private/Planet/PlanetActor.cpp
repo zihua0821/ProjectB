@@ -109,6 +109,11 @@ void APlanetActor::CallPlanetInfoChanged_Implementation()
 	OnPlanetInfoChanged.Broadcast(PlanetData);
 }
 
+void APlanetActor::UpdateRotation_Implementation(float NewAngle)
+{
+	SetActorRotation(FRotator(0.0f, NewAngle, 0.0f));
+}
+
 TArray<FFarmLandPlotSaveGameData> APlanetActor::GetPlotSaveGameData() const
 {
 	if (!FarmlandComponent)

@@ -25,3 +25,7 @@ FPlanetInfo& IPlanetInterface::GetPlanetInfoRef()
 void IPlanetInterface::CallPlanetInfoChanged_Implementation()
 {
 }
+
+void IPlanetInterface::UpdateRotation_Implementation(float NewAngle)
+{
+}

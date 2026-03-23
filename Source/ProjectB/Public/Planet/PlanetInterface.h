@@ -41,4 +41,9 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Planet")
 	void CallPlanetInfoChanged();
 	virtual void CallPlanetInfoChanged_Implementation();
+
+	// 通知旋转更新
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Rotation")
+	void UpdateRotation(float NewAngle);
+	virtual void UpdateRotation_Implementation(float NewAngle);
 };
