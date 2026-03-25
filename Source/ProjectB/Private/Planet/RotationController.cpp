@@ -57,10 +57,10 @@ void ARotationController::Tick(float DeltaTime)
 void ARotationController::UpdateRotation()
 {
 	// 更新星球
-	// if (Planet && Planet->IsValidLowLevel())
-	// {
-	// 	IPlanetInterface::Execute_UpdateRotation(Planet, CurrentAngle);
-	// }
+	if (Planet && Planet->IsValidLowLevel())
+	{
+		IPlanetInterface::Execute_UpdateRotation(Planet, CurrentAngle);
+	}
     
 	// 更新昼夜系统
 	if (DayNightCycle && DayNightCycle->IsValidLowLevel())
