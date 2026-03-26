@@ -11,7 +11,6 @@
 ADayNightCycle::ADayNightCycle()
 {
 	PrimaryActorTick.bCanEverTick = true;
-	PrimaryActorTick.TickInterval = 0.1f;
 	
 	// 创建根组件
 	RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
@@ -35,10 +34,10 @@ ADayNightCycle::ADayNightCycle()
 	// 创建天空光照
 	SkyLight = CreateDefaultSubobject<USkyLightComponent>(TEXT("SkyLight"));
 	SkyLight->SetupAttachment(RootSceneComponent);
-	SkyLight->SetIntensity(20.f);
+	SkyLight->SetIntensity(200.f);
 	SkyLight->SetMobility(EComponentMobility::Movable);
 	SkyLight->SetCastShadows(false);
-	SkyLight->SetLightColor(FLinearColor(0.05f, 0.05f, 0.1f));  
+	SkyLight->SetLightColor(FLinearColor::White);  
 
 	// 创建太阳光源
 	SunLight = CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("SunLight"));
@@ -47,24 +46,16 @@ ADayNightCycle::ADayNightCycle()
 	SunLight->SetMobility(EComponentMobility::Movable);
 	SunLight->SetCastShadows(true);
 	SunLight->SetLightColor(FLinearColor::White);  
-	SunLight->SetAtmosphereSunLight(false);
-	SunLight->SetForwardShadingPriority(0);
-
-	// 创建背光光源
-	BackLight = CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("BackLight"));
-	BackLight->SetupAttachment(RootSceneComponent);
-	BackLight->SetIntensity(1.0f);
-	BackLight->SetMobility(EComponentMobility::Movable);
-	BackLight->SetCastShadows(false);
-	BackLight->SetLightColor(FLinearColor::White);  
-	BackLight->SetAtmosphereSunLight(false);
-	BackLight->SetForwardShadingPriority(1);
+	SunLight->SetAtmosphereSunLight(true);
+	SunLight->SetForwardShadingPriority(0);	
+	
 }
 
 void ADayNightCycle::BeginPlay()
 {
 	Super::BeginPlay();
-
+	
+	
 	// 从配置加载初始值
 	if (TimeConfig)
 	{
@@ -73,7 +64,13 @@ void ADayNightCycle::BeginPlay()
 		CurrentTimeSpeedMultiplier = TimeConfig->TimeSpeedMultiplier;
 	}
 
-	OnSeasonChanged.Broadcast(LastSeasonIndex);
+	GetWorldTimerManager().SetTimer(
+	   EventUpdateTimerHandle,
+	   this,
+	   &ThisClass::UpdateEvent,
+	   0.1f,  
+	   true   
+   );
 }
 
 void ADayNightCycle::Tick(float DeltaSeconds)
@@ -133,8 +130,6 @@ void ADayNightCycle::Tick(float DeltaSeconds)
 
 	// 4. 更新旋转
 	UpdateRotationFromTime(CurrentTimeOfDay, CurrentSeasonProgress);
-
-	UpdateEvent();
 }
 
 void ADayNightCycle::UpdateRotation(FRotator NewRotation)

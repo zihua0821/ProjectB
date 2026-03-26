@@ -44,10 +44,6 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UDirectionalLightComponent> SunLight;
 
-	// 背光光源组件
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	TObjectPtr<UDirectionalLightComponent> BackLight;
-
 	// === 事件 ===
 
 	// 时间改变事件
@@ -88,7 +84,6 @@ public:
 	
 	// 更新旋转
 	virtual void UpdateRotation(FRotator NewRotation);
-	void UpdateEvent();
 
 	// 使用时间更新旋转
 	virtual void UpdateRotationFromTime(float TimeOfDay, float SeasonProgress);
@@ -109,6 +104,11 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Time Control")
 	void SetTimeSpeedMultiplier(float Multiplier);
+
+private:
+	FTimerHandle EventUpdateTimerHandle;
+	
+	void UpdateEvent();
 
 };
 
