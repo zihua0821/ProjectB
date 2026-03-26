@@ -6,6 +6,11 @@
 #include "GameFramework/Actor.h"
 #include "DayNightCycle.generated.h"
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTimeChanged, float, TimeOfDay);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSeasonChanged, float, SeasonProgress);
+
+class UPlanetTimeConfig;
+
 UCLASS()
 class PROJECTB_API ADayNightCycle : public AActor
 {
@@ -17,6 +22,7 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
+	virtual void Tick(float DeltaSeconds) override;
 public:
 	// 根组件
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -42,11 +48,68 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UDirectionalLightComponent> BackLight;
 
-	// 当前角度（0-360）
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DayNight")
-	float CurrentAngle = 90.f;
+	// === 事件 ===
+
+	// 时间改变事件
+	UPROPERTY(BlueprintAssignable, Category = "Events")
+	FOnTimeChanged OnTimeChanged;
+
+	// 季节改变事件
+	UPROPERTY(BlueprintAssignable, Category = "Events")
+	FOnSeasonChanged OnSeasonChanged;
+
+	// === 时间配置 ===
 	
-	// 接口实现：接收旋转更新
-	virtual void UpdateRotation(float NewAngle);
+	// 时间配置 DataAsset
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+	TObjectPtr<UPlanetTimeConfig> TimeConfig;
+
+	// === 时间状态 ===
+
+	// 当前时间
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Time State")
+	float CurrentTimeOfDay = 12.0f;
+
+	// 当前季节进度
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Time State")
+	float CurrentSeasonProgress = 0.0f;
+
+	// 当前时间流速倍数
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Time State")
+	float CurrentTimeSpeedMultiplier = 1.f;
+
+	// 时间累计
+	float TimeAccumulator = 0.0f;
+
+	// 上一季节索引
+	int32 LastSeasonIndex = 0;
+
+	// === 旋转接口 ===
 	
+	// 更新旋转
+	virtual void UpdateRotation(FRotator NewRotation);
+	void UpdateEvent();
+
+	// 使用时间更新旋转
+	virtual void UpdateRotationFromTime(float TimeOfDay, float SeasonProgress);
+
+	// === 控制接口 ===
+
+	UFUNCTION(BlueprintPure, Category = "Time State")
+	float GetTimeOfDay() const { return CurrentTimeOfDay; }
+
+	UFUNCTION(BlueprintPure, Category = "Time State")
+	float GetSeasonProgress() const { return CurrentSeasonProgress; }
+
+	UFUNCTION(BlueprintCallable, Category = "Time Control")
+	void SetTimeOfDay(float NewTime);
+
+	UFUNCTION(BlueprintCallable, Category = "Time Control")
+	void SetSeasonProgress(float NewProgress);
+
+	UFUNCTION(BlueprintCallable, Category = "Time Control")
+	void SetTimeSpeedMultiplier(float Multiplier);
+
 };
+
+
