@@ -706,7 +706,7 @@ void UFarmlandComponent::CreateDefaultLandCells()
 	const float ScaleFactorZ = FarmlandConfig->LandHeightOffset / (CellExtent.Z * 2.f);
 
 	// 纬度收缩参数
-	const float MinLatitudeScale = 0.5f;  // 边缘最小缩放系数（Y 轴缩到 70%）
+	const float MinLatitudeScale = FarmlandConfig->MinLatitudeScale;  // 边缘最小缩放系数（Y 轴缩到 70%）
 
     // 自动计算经纬度步长
     const float LatStep = (PlanetConfig->MaxLat - PlanetConfig->MinLat) / (PlanetConfig->NumLat - 1);

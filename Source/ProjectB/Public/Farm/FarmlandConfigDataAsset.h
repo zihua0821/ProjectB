@@ -79,6 +79,11 @@ public:
 			  meta = (DisplayName = "单元格大小"))
 	FVector2D CellSize = FVector2D(400.f, 400.f);
 
+	// 边缘最小缩放系数
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Cell",
+			  meta = (DisplayName = "边缘最小缩放系数", ClampMin = "0.1", ClampMax = "1.0", UIMin = "0.1", UIMax = "1.0"))
+	float MinLatitudeScale = 0.5f;
+	
 	// z偏移
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Cell",
 			  meta = (DisplayName = "单元格z偏移"))

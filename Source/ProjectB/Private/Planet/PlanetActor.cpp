@@ -168,7 +168,11 @@ void APlanetActor::SetupComponents()
 		SphereMeshComponent->SetMaterial(0, PlanetConfig->SurfaceMaterial);
 	}
 
-	GenerateGridLines();
+	if (FarmlandConfig->bShowDebugGrid)
+	{
+		GenerateGridLines();
+	}
+	
 	
 }
 
