@@ -175,6 +175,9 @@ private:
 
 	// 害虫扩散定时器
 	FTimerHandle PestSpreadTimerHandle;
+
+	// 当前选中的轮廓坐标
+	FIntPoint CurrentOutlineCoords = FIntPoint(-1, -1);
     
 	// ===================== 辅助方法 =====================
 	
@@ -188,7 +191,7 @@ private:
 	int32 GetPlotIndex(const FIntPoint& PlotCoords) const;
 
 	// 更新轮廓颜色
-	void UpdateOutlineColor() const;
+	void UpdateOutlineColor(FIntPoint Coords) const;
 
 	// 创建默认地块
 	void CreateDefaultLandCells();

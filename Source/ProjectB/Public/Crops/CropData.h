@@ -7,6 +7,28 @@ class UCropBase;
 class UNiagaraComponent;
 class UCropDataAsset;
 
+/**
+ * 单元格高亮材质自定义数据索引
+ */
+namespace CellOutlineCustomData
+{
+    constexpr int32 Opacity = 0;
+    constexpr int32 R = 1;
+    constexpr int32 G = 2;
+    constexpr int32 B = 3;
+    constexpr int32 X00 = 4;
+    constexpr int32 Y00 = 5;
+    constexpr int32 Z00 = 6;
+    constexpr int32 X10 = 7;
+    constexpr int32 Y10 = 8;
+    constexpr int32 Z10 = 9;
+    constexpr int32 X01 = 10;
+    constexpr int32 Y01 = 11;
+    constexpr int32 Z01 = 12;
+    constexpr int32 X11 = 13;
+    constexpr int32 Y11 = 14;
+    constexpr int32 Z11 = 15;
+}
 
 /**
  * 地块自定义数据索引

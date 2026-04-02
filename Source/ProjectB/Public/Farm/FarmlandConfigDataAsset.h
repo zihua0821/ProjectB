@@ -231,11 +231,12 @@ public:
 	bool bPestCanSpreadToEmptyPlots = false;
 	
 	// ==================== 选中配置 ====================
-	// 高亮材质
+	
+	// 高亮网格体
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Outline", 
-			  meta = (DisplayName = "高亮材质"))
-	TObjectPtr<UMaterialInstance> OutlineMaterial;
-
+			  meta = (DisplayName = "高亮网格体"))
+	TObjectPtr<UStaticMesh> OutlineMesh;
+	
 	// 高亮材质偏移Z
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Outline", 
 			  meta = (DisplayName = "高亮材质偏移Z"))

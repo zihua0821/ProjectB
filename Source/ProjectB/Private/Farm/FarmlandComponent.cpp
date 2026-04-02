@@ -432,24 +432,29 @@ void UFarmlandComponent::UpdateOutline(FIntPoint Coords, bool bEnable)
 	UISMTools::GetInstanceIndexByTransform(LandCellOutlineRenderer,InstanceTransform, InstanceIndex);
 	if (bEnable && BasePlayerController->GetEditMode() != EEditMode::None)
 	{
-		LandCellOutlineRenderer->SetCustomDataValue(InstanceIndex, PlotCustomData::Opacity, 0.1f);
-		UpdateOutlineColor();
+		CurrentOutlineCoords = Coords;
+		LandCellOutlineRenderer->SetCustomDataValue(InstanceIndex, CellOutlineCustomData::Opacity, 0.1f);
+		UpdateOutlineColor(Coords);
 	}
 	else
 	{
-		LandCellOutlineRenderer->SetCustomDataValue(InstanceIndex, PlotCustomData::Opacity, 0.f);
+		CurrentOutlineCoords = FIntPoint(-1, -1);
+		LandCellOutlineRenderer->SetCustomDataValue(InstanceIndex, CellOutlineCustomData::Opacity, 0.f);
 	}
 }
 
-void UFarmlandComponent::UpdateOutlineColor() const
+void UFarmlandComponent::UpdateOutlineColor(FIntPoint Coords) const
 {
+	if (Coords == FIntPoint(-1, -1))
+	{
+		return;
+	}
 	if (!LandCellOutlineRenderer)
 	{
 		UE_LOG(LogTemp, Error, TEXT("OutlineHISMComponent is nullptr"))
 		return;
 	}
-	check(FarmlandConfig->OutlineMaterial);
-	UMaterialInstanceDynamic* DynamicOutlineMaterialInstance = LandCellOutlineRenderer->CreateDynamicMaterialInstance(0, FarmlandConfig->OutlineMaterial);
+
 	FLinearColor OutlineColor = FLinearColor::Green;
 	switch (BasePlayerController->GetEditMode()) {
 	case None:
@@ -506,8 +511,16 @@ void UFarmlandComponent::UpdateOutlineColor() const
 	case Count:
 		break;
 	}
-	DynamicOutlineMaterialInstance->SetVectorParameterValue("SelfLuminousColor", OutlineColor);
-	LandCellOutlineRenderer->SetMaterial(0,DynamicOutlineMaterialInstance);
+
+	const FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(Coords);
+	FTransform InstanceTransform = PlotInfo.Transform;
+	InstanceTransform.AddToTranslation(FVector(0.f, 0.f, FarmlandConfig->OutlineOffsetZ));
+	int32 InstanceIndex;
+	UISMTools::GetInstanceIndexByTransform(LandCellOutlineRenderer,InstanceTransform, InstanceIndex);
+	LandCellOutlineRenderer->SetCustomDataValue(InstanceIndex, CellOutlineCustomData::R, OutlineColor.R);
+	LandCellOutlineRenderer->SetCustomDataValue(InstanceIndex, CellOutlineCustomData::G, OutlineColor.G);
+	LandCellOutlineRenderer->SetCustomDataValue(InstanceIndex, CellOutlineCustomData::B, OutlineColor.B);
+
 }
 
 void UFarmlandComponent::InitLandCellOutlineRenderer()
@@ -523,9 +536,9 @@ void UFarmlandComponent::InitLandCellOutlineRenderer()
 	LandCellOutlineRenderer->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	LandCellOutlineRenderer->SetCollisionResponseToAllChannels(ECR_Ignore);
 	ensure(FarmlandConfig);
-	ensure(FarmlandConfig->LandCellMesh);
-	LandCellOutlineRenderer->SetStaticMesh(FarmlandConfig->LandCellMesh);
-	LandCellOutlineRenderer->SetNumCustomDataFloats(1);
+	ensure(FarmlandConfig->OutlineMesh);
+	LandCellOutlineRenderer->SetStaticMesh(FarmlandConfig->OutlineMesh);
+	LandCellOutlineRenderer->SetNumCustomDataFloats(16);
 	LandCellOutlineRenderer->bDisallowNanite = true;
 	LandCellOutlineRenderer->SetCastShadow(false);
 }
@@ -712,6 +725,10 @@ void UFarmlandComponent::CreateDefaultLandCells()
     const float LatStep = (PlanetConfig->MaxLat - PlanetConfig->MinLat) / (PlanetConfig->NumLat - 1);
     const float LonStep = 360.0f / PlanetConfig->NumLon;
 
+	// 转换为弧度
+	const float LatStepRad = FMath::DegreesToRadians(LatStep);
+	const float LonStepRad = FMath::DegreesToRadians(LonStep);
+	
 	const int32 NumLatCells = PlanetConfig->NumLat - 1;  
 	const int32 NumLonCells = PlanetConfig->NumLon;       
 	
@@ -721,19 +738,19 @@ void UFarmlandComponent::CreateDefaultLandCells()
         for (int32 LonIdx = 0; LonIdx < NumLonCells; LonIdx++)
         {
             // 将索引转换为弧度
-        	const float LatRad = FMath::DegreesToRadians(PlanetConfig->MinLat + (LatIdx + 0.5f) * LatStep);
-        	const float LonRad = FMath::DegreesToRadians((LonIdx + 0.5f) * LonStep);
+        	const float CenterLatRad = FMath::DegreesToRadians(PlanetConfig->MinLat + (LatIdx + 0.5f) * LatStep);
+        	const float CenterLonRad = FMath::DegreesToRadians((LonIdx + 0.5f) * LonStep);
 
             // 球面坐标转世界坐标（Z 轴向上）
-            const float CosLat = FMath::Cos(LatRad);
-            const float SinLat = FMath::Sin(LatRad);
-            const float CosLon = FMath::Cos(LonRad);
-            const float SinLon = FMath::Sin(LonRad);
+            const float CenterCosLat = FMath::Cos(CenterLatRad);
+            const float CenterSinLat = FMath::Sin(CenterLatRad);
+            const float CenterCosLon = FMath::Cos(CenterLonRad);
+            const float CenterSinLon = FMath::Sin(CenterLonRad);
 
             FVector PlotLocation(
-                PlanetConfig->Radius * CosLat * CosLon,
-                PlanetConfig->Radius * CosLat * SinLon,
-                PlanetConfig->Radius * SinLat
+                PlanetConfig->Radius * CenterCosLat * CenterCosLon,
+                PlanetConfig->Radius * CenterCosLat * CenterSinLon,
+                PlanetConfig->Radius * CenterSinLat
             );
 
         	// 计算地块朝向：让 Z 轴指向球心外（径向）
@@ -765,13 +782,86 @@ void UFarmlandComponent::CreateDefaultLandCells()
         	// const FString DebugText = FString::Printf(TEXT("(%d,%d)"), LatIdx, LonIdx);
         	// DrawDebugString(GetWorld(), WorldLocation, DebugText, nullptr, FColor::White, -1.f, false, 2.f);
 
+        	// ==================== 计算地块四个顶点（用于 ISM 高亮） ====================
+        	// 当前地块的经纬度边界
+        	const float MinLat = PlanetConfig->MinLat + LatIdx * LatStep;
+        	const float MaxLat = MinLat + LatStep;
+        	const float MinLon = LonIdx * LonStep;
+        	const float MaxLon = MinLon + LonStep;
 
+        	// 四个角点的经纬度（单位：度）
+        	// 顺序：V1=左下 (南西), V2=右下 (南东), V3=左上 (北西), V4=右上 (北东)
+        	const float LatDegrees[4] = { MinLat, MinLat, MaxLat, MaxLat };
+        	const float LonDegrees[4] = { MinLon, MaxLon, MinLon, MaxLon };
+
+        	// 转换为球面坐标（四个顶点，相对于世界原点）
+        	FVector VertexPositions[4];
+        	for (int32 i = 0; i < 4; i++)
+        	{
+        		const float LatRad = FMath::DegreesToRadians(LatDegrees[i]);
+        		const float LonRad = FMath::DegreesToRadians(LonDegrees[i]);
+        		const float CosLat = FMath::Cos(LatRad);
+        		const float SinLat = FMath::Sin(LatRad);
+        		const float CosLon = FMath::Cos(LonRad);
+        		const float SinLon = FMath::Sin(LonRad);
+
+        		VertexPositions[i] = FVector(
+					PlanetConfig->Radius * CosLat * CosLon,
+					PlanetConfig->Radius * CosLat * SinLon,
+					PlanetConfig->Radius * SinLat
+				);
+        	}
+
+        	// 转换到组件局部空间
+        	FVector LocalVertexPositions[4];
+        	for (int32 i = 0; i < 4; i++)
+        	{
+        		LocalVertexPositions[i] = GetComponentTransform().InverseTransformPosition(VertexPositions[i]);
+        	}
+        	
         	// 创建轮廓
+        	// 当前地块中心纬度（用于计算经度方向宽度）
+        	const float CurrentLatRad = FMath::DegreesToRadians(CurrentLatDeg);
+
+        	// 计算单元格实际尺寸（球面几何）
+        	const float CellHeight = PlanetConfig->Radius * LatStepRad;                    // 南北向
+        	const float CellWidth = PlanetConfig->Radius * FMath::Cos(CurrentLatRad) * LonStepRad;  // 东西向
+
+        	// 获取轮廓网格体自身尺寸
+        	FBoxSphereBounds OutlineBounds = FarmlandConfig->OutlineMesh->GetBounds();
+        	const FVector OutlineExtent = OutlineBounds.BoxExtent;
+
+        	// 计算轮廓缩放（匹配单元格实际大小）
+        	const float OutlineScaleX = CellWidth / (OutlineExtent.X * 2.f);
+        	const float OutlineScaleY = CellHeight / (OutlineExtent.Y * 2.f);
+        	const float OutlineScaleZ = 1.0f;
+
+        	// 创建轮廓实例（使用独立计算的缩放）
         	FTransform OutlineInstanceTransform = PlotInfo.Transform;
         	OutlineInstanceTransform.AddToTranslation(FVector(0.f, 0.f, FarmlandConfig->OutlineOffsetZ));
+        	OutlineInstanceTransform.SetScale3D(FVector(OutlineScaleX, OutlineScaleY, OutlineScaleZ));
+
         	int32 OutlineInstanceIdx = LandCellOutlineRenderer->AddInstance(OutlineInstanceTransform);
-        	LandCellOutlineRenderer->SetCustomDataValue(OutlineInstanceIdx, PlotCustomData::Opacity, 0.f);
-        	
+        	TArray<float> CustomData =
+        	{
+        		0.f,										  // Opacity
+        		1.f,										  // R
+        		1.f,										  // G
+        		1.f,										  // B
+        		static_cast<float>(LocalVertexPositions[0].X),// X00
+        		static_cast<float>(LocalVertexPositions[0].Y),// Y00
+        		static_cast<float>(LocalVertexPositions[0].Z),// Z00
+        		static_cast<float>(LocalVertexPositions[1].X),// X01
+        		static_cast<float>(LocalVertexPositions[1].Y),// Y01
+        		static_cast<float>(LocalVertexPositions[1].Z),// Z01
+        		static_cast<float>(LocalVertexPositions[2].X),// X10
+        		static_cast<float>(LocalVertexPositions[2].Y),// Y10
+        		static_cast<float>(LocalVertexPositions[2].Z),// Z10
+        		static_cast<float>(LocalVertexPositions[3].X),// X11
+        		static_cast<float>(LocalVertexPositions[3].Y),// Y11
+        		static_cast<float>(LocalVertexPositions[3].Z),// Z11
+        	};
+        	LandCellOutlineRenderer->SetCustomData(OutlineInstanceIdx, CustomData);
             // 初始化耕地状态
             if (FarmlandConfig->bInitAllLandCells && PlotSaveGameData.Num() == 0)
             {
@@ -904,7 +994,7 @@ int32 UFarmlandComponent::GetPlotIndex(const FIntPoint& PlotCoords) const
 // ReSharper disable once CppMemberFunctionMayBeConst
 void UFarmlandComponent::OnEditModeChanged(EEditMode NewEditMode)
 {
-	UpdateOutlineColor();
+	UpdateOutlineColor(CurrentOutlineCoords);
 }
 
 void UFarmlandComponent::HandlePlotMoistureChanged(FIntPoint Coords)
