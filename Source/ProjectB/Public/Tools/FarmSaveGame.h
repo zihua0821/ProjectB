@@ -23,6 +23,10 @@ struct FFarmLandPlotSaveGameData
 	UPROPERTY()
 	FIntPoint Coords;
 
+	// 地块类型
+	UPROPERTY()
+	ECellType CellType = ECellType::Empty;
+	
 	// 地块状态
 	UPROPERTY()
 	FPlotStateData StateData;

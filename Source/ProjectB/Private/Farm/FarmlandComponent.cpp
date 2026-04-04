@@ -85,7 +85,8 @@ void UFarmlandComponent::RemoveLand(const FIntPoint Coords)
 		UE_LOG(LogTemp, Error, TEXT("Plot not exists"));
 		return;
 	}
-	
+
+	PlotInfo.CellType = ECellType::Empty;
 	PlotInfo.StateData.Reset();
 	PlotInfo.MoisturePercentage = 0.f;
 	PlotInfo.FertilityPercentage = 0.f;
@@ -112,6 +113,7 @@ void UFarmlandComponent::PlowLand(const FIntPoint Coords)
 	}
 
 	LandCellRenderer->AddInstance(PlotInfo.Transform);
+	PlotInfo.CellType = ECellType::Crop;
 	SetPlotState(Coords, EPlotState::Plowed, true);
 	UpdatePlotVisual(Coords);
 }
@@ -628,6 +630,7 @@ TArray<FFarmLandPlotSaveGameData> UFarmlandComponent::GetPlotSaveGameData()
 		// 创建保存数据项
 		FFarmLandPlotSaveGameData PlotSaveGameDataItem;
 		PlotSaveGameDataItem.Coords = PlotInfoTuple.Key;
+		PlotSaveGameDataItem.CellType = PlotInfoTuple.Value.CellType;
 		PlotSaveGameDataItem.StateData = PlotInfoTuple.Value.StateData;
 		PlotSaveGameDataItem.WeedsTransform = PlotInfoTuple.Value.WeedsTransform;
 		PlotSaveGameDataItem.MoisturePercentage = PlotInfoTuple.Value.MoisturePercentage;
@@ -887,6 +890,7 @@ void UFarmlandComponent::InitPlotFromSaveGameData()
 		for (auto& PlotSaveGameDataItem : PlotSaveGameData)
 		{
 			FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(PlotSaveGameDataItem.Coords);
+			PlotInfo.CellType = PlotSaveGameDataItem.CellType;
 			PlotInfo.WeedsTransform = PlotSaveGameDataItem.WeedsTransform;
 			PlotInfo.MoisturePercentage = PlotSaveGameDataItem.MoisturePercentage;
 			PlotInfo.FertilityPercentage = PlotSaveGameDataItem.FertilityPercentage;

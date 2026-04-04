@@ -81,6 +81,22 @@ enum EEditMode : uint8
 };
 
 /**
+ * 地块类型
+ */
+UENUM(BlueprintType)
+enum class ECellType : uint8
+{
+    Empty       UMETA(DisplayName = "空地"),
+    Crop        UMETA(DisplayName = "作物地块"),
+    Warehouse   UMETA(DisplayName = "仓库"),
+    Conveyor    UMETA(DisplayName = "传送带"),
+    Sorter      UMETA(DisplayName = "分拣器"),
+    SellMachine UMETA(DisplayName = "出售机"),
+    Processor   UMETA(DisplayName = "加工厂"),
+    MailBox     UMETA(DisplayName = "邮局")
+};
+
+/**
  * 农作物生长阶段
  */
 UENUM(BlueprintType)
@@ -643,6 +659,10 @@ struct FFarmLandPlotInfo
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLand|PlotInfo")
     FTransform Transform;
 
+    // 地块类型
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLand|PlotInfo")
+    ECellType CellType = ECellType::Empty;
+    
     // 地块状态
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmLand|PlotInfo")
     FPlotStateData StateData;
