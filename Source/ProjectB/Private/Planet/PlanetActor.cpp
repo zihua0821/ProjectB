@@ -5,6 +5,7 @@
 
 #include "Farm/CropManagerComponent.h"
 #include "Farm/FarmlandComponent.h"
+#include "Planet/OrbitManagerComponent.h"
 
 
 APlanetActor::APlanetActor()
@@ -28,6 +29,9 @@ APlanetActor::APlanetActor()
 	// CropManagerComponent
 	CropManagerComponent = CreateDefaultSubobject<UCropManagerComponent>(TEXT("CropManagerComponent"));
 	CropManagerComponent->SetupAttachment(RootSceneComponent);
+	
+	// OrbitManagerComponent
+	OrbitManagerComponent = CreateDefaultSubobject<UOrbitManagerComponent>(TEXT("OrbitManagerComponent"));
 }
 
 void APlanetActor::BeginPlay()
@@ -60,6 +64,11 @@ void APlanetActor::PostInitializeComponents()
 	if (FarmlandComponent && CropManagerComponent)
 	{
 		CropManagerComponent->Initialize(FarmlandComponent);
+	}
+	if (OrbitManagerComponent && FarmlandComponent)
+	{
+		OrbitManagerComponent->SetCellManager(FarmlandComponent);
+		OrbitManagerComponent->SetPlanetConfig(PlanetConfig);
 	}
 }
 

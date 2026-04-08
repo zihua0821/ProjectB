@@ -11,6 +11,7 @@
 #include "Tools/FarmSaveGame.h"
 #include "PlanetActor.generated.h"
 
+class UOrbitManagerComponent;
 class UCropManagerComponent;
 class UFarmlandConfigDataAsset;
 class UFarmlandComponent;
@@ -100,8 +101,12 @@ public:
 	TObjectPtr<UFarmlandComponent> FarmlandComponent;
 
 	// 农作物管理组件
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Farmland|Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UCropManagerComponent> CropManagerComponent;
+
+	// 轨道管理组件
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UOrbitManagerComponent> OrbitManagerComponent;
 
 	// ==================== 配置属性 ====================
 

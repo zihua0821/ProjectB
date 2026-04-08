@@ -9,6 +9,7 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Planet/PlanetConfigDataAsset.h"
 #include "Player/BasePlayerController.h"
+#include "ProjectB/ProjectB.h"
 #include "Tools/ISMTools.h"
 
 
@@ -535,8 +536,9 @@ void UFarmlandComponent::InitLandCellOutlineRenderer()
 	LandCellOutlineRenderer = NewObject<UInstancedStaticMeshComponent>(GetOwner());
 	LandCellOutlineRenderer->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
 	LandCellOutlineRenderer->RegisterComponent();
+	LandCellOutlineRenderer->SetCollisionObjectType(ECC_Cell);
 	LandCellOutlineRenderer->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-	LandCellOutlineRenderer->SetCollisionResponseToAllChannels(ECR_Ignore);
+	// LandCellOutlineRenderer->SetCollisionResponseToAllChannels(ECR_Ignore);
 	ensure(FarmlandConfig);
 	ensure(FarmlandConfig->OutlineMesh);
 	LandCellOutlineRenderer->SetStaticMesh(FarmlandConfig->OutlineMesh);
@@ -620,6 +622,15 @@ void UFarmlandComponent::SetPlotState(const FIntPoint& PlotCoords, EPlotState St
 	
 	// 广播状态变更事件
 	OnPlotStateChanged.Broadcast(PlotCoords, PlotInfo.StateData);
+}
+
+FIntPoint UFarmlandComponent::GetCellCoordsByIndex(int32 Index) const
+{
+	if (CellIndexMap.Contains(Index))
+	{
+		return *CellIndexMap.Find(Index);
+	}
+	return FIntPoint(-1, -1);
 }
 
 TArray<FFarmLandPlotSaveGameData> UFarmlandComponent::GetPlotSaveGameData()
@@ -845,6 +856,8 @@ void UFarmlandComponent::CreateDefaultLandCells()
         	OutlineInstanceTransform.SetScale3D(FVector(OutlineScaleX, OutlineScaleY, OutlineScaleZ));
 
         	int32 OutlineInstanceIdx = LandCellOutlineRenderer->AddInstance(OutlineInstanceTransform);
+        	CellIndexMap.Add(OutlineInstanceIdx, FIntPoint(LatIdx, LonIdx));
+
         	TArray<float> CustomData =
         	{
         		0.f,										  // Opacity
@@ -972,6 +985,12 @@ void UFarmlandComponent::InitializeLandCells()
 
 	CreateDefaultLandCells();
 	InitPlotFromSaveGameData();
+
+	if (OnInstancesReady.IsBound())
+	{
+		bIsInstancesReady = true;
+		OnInstancesReady.Execute();
+	}
 }
 
 int32 UFarmlandComponent::GetPlotIndex(const FIntPoint& PlotCoords) const

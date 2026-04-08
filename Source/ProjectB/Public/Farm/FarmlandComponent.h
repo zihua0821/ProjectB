@@ -16,6 +16,7 @@ class UInstancedStaticMeshComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlotStateChanged, FIntPoint, Coords, FPlotStateData, NewPlotState);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlotParamChanged, FIntPoint, Coords, float, NewPlotParam);
+DECLARE_DELEGATE(FOnInstancesReady);
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class PROJECTB_API UFarmlandComponent : public USceneComponent
@@ -37,6 +38,12 @@ public:
 	// 地块参数肥力改变
 	UPROPERTY(BlueprintAssignable, Category = "Farmland|Events")
 	FOnPlotParamChanged OnPlotFertilityChanged;
+
+	// 实例创建完成
+	FOnInstancesReady OnInstancesReady;
+
+	// 实例创建完成
+	bool bIsInstancesReady = false;
 	
 	// ==================== 配置接口 ====================
 
@@ -56,6 +63,9 @@ public:
 	
 	// 设置地块状态
 	void SetPlotState(const FIntPoint& PlotCoords, EPlotState State, bool bEnable = true);
+
+	// 获取单元格坐标
+	FIntPoint GetCellCoordsByIndex(int32 Index) const;
 
 	// ==================== 保存接口 ====================
 	
@@ -146,6 +156,10 @@ private:
 	UPROPERTY()
 	TObjectPtr<UFarmlandConfigDataAsset> FarmlandConfig;
 
+	// 单元格信息Map
+	UPROPERTY()
+	TMap<int32, FIntPoint> CellIndexMap;
+	
 	// 地块信息Map
 	UPROPERTY()
 	TMap<FIntPoint, FFarmLandPlotInfo> PlotInfoIndex;
