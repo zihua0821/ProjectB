@@ -5,6 +5,7 @@
 
 #include "Engine/OverlapResult.h"
 #include "Farm/FarmlandComponent.h"
+#include "Planet/AutomationSatellite.h"
 #include "Planet/PlanetConfigDataAsset.h"
 #include "ProjectB/ProjectB.h"
 
@@ -16,6 +17,16 @@ UOrbitManagerComponent::UOrbitManagerComponent()
 	// ...
 }
 
+void UOrbitManagerComponent::SetCellManager(UFarmlandComponent* InCellManager)
+{
+	CellManager = InCellManager;
+}
+
+void UOrbitManagerComponent::SetPlanetConfig(const TObjectPtr<UPlanetConfigDataAsset>& InPlanetConfig)
+{
+	PlanetConfig = InPlanetConfig;
+}
+
 void UOrbitManagerComponent::AddOrbit(FName OrbitName, const FOrbitData& Definition)
 {
 	if (OrbitName == NAME_None)
@@ -24,16 +35,16 @@ void UOrbitManagerComponent::AddOrbit(FName OrbitName, const FOrbitData& Definit
 		return;
 	}
 	Orbits.Add(OrbitName, Definition);
-	// DrawCircle(
-	// 	GetWorld(),
-	// 	Definition.Transform.GetLocation(),
-	// 	Definition.Transform.GetRotation().GetForwardVector(),
-	// 	Definition.Transform.GetRotation().GetRightVector(),
-	// 	FColor::Red,
-	// 	Definition.Radius,
-	// 	128,
-	// 	true
-	// 	);
+	DrawCircle(
+		GetWorld(),
+		Definition.Transform.GetLocation(),
+		Definition.Transform.GetRotation().GetForwardVector(),
+		Definition.Transform.GetRotation().GetRightVector(),
+		FColor::Red,
+		Definition.Radius,
+		128,
+		true
+		);
 	UpdateOrbitCoveredCoords(OrbitName);
 }
 
@@ -79,7 +90,7 @@ void UOrbitManagerComponent::BeginPlay()
 		}
 		else
 		{
-			CellManager.Get()->OnInstancesReady.BindRaw(this, &ThisClass::InitOrbit);
+			CellManager.Get()->OnInstancesReady.BindUObject(this, &ThisClass::InitOrbit);
 		}
 	}
 	
@@ -133,8 +144,14 @@ void UOrbitManagerComponent::InitOrbit()
 {
 	FOrbitData DefaultOrbitData;
 	DefaultOrbitData.Transform = FTransform::Identity;
+	DefaultOrbitData.Transform.SetRotation(FRotator(0.f, 180.f, 45.f).Quaternion());
 	DefaultOrbitData.Radius = 30000.f;
 
 	AddOrbit(FName("Default"), DefaultOrbitData);
-}
 
+	AAutomationSatellite* Satellite = GetWorld()->SpawnActorDeferred<AAutomationSatellite>(AAutomationSatellite::StaticClass(), FTransform::Identity);
+	Satellite->OrbitData = DefaultOrbitData;
+	Satellite->AngularVelocity = 50.0f;
+	Satellite->bClockwise = true;
+	Satellite->FinishSpawning(FTransform::Identity);
+}

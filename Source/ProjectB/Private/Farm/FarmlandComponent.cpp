@@ -986,9 +986,9 @@ void UFarmlandComponent::InitializeLandCells()
 	CreateDefaultLandCells();
 	InitPlotFromSaveGameData();
 
+	bIsInstancesReady = true;
 	if (OnInstancesReady.IsBound())
 	{
-		bIsInstancesReady = true;
 		OnInstancesReady.Execute();
 	}
 }

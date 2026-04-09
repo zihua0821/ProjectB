@@ -41,10 +41,10 @@ public:
 	UOrbitManagerComponent();
 
 	// 设置地块渲染组件
-	void SetCellManager(UFarmlandComponent* InCellManager) { CellManager = InCellManager; }
+	void SetCellManager(UFarmlandComponent* InCellManager);
 
 	// 设置星球配置数据
-	void SetPlanetConfig(const TObjectPtr<UPlanetConfigDataAsset>& InPlanetConfig) {PlanetConfig = InPlanetConfig;}
+	void SetPlanetConfig(const TObjectPtr<UPlanetConfigDataAsset>& InPlanetConfig);
 	
 	// 添加轨道
 	UFUNCTION(BlueprintCallable, Category = "Orbit Management")
