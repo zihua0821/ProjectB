@@ -148,10 +148,4 @@ void UOrbitManagerComponent::InitOrbit()
 	DefaultOrbitData.Radius = 30000.f;
 
 	AddOrbit(FName("Default"), DefaultOrbitData);
-
-	AAutomationSatellite* Satellite = GetWorld()->SpawnActorDeferred<AAutomationSatellite>(AAutomationSatellite::StaticClass(), FTransform::Identity);
-	Satellite->OrbitData = DefaultOrbitData;
-	Satellite->AngularVelocity = 50.0f;
-	Satellite->bClockwise = true;
-	Satellite->FinishSpawning(FTransform::Identity);
 }

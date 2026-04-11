@@ -7,6 +7,16 @@
 #include "GameFramework/MovementComponent.h"
 #include "OrbitMovementComponent.generated.h"
 
+// 移动状态枚举
+UENUM(BlueprintType)
+enum class ESatelliteMoveState : uint8
+{
+	Idle             UMETA(DisplayName = "闲置"),
+	MovingToTarget   UMETA(DisplayName = "移动到目标"),
+	Paused           UMETA(DisplayName = "暂停")
+};
+
+DECLARE_MULTICAST_DELEGATE(FOnMoveToTargetCompleted);
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class PROJECTB_API UOrbitMovementComponent : public UMovementComponent
@@ -34,10 +44,53 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Orbit")
 	float CurrentAngle = 0.0f;
 
+	// 移动状态
+	FOnMoveToTargetCompleted OnMoveToTargetCompleted;
+
+	// 设置移动状态
+	UFUNCTION(BlueprintCallable)
+	void SetMoveState(const ESatelliteMoveState NewState) { MoveState = NewState;}
+
+	// 获取移动状态
+	UFUNCTION(BlueprintCallable)
+	ESatelliteMoveState GetMoveState() const { return MoveState; }
+
+	// 移动到目标角度
+	UFUNCTION(BlueprintCallable)
+	void StartMoveToTargetAngle(const float NewTargetAngle)
+	{
+		TargetAngle = FMath::Fmod(NewTargetAngle, 360.0f);
+		if (TargetAngle < 0) TargetAngle += 360.0f;
+		MoveState = ESatelliteMoveState::MovingToTarget;
+	}
+
+	// 暂停移动
+	UFUNCTION(BlueprintCallable)
+	void PauseMovement()
+	{
+		if (MoveState != ESatelliteMoveState::Paused) MoveState = ESatelliteMoveState::Paused;
+	}
+
+	// 恢复移动
+	UFUNCTION(BlueprintCallable)
+	void ResumeMovement()
+	{
+		if (MoveState == ESatelliteMoveState::Paused) MoveState = ESatelliteMoveState::Idle;
+	}
+
 protected:
 	virtual void BeginPlay() override;
 
 private:
+	// 更新轨道移动
 	void UpdateOrbitMovement(float DeltaTime);
 
+	// 计算轨道位置
+	FVector CalculateOrbitPosition(float Angle) const;
+
+	// 移动状态
+	ESatelliteMoveState MoveState = ESatelliteMoveState::Idle;
+
+	// 目标角度
+	float TargetAngle = 0.0f;
 };

@@ -26,15 +26,15 @@ public:
 	TObjectPtr<UStaticMeshComponent> SatelliteMeshComponent;
 
 	// 轨道配置 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbit")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbit", meta = (ExposeOnSpawn = "true"))
 	FOrbitData OrbitData;
 
 	// 角速度 (度/秒)
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbit")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbit", meta = (ExposeOnSpawn = "true"))
 	float AngularVelocity = 10.0f;
 
 	// 运行方向：true=顺时针, false=逆时针
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbit")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbit", meta = (ExposeOnSpawn = "true"))
 	bool bClockwise = false;
 
 protected:

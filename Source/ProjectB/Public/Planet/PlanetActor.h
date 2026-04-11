@@ -71,6 +71,12 @@ public:
 	// 更新旋转
 	virtual void UpdateRotation_Implementation(float NewAngle) override;
 
+	// 获取轨道定义
+	virtual FOrbitData GetOrbitData_Implementation(FName OrbitName) const override;
+
+	// 获取单元格坐标Transform
+	virtual FTransform GetCellWorldTransform_Implementation(FIntPoint CellCoord) const override;
+
 	// 获取地块保存数据
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	TArray<FFarmLandPlotSaveGameData> GetPlotSaveGameData() const;

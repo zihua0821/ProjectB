@@ -123,6 +123,24 @@ void APlanetActor::UpdateRotation_Implementation(float NewAngle)
 	SetActorRotation(FRotator(0.0f, NewAngle, 0.0f));
 }
 
+FOrbitData APlanetActor::GetOrbitData_Implementation(FName OrbitName) const
+{
+	if (OrbitManagerComponent)
+	{
+		return OrbitManagerComponent->GetOrbitData(OrbitName);
+	}
+	return IPlanetInterface::GetOrbitData_Implementation(OrbitName);
+}
+
+FTransform APlanetActor::GetCellWorldTransform_Implementation(FIntPoint CellCoord) const
+{
+	if (FarmlandComponent)
+	{
+		return FarmlandComponent->GetComponentTransform() * FarmlandComponent->GetPlotInfo(CellCoord).Transform;
+	}
+	return IPlanetInterface::GetCellWorldTransform_Implementation(CellCoord);
+}
+
 TArray<FFarmLandPlotSaveGameData> APlanetActor::GetPlotSaveGameData() const
 {
 	if (!FarmlandComponent)

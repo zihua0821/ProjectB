@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "OrbitManagerComponent.h"
 #include "UObject/Interface.h"
 #include "PlanetInterface.generated.h"
 
@@ -46,4 +47,13 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Rotation")
 	void UpdateRotation(float NewAngle);
 	virtual void UpdateRotation_Implementation(float NewAngle);
+
+	// 获取轨道数据
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Orbit")
+	FOrbitData GetOrbitData(FName OrbitName) const;
+	virtual FOrbitData GetOrbitData_Implementation(FName OrbitName) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Cell")
+	FTransform GetCellWorldTransform(FIntPoint CellCoord) const;
+	virtual FTransform GetCellWorldTransform_Implementation(FIntPoint CellCoord) const;
 };

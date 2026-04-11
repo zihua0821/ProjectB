@@ -19,18 +19,10 @@ void UOrbitMovementComponent::BeginPlay()
 	// ...
 	if (!UpdatedComponent) return;
 
-	// 1. 计算在轨道平面上的初始位置
-	const float RadAngle = FMath::DegreesToRadians(CurrentAngle);
-	const FVector OrbitPlanePosition = FVector(
-		OrbitData.Radius * FMath::Cos(RadAngle),
-		OrbitData.Radius * FMath::Sin(RadAngle),
-		0.0f
-	);
+	// 计算起始位置
+	const FVector StartLocation = CalculateOrbitPosition(CurrentAngle);
 
-	// 2. 转换到世界坐标
-	FVector StartLocation = OrbitData.Transform.TransformPosition(OrbitPlanePosition);
-
-	// 3. 强制设置位置 (忽略碰撞，确保准确出生)
+	// 强制设置位置 (忽略碰撞，确保准确出生)
 	UpdatedComponent->SetWorldLocation(StartLocation);
 }
 
@@ -42,40 +34,75 @@ void UOrbitMovementComponent::UpdateOrbitMovement(float DeltaTime)
 		return;
 	}
 
-	// 1. 根据方向更新角度
-	if (bClockwise)
+	float NewAngle = CurrentAngle;
+	const float DeltaAngle = AngularVelocity * DeltaTime;
+
+	switch (MoveState)
 	{
-		CurrentAngle -= AngularVelocity * DeltaTime;
-	}
-	else
-	{
-		CurrentAngle += AngularVelocity * DeltaTime;
+	case ESatelliteMoveState::Idle:
+		NewAngle += (bClockwise ? -DeltaAngle : DeltaAngle);
+		break;
+
+	case ESatelliteMoveState::MovingToTarget:
+		{
+			// 计算最短弧方向
+			float Delta = TargetAngle - CurrentAngle;
+			// 归一化到 [-180, 180]
+			Delta = FMath::Fmod(Delta + 180.0f, 360.0f);
+			if (Delta < 0) Delta += 360.0f;
+			Delta -= 180.0f;
+
+			if (FMath::Abs(Delta) <= 0.1f)
+			{
+				// 到达目标
+				NewAngle = TargetAngle;
+				MoveState = ESatelliteMoveState::Paused;  
+				OnMoveToTargetCompleted.Broadcast();
+			}
+			else
+			{
+				// 向目标方向移动一步，不越过目标
+				float Step = FMath::Min(FMath::Abs(Delta), DeltaAngle);
+				NewAngle += (Delta > 0 ? Step : -Step);
+			}
+		}
+		break;
+
+	case ESatelliteMoveState::Paused:
+		return; // 不移动
+
+	default:
+		break;
 	}
 
-	// 角度归一化 (保持数值在合理范围)
-	if (CurrentAngle >= 360.0f) CurrentAngle -= 360.0f;
-	if (CurrentAngle <= -360.0f) CurrentAngle += 360.0f;
+	// 归一化角度到 [0, 360)
+	NewAngle = FMath::Fmod(NewAngle, 360.0f);
+	if (NewAngle < 0) NewAngle += 360.0f;
+	CurrentAngle = NewAngle;
 
-	// 2. 计算在轨道平面上的位置
-	// 轨道平面：XY平面是轨道平面，Z轴是轨道法线
-	const float RadAngle = FMath::DegreesToRadians(CurrentAngle);
+	// 更新位置
+	const FVector WorldLocation = CalculateOrbitPosition(CurrentAngle);
+	const FVector DeltaMove = WorldLocation - UpdatedComponent->GetComponentLocation();
+	if (!DeltaMove.IsNearlyZero())
+	{
+		MoveUpdatedComponent(DeltaMove, UpdatedComponent->GetComponentQuat(), true);
+	}
+}
+
+FVector UOrbitMovementComponent::CalculateOrbitPosition(const float Angle) const
+{
+	// 角度转换为弧度
+	const float RadAngle = FMath::DegreesToRadians(Angle);
+
+	// 计算在轨道平面的相对位置
 	const FVector OrbitPlanePosition = FVector(
 		OrbitData.Radius * FMath::Cos(RadAngle),
 		OrbitData.Radius * FMath::Sin(RadAngle),
 		0.0f
 	);
 
-	// 3. 转换到世界空间
-	// Transform定义了：
-	// - Location: 轨道中心（星球中心）
-	// - Rotation: 轨道平面的方向
-	//   - Roll (X): 轨道方位角（绕X轴旋转）
-	//   - Pitch (Y): 轨道倾角（绕Y轴旋转）
-	//   - Yaw (Z): 相位零点（绕Z轴旋转）
-	const FVector WorldLocation = OrbitData.Transform.TransformPosition(OrbitPlanePosition);
-
-	// 4. 执行移动
-	MoveUpdatedComponent(WorldLocation - UpdatedComponent->GetComponentLocation(), UpdatedComponent->GetComponentQuat(), true);
+	// 转换到世界空间
+	return OrbitData.Transform.TransformPosition(OrbitPlanePosition);
 }
 
 void UOrbitMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)

@@ -29,3 +29,13 @@ void IPlanetInterface::CallPlanetInfoChanged_Implementation()
 void IPlanetInterface::UpdateRotation_Implementation(float NewAngle)
 {
 }
+
+FOrbitData IPlanetInterface::GetOrbitData_Implementation(FName OrbitName) const
+{
+	return FOrbitData();
+}
+
+FTransform IPlanetInterface::GetCellWorldTransform_Implementation(FIntPoint CellCoord) const
+{
+	return FTransform();
+}
