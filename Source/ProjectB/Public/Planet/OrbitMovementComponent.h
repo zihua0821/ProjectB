@@ -40,10 +40,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbit")
 	bool bClockwise = false;
 
-	// 当前相位角 (度)
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Orbit")
-	float CurrentAngle = 0.0f;
-
+	// 获取当前相位角
+	UFUNCTION(BlueprintCallable)
+	float GetCurrentAngle() const { return CurrentAngle; }
+	
 	// 移动状态
 	FOnMoveToTargetCompleted OnMoveToTargetCompleted;
 
@@ -93,4 +93,7 @@ private:
 
 	// 目标角度
 	float TargetAngle = 0.0f;
+
+	// 当前相位角 (度)
+	float CurrentAngle = 0.0f;
 };

@@ -6,7 +6,10 @@
 #include "BehaviorTree/BlackboardComponent.h"
 #include "BehaviorTree/Blackboard/BlackboardKeyType_Struct.h"
 #include "Kismet/GameplayStatics.h"
+#include "Planet/AutomationSatellite.h"
+#include "Planet/OrbitMovementComponent.h"
 #include "Planet/PlanetActor.h"
+#include "Planet/PlanetBlueprintFunctionLibrary.h"
 #include "Planet/AI/SatelliteAIController.h"
 #include "StructUtils/StructView.h"
 
@@ -14,7 +17,7 @@ UBTService_UpdateSatelliteData::UBTService_UpdateSatelliteData()
 {
 	NodeName = TEXT("Update Satellite Data");
 	bTickIntervals = true;
-	Interval = 1.f;
+	Interval = 0.1f;
 }
 
 void UBTService_UpdateSatelliteData::OnSearchStart(FBehaviorTreeSearchData& SearchData)
@@ -30,15 +33,20 @@ void UBTService_UpdateSatelliteData::OnSearchStart(FBehaviorTreeSearchData& Sear
 	UBlackboardComponent* Blackboard = SearchData.OwnerComp.GetBlackboardComponent();
 	if (!Blackboard) return;
 
+	UObject* SelfActor = Blackboard->GetValueAsObject(TEXT("SelfActor"));
+	if (!SelfActor) return;
+	AutomationSatellite = Cast<AAutomationSatellite>(SelfActor);
+	if (!AutomationSatellite) return;
+	
 	AActor* PlanetActor = UGameplayStatics::GetActorOfClass(AIController, APlanetActor::StaticClass());
 	if (PlanetActor == nullptr) return;
 	Blackboard->SetValueAsObject(TEXT("PlanetActor"), PlanetActor);
 
-	FBlackboard::FKey KeyID = Blackboard->GetKeyID("TargetCellCoord");
-	FIntPoint MyCoord(10, 20);
-	Blackboard->SetValue<UBlackboardKeyType_Struct>(KeyID, FInstancedStruct::Make(MyCoord));
+	// FBlackboard::FKey KeyID = Blackboard->GetKeyID("TargetCellCoord");
+	// FIntPoint MyCoord(10, 20);
+	// Blackboard->SetValue<UBlackboardKeyType_Struct>(KeyID, FInstancedStruct::Make(MyCoord));
 	
-	FOrbitData OrbitData = IPlanetInterface::Execute_GetOrbitData(PlanetActor, "Default");
+	OrbitData = IPlanetInterface::Execute_GetOrbitData(PlanetActor, "Default");
 	Blackboard->SetValue<UBlackboardKeyType_Struct>(TEXT("OrbitData"), FInstancedStruct::Make(OrbitData));
 }
 
@@ -46,6 +54,17 @@ void UBTService_UpdateSatelliteData::TickNode(UBehaviorTreeComponent& OwnerComp,
 {
 	Super::TickNode(OwnerComp, NodeMemory, DeltaSeconds);
 
-	FName Name = GetSelectedBlackboardKey();
-	FString Key = Name.ToString();
+	if (!AutomationSatellite) return;
+	UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent();
+	if (!Blackboard) return;
+	UOrbitMovementComponent* OrbitMovementComponent = AutomationSatellite->OrbitMovementComponent;
+	if (!OrbitMovementComponent) return;
+
+	// 更新移动状态
+	Blackboard->SetValueAsEnum(TEXT("CurrentMoveState"), static_cast<uint8>(OrbitMovementComponent->GetMoveState()));
+
+	// 获取当前坐标
+	const FIntPoint CurrentCellCoord = UPlanetBlueprintFunctionLibrary::GetNearestCellCoordFromOrbitAngle(OrbitMovementComponent->GetCurrentAngle(), OrbitData);
+	Blackboard->SetValue<UBlackboardKeyType_Struct>(TEXT("CurrentCellCoord"), FInstancedStruct::Make(CurrentCellCoord));
 }
+

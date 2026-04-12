@@ -4,8 +4,10 @@
 
 #include "CoreMinimal.h"
 #include "BehaviorTree/Services/BTService_BlackboardBase.h"
+#include "Planet/OrbitManagerComponent.h"
 #include "BTService_UpdateSatelliteData.generated.h"
 
+class AAutomationSatellite;
 /**
  * 更新卫星数据
  */
@@ -23,4 +25,10 @@ protected:
 	
 	// Tick
 	virtual void TickNode(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, float DeltaSeconds) override;
+private:
+	UPROPERTY()
+	TObjectPtr<AAutomationSatellite> AutomationSatellite;
+
+	UPROPERTY()
+	FOrbitData OrbitData;
 };

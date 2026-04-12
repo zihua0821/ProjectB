@@ -6,6 +6,7 @@
 #include "Engine/OverlapResult.h"
 #include "Farm/FarmlandComponent.h"
 #include "Planet/AutomationSatellite.h"
+#include "Planet/PlanetBlueprintFunctionLibrary.h"
 #include "Planet/PlanetConfigDataAsset.h"
 #include "ProjectB/ProjectB.h"
 
@@ -107,7 +108,7 @@ void UOrbitManagerComponent::UpdateOrbitCoveredCoords(FName OrbitName)
 		return;
 	}
 	FOrbitData& OrbitData = Orbits[OrbitName];
-	TSet<FIntPoint> CoveredCoords;
+	TMap<FIntPoint, float> CoveredCoords;
 
 	const float LatStep = (PlanetConfig->MaxLat - PlanetConfig->MinLat) / (PlanetConfig->NumLat - 1);
 	const float LatStepRad = FMath::DegreesToRadians(LatStep);
@@ -133,11 +134,16 @@ void UOrbitManagerComponent::UpdateOrbitCoveredCoords(FName OrbitName)
 			);
 	}
 
+	const AActor* PlanetActor = GetOwner();
+	if (!PlanetActor) return;
+	
 	for (const FOverlapResult& Overlap : Overlaps)
 	{
-		CoveredCoords.Add(CellManager.Get()->GetCellCoordsByIndex(Overlap.ItemIndex));
+		FIntPoint Coord = CellManager->GetCellCoordsByIndex(Overlap.ItemIndex);
+		float Angle = UPlanetBlueprintFunctionLibrary::CalculateOrbitAngleFromCell(Coord, OrbitData, PlanetActor);
+		CoveredCoords.Add(Coord, Angle);
 	}
-	OrbitData.CoveredCoords = CoveredCoords;
+	OrbitData.CoveredCoordsMap = CoveredCoords;
 }
 
 void UOrbitManagerComponent::InitOrbit()

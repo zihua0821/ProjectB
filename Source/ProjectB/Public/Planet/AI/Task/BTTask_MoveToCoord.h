@@ -24,8 +24,6 @@ private:
 	// 缓存 BehaviorTreeComponent
 	UPROPERTY()
 	TWeakObjectPtr<UBehaviorTreeComponent> CachedOwnerComp;
-	// 将单元格坐标转换为轨道角度（度数）
-	static float CalculateOrbitAngleFromCell(const FIntPoint& CellCoord, UBehaviorTreeComponent& OwnerComp);
 
 	void OnMoveCompleted() const;
 };

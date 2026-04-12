@@ -29,7 +29,7 @@ struct FOrbitData
 
 	// 轨道覆盖的地块坐标列表
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Orbit")
-	TSet<FIntPoint> CoveredCoords;
+	TMap<FIntPoint, float> CoveredCoordsMap;
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -70,7 +70,6 @@ protected:
 	virtual void BeginPlay() override;
 
 private:
-
 	void UpdateOrbitCoveredCoords(FName OrbitName);
 	void InitOrbit();
 
