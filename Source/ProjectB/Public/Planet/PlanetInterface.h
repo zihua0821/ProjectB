@@ -53,7 +53,13 @@ public:
 	FOrbitData GetOrbitData(FName OrbitName) const;
 	virtual FOrbitData GetOrbitData_Implementation(FName OrbitName) const;
 
+	// 获取单元格世界坐标
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Cell")
 	FTransform GetCellWorldTransform(FIntPoint CellCoord) const;
 	virtual FTransform GetCellWorldTransform_Implementation(FIntPoint CellCoord) const;
+
+	// 根据世界位置获取单元格坐标
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Cell")
+	FIntPoint GetCellCoord(FVector CellWorldLocation) const;
+	virtual FIntPoint GetCellCoord_Implementation(FVector CellWorldLocation) const;
 };

@@ -39,3 +39,8 @@ FTransform IPlanetInterface::GetCellWorldTransform_Implementation(FIntPoint Cell
 {
 	return FTransform();
 }
+
+FIntPoint IPlanetInterface::GetCellCoord_Implementation(FVector CellWorldLocation) const
+{
+	return FIntPoint();
+}

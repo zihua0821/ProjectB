@@ -77,6 +77,9 @@ public:
 	// 获取单元格坐标Transform
 	virtual FTransform GetCellWorldTransform_Implementation(FIntPoint CellCoord) const override;
 
+	// 获取单元格坐标
+	virtual FIntPoint GetCellCoord_Implementation(FVector CellWorldLocation) const override;
+
 	// 获取地块保存数据
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	TArray<FFarmLandPlotSaveGameData> GetPlotSaveGameData() const;

@@ -633,6 +633,21 @@ FIntPoint UFarmlandComponent::GetCellCoordsByIndex(int32 Index) const
 	return FIntPoint(-1, -1);
 }
 
+FIntPoint UFarmlandComponent::GetCellCoord(const FVector& WorldLocation)
+{
+	const FVector LocalLocation = LandCellOutlineRenderer->GetComponentTransform().TransformVector(WorldLocation);
+	for (const auto& PlotInfoTuple : PlotInfoIndex)
+	{
+		const FTransform& PlotTransform = PlotInfoTuple.Value.Transform;
+		if (LocalLocation == PlotTransform.GetLocation())
+		{
+			return PlotInfoTuple.Key;
+		}
+		
+	}
+	return FIntPoint(-1, -1);
+}
+
 TArray<FFarmLandPlotSaveGameData> UFarmlandComponent::GetPlotSaveGameData()
 {
 	PlotSaveGameData.Empty();

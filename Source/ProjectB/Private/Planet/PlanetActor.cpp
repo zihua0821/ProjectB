@@ -141,6 +141,15 @@ FTransform APlanetActor::GetCellWorldTransform_Implementation(FIntPoint CellCoor
 	return IPlanetInterface::GetCellWorldTransform_Implementation(CellCoord);
 }
 
+FIntPoint APlanetActor::GetCellCoord_Implementation(FVector CellWorldLocation) const
+{
+	if (FarmlandComponent)
+	{
+		return FarmlandComponent->GetCellCoord(CellWorldLocation);
+	}
+	return IPlanetInterface::GetCellCoord_Implementation(CellWorldLocation);
+}
+
 TArray<FFarmLandPlotSaveGameData> APlanetActor::GetPlotSaveGameData() const
 {
 	if (!FarmlandComponent)

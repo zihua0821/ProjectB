@@ -150,7 +150,7 @@ void UOrbitManagerComponent::InitOrbit()
 {
 	FOrbitData DefaultOrbitData;
 	DefaultOrbitData.Transform = FTransform::Identity;
-	DefaultOrbitData.Transform.SetRotation(FRotator(0.f, 180.f, 45.f).Quaternion());
+	DefaultOrbitData.Transform.SetRotation(FRotator(0.f, 180.f, 0.f).Quaternion());
 	DefaultOrbitData.Radius = 30000.f;
 
 	AddOrbit(FName("Default"), DefaultOrbitData);

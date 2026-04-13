@@ -67,6 +67,9 @@ public:
 	// 获取单元格坐标
 	FIntPoint GetCellCoordsByIndex(int32 Index) const;
 
+	// 获取单元格坐标
+	FIntPoint GetCellCoord(const FVector& WorldLocation);
+
 	// ==================== 保存接口 ====================
 	
 	// 获取地块信息保存数据
