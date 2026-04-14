@@ -20,6 +20,19 @@ public:
 	
 	virtual EBTNodeResult::Type ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) override;
 
+	// 目标单元格坐标（Struct: FIntPoint）
+	UPROPERTY(EditAnywhere, Category = "Blackboard")
+	FBlackboardKeySelector TargetCoordKey;
+
+	// PlanetActor
+	UPROPERTY(EditAnywhere, Category = "Blackboard")
+	FBlackboardKeySelector PlanetActorKey;
+
+	// 轨道数据（Struct: FOrbitData）
+	UPROPERTY(EditAnywhere, Category = "Blackboard")
+	FBlackboardKeySelector OrbitDataKey;
+
+
 private:
 	// 缓存 BehaviorTreeComponent
 	UPROPERTY()

@@ -21,59 +21,31 @@ EBTNodeResult::Type UBTTask_MoveToCoord::ExecuteTask(UBehaviorTreeComponent& Own
 {
 	CachedOwnerComp = &OwnerComp;
 	// 1. 获取黑板
-	UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent();
-	if (!Blackboard)
-	{
-		UE_LOG(LogBehaviorTree, Error, TEXT("MoveToCoord: Blackboard is null"));
-		return EBTNodeResult::Failed;
-	}
+	const UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent();
+	if (!Blackboard) return EBTNodeResult::Failed;
 	
 	// 2. 读取目标坐标
-	FInstancedStruct TargetCoordStruct = FInstancedStruct(Blackboard->GetValue<UBlackboardKeyType_Struct>(TEXT("TargetCellCoord")));
+	const FInstancedStruct TargetCoordStruct = FInstancedStruct(Blackboard->GetValue<UBlackboardKeyType_Struct>(TargetCoordKey.GetSelectedKeyID()));
 	const FIntPoint TargetCoord = TargetCoordStruct.Get<FIntPoint>();
 
-	// 检查当前坐标是否等于目标坐标
-	FInstancedStruct CurrentCoordStruct = FInstancedStruct(Blackboard->GetValue<UBlackboardKeyType_Struct>(TEXT("CurrentCellCoord")));
-	const FIntPoint CurrentCoord = CurrentCoordStruct.Get<FIntPoint>();
-
 	// 3. 获取 AI Controller 和 Pawn
-	AAIController* AIController = OwnerComp.GetAIOwner();
-	if (!AIController)
-	{
-		UE_LOG(LogBehaviorTree, Error, TEXT("MoveToCoord: AI Controller is null"));
-		return EBTNodeResult::Failed;
-	}
-
-	APawn* ControlledPawn = AIController->GetPawn();
-	if (!ControlledPawn)
-	{
-		UE_LOG(LogBehaviorTree, Error, TEXT("MoveToCoord: Pawn is null"));
-		return EBTNodeResult::Failed;
-	}
+	const AAIController* AIController = OwnerComp.GetAIOwner();
+	if (!AIController) return EBTNodeResult::Failed;
+	const APawn* ControlledPawn = AIController->GetPawn();
+	if (!ControlledPawn) return EBTNodeResult::Failed;
 
 	// 4. 获取轨道移动组件
 	UOrbitMovementComponent* OrbitMovement = ControlledPawn->FindComponentByClass<UOrbitMovementComponent>();
-	if (!OrbitMovement)
-	{
-		UE_LOG(LogBehaviorTree, Error, TEXT("MoveToCoord: OrbitMovementComponent not found on pawn"));
-		return EBTNodeResult::Failed;
-	}
-	const float CurrentAngleDeg = OrbitMovement->GetCurrentAngle();
+	if (!OrbitMovement) return EBTNodeResult::Failed;
 	
-	// 6. 计算目标角度
-	const FInstancedStruct OrbitDataStruct = FInstancedStruct(Blackboard->GetValue<UBlackboardKeyType_Struct>(TEXT("OrbitData")));
+	// 5. 计算目标角度
+	const FInstancedStruct OrbitDataStruct = FInstancedStruct(Blackboard->GetValue<UBlackboardKeyType_Struct>(OrbitDataKey.GetSelectedKeyID()));
 	const FOrbitData& OrbitData = OrbitDataStruct.Get<FOrbitData>();
-	const UObject* PlanetActor = Blackboard->GetValueAsObject(TEXT("PlanetActor"));
-	if (!PlanetActor)
-	{
-		UE_LOG(LogBehaviorTree, Error, TEXT("MoveToCoord: PlanetActor not found in blackboard"));
-		return EBTNodeResult::Failed;
-	}
-	float TargetAngleDeg = UPlanetBlueprintFunctionLibrary::CalculateOrbitAngleFromCell(TargetCoord, OrbitData, PlanetActor);
-
-	if (CurrentCoord == TargetCoord || FMath::IsNearlyEqual(CurrentAngleDeg, TargetAngleDeg, 10.f)) TargetAngleDeg = CurrentAngleDeg;
-
-	// 5. 添加委托
+	const UObject* PlanetActor = Blackboard->GetValueAsObject(PlanetActorKey.SelectedKeyName);
+	if (!PlanetActor) return EBTNodeResult::Failed;
+	const float TargetAngleDeg = UPlanetBlueprintFunctionLibrary::CalculateOrbitAngleFromCell(TargetCoord, OrbitData, PlanetActor);
+	
+	// 6. 添加委托
 	OrbitMovement->OnMoveToTargetCompleted.AddUObject(this, &ThisClass::OnMoveCompleted);
 
 	// 7. 开始移动

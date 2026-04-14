@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "OrbitManagerComponent.h"
+#include "Crops/CropData.h"
 #include "GameFramework/Pawn.h"
 #include "AutomationSatellite.generated.h"
 
@@ -44,4 +45,9 @@ public:
 	virtual void Tick(float DeltaTime) override;
 
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+
+	TQueue<EEditMode>& GetSatelliteTaskQueue() { return SatelliteTaskQueue;}
+
+private:
+	TQueue<EEditMode> SatelliteTaskQueue;
 };
