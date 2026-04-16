@@ -23,11 +23,11 @@ bool UBTDecorator_IsAtTargetCellCoord::CalculateRawConditionValue(UBehaviorTreeC
 	if (!Blackboard) return false;
 	
 	// 2. 读取目标坐标
-	const FInstancedStruct TargetCoordStruct = FInstancedStruct(Blackboard->GetValue<UBlackboardKeyType_Struct>(TargetCoordKey.GetSelectedKeyID()));
+	const FInstancedStruct TargetCoordStruct = FInstancedStruct(Blackboard->GetValue<UBlackboardKeyType_Struct>(TargetCoordKey.SelectedKeyName));
 	const FIntPoint TargetCoord = TargetCoordStruct.Get<FIntPoint>();
 
 	// 3. 读取当前坐标
-	const FInstancedStruct CurrentCoordStruct = FInstancedStruct(Blackboard->GetValue<UBlackboardKeyType_Struct>(CurrentCoordKey.GetSelectedKeyID()));
+	const FInstancedStruct CurrentCoordStruct = FInstancedStruct(Blackboard->GetValue<UBlackboardKeyType_Struct>(CurrentCoordKey.SelectedKeyName));
 	const FIntPoint CurrentCoord = CurrentCoordStruct.Get<FIntPoint>();
 
 	// 4. 获取 AI Controller 和 Pawn
@@ -43,7 +43,7 @@ bool UBTDecorator_IsAtTargetCellCoord::CalculateRawConditionValue(UBehaviorTreeC
 	const float CurrentAngleDeg = OrbitMovement->GetCurrentAngle();
 	
 	// 6. 计算目标角度
-	const FInstancedStruct OrbitDataStruct = FInstancedStruct(Blackboard->GetValue<UBlackboardKeyType_Struct>(OrbitDataKey.GetSelectedKeyID()));
+	const FInstancedStruct OrbitDataStruct = FInstancedStruct(Blackboard->GetValue<UBlackboardKeyType_Struct>(OrbitDataKey.SelectedKeyName));
 	const FOrbitData& OrbitData = OrbitDataStruct.Get<FOrbitData>();
 	const UObject* PlanetActor = Blackboard->GetValueAsObject(PlanetActorKey.SelectedKeyName);
 	if (!PlanetActor) return false;

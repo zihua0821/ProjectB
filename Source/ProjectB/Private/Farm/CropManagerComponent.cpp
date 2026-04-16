@@ -53,6 +53,15 @@ void UCropManagerComponent::HandleLeftMouseClicked(const EEditMode EditMode, con
     }
 }
 
+FPlotCropInfo UCropManagerComponent::GetPlotCropInfoFromWorldLocation(const FVector& WorldLocation)
+{
+    if (PlotCropInfoWorldLocationMap.Contains(WorldLocation))
+    {
+        return *PlotCropInfoWorldLocationMap.Find(WorldLocation);
+    }
+    return FPlotCropInfo();
+}
+
 void UCropManagerComponent::BeginPlay()
 {
     Super::BeginPlay();
@@ -118,6 +127,8 @@ void UCropManagerComponent::RemoveCrop(FIntPoint Coords)
 
     // 移除实例
     PlotCropMap.Remove(Coords);
+    const FVector CropLocation = GetComponentTransform().TransformPosition(CropInfo.CropTransform.GetLocation());
+    PlotCropInfoWorldLocationMap.Remove(CropLocation);
     
     // 更新地块状态
     FarmlandComponent->SetPlotState(Coords, EPlotState::CropPlanted, true);
@@ -175,16 +186,21 @@ void UCropManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
         CropData.CropStateData.AddState(ECropState::WeedInfested);
 
     // 存储作物信息
-    auto& [Crop, CropTransform, CropMeshVariant, CropNumCustomDataFloats] = PlotCropMap.Add(Coords);
-    Crop = NewCrop;
-    CropMeshVariant = Row->MeshVariants[VariantIndex];
-    CropNumCustomDataFloats = Row->CropNumCustomDataFloats;
+    FPlotCropInfo CropInfo;
+    CropInfo.Crop = NewCrop;
+    CropInfo.CropMeshVariant = Row->MeshVariants[VariantIndex];
+    CropInfo.CropNumCustomDataFloats = Row->CropNumCustomDataFloats;
 
-    // 计算作物世界位置（需要地块组件提供 Transform）
+    // 计算作物位置
     FTransform PlotCropTransform = PlotInfo.Transform;
     PlotCropTransform.AddToTranslation(FarmlandConfig->CropOffset);
-    CropTransform = PlotCropTransform;
+    CropInfo.CropTransform = PlotCropTransform;
     
+    // 计算作物世界位置
+    FVector CropWorldLocation = GetComponentTransform().TransformPosition(PlotCropTransform.GetLocation());
+    PlotCropInfoWorldLocationMap.Add(CropWorldLocation, CropInfo);
+    PlotCropMap.Add(Coords, CropInfo);
+   
     // 绑定作物自身的事件
     NewCrop->OnPlantGrowthStageChanged.AddDynamic(this, &ThisClass::OnCropGrowthStageChanged);
     NewCrop->OnCropGrownThisTime.BindDynamic(this, &ThisClass::OnCropGrownThisTime);
@@ -278,11 +294,14 @@ void UCropManagerComponent::InitCropsFromSaveGameData()
             CropData.GrowthRate_PestInfested = FarmlandConfig->GrowthRate_PestInfested;
             
             // 存储作物信息
-            auto& [Crop, CropTransform, CropMeshVariant, CropNumCustomDataFloats] = PlotCropMap.Add(Coords);
-            Crop = SaveCrop;
-            CropMeshVariant = Row->MeshVariants[CurrentCropSaveGameData.VariantsIndex];
-            CropNumCustomDataFloats = Row->CropNumCustomDataFloats;
-            CropTransform = CurrentCropSaveGameData.Transform;
+            FPlotCropInfo CropInfo;
+            CropInfo.Crop = SaveCrop;
+            CropInfo.CropMeshVariant = Row->MeshVariants[CurrentCropSaveGameData.VariantsIndex];
+            CropInfo.CropNumCustomDataFloats = Row->CropNumCustomDataFloats;
+            CropInfo.CropTransform = CurrentCropSaveGameData.Transform;
+            PlotCropMap.Add(Coords, CropInfo);
+            FVector CropWorldLocation = GetComponentTransform().TransformPosition(CropInfo.CropTransform.GetLocation());
+            PlotCropInfoWorldLocationMap.Add(CropWorldLocation, CropInfo);
             
             // 绑定作物自身的事件
             SaveCrop->OnPlantGrowthStageChanged.AddDynamic(this, &ThisClass::OnCropGrowthStageChanged);

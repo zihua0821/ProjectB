@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "OrbitManagerComponent.h"
+#include "Crops/CropData.h"
 #include "UObject/Interface.h"
 #include "PlanetInterface.generated.h"
 
@@ -62,4 +63,14 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Cell")
 	FIntPoint GetCellCoord(FVector CellWorldLocation) const;
 	virtual FIntPoint GetCellCoord_Implementation(FVector CellWorldLocation) const;
+
+	// 根据世界位置获取单元格信息
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Cell")
+	FFarmLandPlotInfo GetCellPlotInfoFromWorldLocation(FVector CellWorldLocation) const;
+	virtual FFarmLandPlotInfo GetCellPlotInfoFromWorldLocation_Implementation(FVector CellWorldLocation) const;
+
+	// 根据世界位置获取单元格作物信息
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Crop")
+	FPlotCropInfo GetPlotCropInfoFromWorldLocation(FVector CellWorldLocation) const;
+	virtual FPlotCropInfo GetPlotCropInfoFromWorldLocation_Implementation(FVector CellWorldLocation) const;
 };

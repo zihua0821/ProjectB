@@ -44,3 +44,13 @@ FIntPoint IPlanetInterface::GetCellCoord_Implementation(FVector CellWorldLocatio
 {
 	return FIntPoint();
 }
+
+FFarmLandPlotInfo IPlanetInterface::GetCellPlotInfoFromWorldLocation_Implementation(FVector CellWorldLocation) const
+{
+	return FFarmLandPlotInfo();
+}
+
+FPlotCropInfo IPlanetInterface::GetPlotCropInfoFromWorldLocation_Implementation(FVector CellWorldLocation) const
+{
+	return FPlotCropInfo();
+}

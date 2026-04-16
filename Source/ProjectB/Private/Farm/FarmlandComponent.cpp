@@ -648,6 +648,15 @@ FIntPoint UFarmlandComponent::GetCellCoord(const FVector& WorldLocation)
 	return FIntPoint(-1, -1);
 }
 
+FFarmLandPlotInfo UFarmlandComponent::GetPlotInfoFromWorldLocation(const FVector& WorldLocation)
+{
+	if (PlotInfoWorldLocationMap.Contains(WorldLocation))
+	{
+		return *PlotInfoWorldLocationMap.Find(WorldLocation);
+	}
+	return FFarmLandPlotInfo();
+}
+
 TArray<FFarmLandPlotSaveGameData> UFarmlandComponent::GetPlotSaveGameData()
 {
 	PlotSaveGameData.Empty();
@@ -804,6 +813,9 @@ void UFarmlandComponent::CreateDefaultLandCells()
             FFarmLandPlotInfo PlotInfo;
             PlotInfo.Transform = PlotTransform;
             PlotInfoIndex.Add(FIntPoint(LatIdx, LonIdx), PlotInfo);
+        	
+        	FVector WorldLocation = LandCellOutlineRenderer->GetComponentTransform().TransformPosition(PlotLocation);
+        	PlotInfoWorldLocationMap.Add(WorldLocation, PlotInfo);
 
         	// FVector WorldLocation = GetComponentTransform().TransformPosition(PlotLocation);
         	// WorldLocation += NormalDirection * 100.f;

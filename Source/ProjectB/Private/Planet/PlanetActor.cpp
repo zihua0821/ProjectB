@@ -150,6 +150,24 @@ FIntPoint APlanetActor::GetCellCoord_Implementation(FVector CellWorldLocation) c
 	return IPlanetInterface::GetCellCoord_Implementation(CellWorldLocation);
 }
 
+FFarmLandPlotInfo APlanetActor::GetCellPlotInfoFromWorldLocation_Implementation(FVector CellWorldLocation) const
+{
+	if (FarmlandComponent)
+	{
+		return FarmlandComponent->GetPlotInfoFromWorldLocation(CellWorldLocation);
+	}
+	return IPlanetInterface::GetCellPlotInfoFromWorldLocation_Implementation(CellWorldLocation);
+}
+
+FPlotCropInfo APlanetActor::GetPlotCropInfoFromWorldLocation_Implementation(FVector CellWorldLocation) const
+{
+	if (CropManagerComponent)
+	{
+		return CropManagerComponent->GetPlotCropInfoFromWorldLocation(CellWorldLocation);
+	}
+	return IPlanetInterface::GetPlotCropInfoFromWorldLocation_Implementation(CellWorldLocation);
+}
+
 TArray<FFarmLandPlotSaveGameData> APlanetActor::GetPlotSaveGameData() const
 {
 	if (!FarmlandComponent)

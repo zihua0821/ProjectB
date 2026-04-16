@@ -25,7 +25,7 @@ EBTNodeResult::Type UBTTask_MoveToCoord::ExecuteTask(UBehaviorTreeComponent& Own
 	if (!Blackboard) return EBTNodeResult::Failed;
 	
 	// 2. 读取目标坐标
-	const FInstancedStruct TargetCoordStruct = FInstancedStruct(Blackboard->GetValue<UBlackboardKeyType_Struct>(TargetCoordKey.GetSelectedKeyID()));
+	const FInstancedStruct TargetCoordStruct = FInstancedStruct(Blackboard->GetValue<UBlackboardKeyType_Struct>(TargetCoordKey.SelectedKeyName));
 	const FIntPoint TargetCoord = TargetCoordStruct.Get<FIntPoint>();
 
 	// 3. 获取 AI Controller 和 Pawn
@@ -39,7 +39,7 @@ EBTNodeResult::Type UBTTask_MoveToCoord::ExecuteTask(UBehaviorTreeComponent& Own
 	if (!OrbitMovement) return EBTNodeResult::Failed;
 	
 	// 5. 计算目标角度
-	const FInstancedStruct OrbitDataStruct = FInstancedStruct(Blackboard->GetValue<UBlackboardKeyType_Struct>(OrbitDataKey.GetSelectedKeyID()));
+	const FInstancedStruct OrbitDataStruct = FInstancedStruct(Blackboard->GetValue<UBlackboardKeyType_Struct>(OrbitDataKey.SelectedKeyName));
 	const FOrbitData& OrbitData = OrbitDataStruct.Get<FOrbitData>();
 	const UObject* PlanetActor = Blackboard->GetValueAsObject(PlanetActorKey.SelectedKeyName);
 	if (!PlanetActor) return EBTNodeResult::Failed;
