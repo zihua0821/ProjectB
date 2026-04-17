@@ -6,6 +6,7 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "PlanetBlueprintFunctionLibrary.generated.h"
 
+class UPlanetConfigDataAsset;
 struct FOrbitData;
 /**
  * 
@@ -33,8 +34,7 @@ public:
 	 * @return 轨道角度（度数）
 	 */
 	static float CalculateOrbitAngleFromCell(const FTransform& CellWorldTransform, const FOrbitData& OrbitData);
-
-
+	
 	/*
 	 * 获取轨道角度对应的最接近的单元格坐标
 	 * @param OrbitAngle 轨道角度（度数）
@@ -42,4 +42,21 @@ public:
 	 * @return CellCoord 单元格坐标
 	 */
 	static FIntPoint GetNearestCellCoordFromOrbitAngle(float OrbitAngle, const FOrbitData& OrbitData);
+
+	/*
+	 * 将世界/局部坐标转换为单元格坐标
+	 * @param Location 世界/局部坐标
+	 * @param PlanetConfig 行星配置数据
+	 * @param IsWorldLocation 是否是世界坐标
+	 * @param ComponentToPlanet 组件到行星的变换矩阵
+	 * @param Tolerance 容差
+	 * @return CellCoord 单元格坐标
+	 */
+	static FIntPoint ConvertLocationToCellCoord(
+		const FVector& Location,
+		const UPlanetConfigDataAsset* PlanetConfig,
+		const bool IsWorldLocation = false,
+		const FTransform& ComponentToPlanet = FTransform::Identity,
+		const float Tolerance = 0.01f
+		);
 };

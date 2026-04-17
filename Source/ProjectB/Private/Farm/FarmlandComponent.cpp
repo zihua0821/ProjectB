@@ -207,7 +207,7 @@ void UFarmlandComponent::ClearFertilize(const FIntPoint Coords)
 	}
 	if (!PlotInfo.StateData.HasState(EPlotState::Fertilized))
 	{
-		UE_LOG(LogTemp, Error, TEXT("Plot is not Fertilized"))
+		// UE_LOG(LogTemp, Error, TEXT("Plot is not Fertilized"))
 		return;
 	}
 	if (LandCellRenderer == nullptr)
@@ -633,30 +633,6 @@ FIntPoint UFarmlandComponent::GetCellCoordsByIndex(int32 Index) const
 	return FIntPoint(-1, -1);
 }
 
-FIntPoint UFarmlandComponent::GetCellCoord(const FVector& WorldLocation)
-{
-	const FVector LocalLocation = LandCellOutlineRenderer->GetComponentTransform().TransformVector(WorldLocation);
-	for (const auto& PlotInfoTuple : PlotInfoIndex)
-	{
-		const FTransform& PlotTransform = PlotInfoTuple.Value.Transform;
-		if (LocalLocation == PlotTransform.GetLocation())
-		{
-			return PlotInfoTuple.Key;
-		}
-		
-	}
-	return FIntPoint(-1, -1);
-}
-
-FFarmLandPlotInfo UFarmlandComponent::GetPlotInfoFromWorldLocation(const FVector& WorldLocation)
-{
-	if (PlotInfoWorldLocationMap.Contains(WorldLocation))
-	{
-		return *PlotInfoWorldLocationMap.Find(WorldLocation);
-	}
-	return FFarmLandPlotInfo();
-}
-
 TArray<FFarmLandPlotSaveGameData> UFarmlandComponent::GetPlotSaveGameData()
 {
 	PlotSaveGameData.Empty();
@@ -813,9 +789,13 @@ void UFarmlandComponent::CreateDefaultLandCells()
             FFarmLandPlotInfo PlotInfo;
             PlotInfo.Transform = PlotTransform;
             PlotInfoIndex.Add(FIntPoint(LatIdx, LonIdx), PlotInfo);
+
+        	if (FIntPoint(LatIdx, LonIdx) == FIntPoint(12, 45))
+        	{
+        		UE_LOG(LogTemp, Error, TEXT("BestCell: "));
+        	}
         	
         	FVector WorldLocation = LandCellOutlineRenderer->GetComponentTransform().TransformPosition(PlotLocation);
-        	PlotInfoWorldLocationMap.Add(WorldLocation, PlotInfo);
 
         	// FVector WorldLocation = GetComponentTransform().TransformPosition(PlotLocation);
         	// WorldLocation += NormalDirection * 100.f;
@@ -1053,15 +1033,15 @@ void UFarmlandComponent::HandlePlotMoistureChanged(FIntPoint Coords)
 	// 判断水分状态
 	if (PlotInfo.MoisturePercentage >= 0.2f && PlotInfo.MoisturePercentage <= 0.8f)// 正常
 	{
-		UE_LOG(LogTemp, Log, TEXT("Moisture level is normal: %.2f"), PlotInfo.MoisturePercentage);
+		// UE_LOG(LogTemp, Log, TEXT("Moisture level is normal: %.2f"), PlotInfo.MoisturePercentage);
 	}
 	else if (PlotInfo.MoisturePercentage > 0.8f)// 过高
 	{
-		UE_LOG(LogTemp, Log, TEXT("Moisture level is excessive: %.2f"), PlotInfo.MoisturePercentage);
+		// UE_LOG(LogTemp, Log, TEXT("Moisture level is excessive: %.2f"), PlotInfo.MoisturePercentage);
 	}
 	else// 过低
 	{
-		UE_LOG(LogTemp, Log, TEXT("Moisture level is insufficient: %.2f"), PlotInfo.MoisturePercentage);
+		// UE_LOG(LogTemp, Log, TEXT("Moisture level is insufficient: %.2f"), PlotInfo.MoisturePercentage);
 		LandDried(Coords);
 	}
 }
@@ -1072,15 +1052,15 @@ void UFarmlandComponent::HandlePlotFertilityChanged(FIntPoint Coords)
 	// 判断肥力状态
 	if (PlotInfo.FertilityPercentage >= 0.2f && PlotInfo.FertilityPercentage <= 0.8f)// 正常
 	{
-		UE_LOG(LogTemp, Log, TEXT("Fertility level is normal: %.2f"), PlotInfo.FertilityPercentage);
+		// UE_LOG(LogTemp, Log, TEXT("Fertility level is normal: %.2f"), PlotInfo.FertilityPercentage);
 	}
 	else if (PlotInfo.FertilityPercentage > 0.8f)// 过高
 	{
-		UE_LOG(LogTemp, Log, TEXT("Fertility level is excessive: %.2f"), PlotInfo.FertilityPercentage);
+		// UE_LOG(LogTemp, Log, TEXT("Fertility level is excessive: %.2f"), PlotInfo.FertilityPercentage);
 	}
 	else// 过低
 	{
-		UE_LOG(LogTemp, Log, TEXT("Fertility level is insufficient: %.2f"), PlotInfo.FertilityPercentage);
+		// UE_LOG(LogTemp, Log, TEXT("Fertility level is insufficient: %.2f"), PlotInfo.FertilityPercentage);
 		ClearFertilize(Coords);
 	}
 }

@@ -7,6 +7,8 @@
 #include "Blueprint/AIBlueprintHelperLibrary.h"
 #include "Crops/CropData.h"
 #include "EnvironmentQuery/Items/EnvQueryItemType_Point.h"
+#include "Planet/PlanetActor.h"
+#include "Planet/PlanetBlueprintFunctionLibrary.h"
 #include "Planet/PlanetInterface.h"
 
 UEQSTest_PlotState::UEQSTest_PlotState()
@@ -25,8 +27,8 @@ void UEQSTest_PlotState::RunTest(FEnvQueryInstance& QueryInstance) const
 	const UBlackboardComponent* Blackboard = UAIBlueprintHelperLibrary::GetBlackboard(OwnerActor);
 	if (!Blackboard) return;
 
-	const UObject* PlanetObject = Blackboard->GetValueAsObject(TEXT("PlanetActor"));
-
+	const APlanetActor* PlanetActor = Cast<APlanetActor>(Blackboard->GetValueAsObject(TEXT("PlanetActor")));
+	
 	// 构建期望的掩码
 	FPlotStateData PlotStateData;
 	if (bMatchPlowed)       PlotStateData.AddState(EPlotState::Plowed);
@@ -47,8 +49,13 @@ void UEQSTest_PlotState::RunTest(FEnvQueryInstance& QueryInstance) const
 	for (FEnvQueryInstance::ItemIterator It(this, QueryInstance); It; ++It)
 	{
 		// 获取候选点的世界位置
-		const FVector Location = GetItemLocation(QueryInstance, It.GetIndex());
-		FFarmLandPlotInfo PlotInfo = IPlanetInterface::Execute_GetCellPlotInfoFromWorldLocation(PlanetObject, Location);
+		FIntPoint CellCoord = UPlanetBlueprintFunctionLibrary::ConvertLocationToCellCoord(
+			GetItemLocation(QueryInstance, It.GetIndex()),
+			PlanetActor->PlanetConfig,
+			true,
+			PlanetActor->GetActorTransform()
+			);
+		const FFarmLandPlotInfo PlotInfo = PlanetActor->GetPlotInfo(CellCoord);
 
 		It.SetScore(TestPurpose, FilterType, PlotInfo.StateData != PlotStateData, true);
 	}

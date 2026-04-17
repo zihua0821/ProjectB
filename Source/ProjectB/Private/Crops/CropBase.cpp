@@ -284,7 +284,7 @@ void UCropBase::HandlePlotStateChanged(FIntPoint Coords, FPlotStateData NewPlotS
 {
 	if (CropData.Coords != Coords)
 	{
-		UE_LOG(LogTemp, Error, TEXT("Crop is not in the same plot!"))
+		// UE_LOG(LogTemp, Error, TEXT("Crop is not in the same plot!"))
 		return;
 	}
 	if (!FarmlandComponent.IsValid())

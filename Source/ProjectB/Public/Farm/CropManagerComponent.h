@@ -85,10 +85,6 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Farmland")
     void SetCropSaveGameData(const TArray<FCropSaveGameData>& InCropSaveGameData){CropSaveGameData = InCropSaveGameData;}
 
-    // 获取地块作物信息
-    FPlotCropInfo GetPlotCropInfoFromWorldLocation(const FVector& WorldLocation);
-
-    
 protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
@@ -118,10 +114,6 @@ private:
     // 地块作物信息
     UPROPERTY()
     TMap<FIntPoint, FPlotCropInfo> PlotCropMap;
-
-    // 地块作物信息
-    UPROPERTY()
-    TMap<FVector, FPlotCropInfo> PlotCropInfoWorldLocationMap;
 
     // 作物渲染组件映射
     UPROPERTY()

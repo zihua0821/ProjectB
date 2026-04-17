@@ -41,20 +41,27 @@ void UBTService_UpdateSatelliteData::OnSearchStart(FBehaviorTreeSearchData& Sear
 	
 	OrbitData = IPlanetInterface::Execute_GetOrbitData(PlanetActor, "Default");
 	Blackboard->SetValue<UBlackboardKeyType_Struct>(TEXT("OrbitData"), FInstancedStruct::Make(OrbitData));
+
+	UpdateCurrentCellCoord(SearchData.OwnerComp);
+}
+
+void UBTService_UpdateSatelliteData::UpdateCurrentCellCoord(UBehaviorTreeComponent& OwnerComp) const
+{
+	if (!AutomationSatellite) return;
+	UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent();
+	if (!Blackboard) return;
+	const UOrbitMovementComponent* OrbitMovementComponent = AutomationSatellite->OrbitMovementComponent;
+	if (!OrbitMovementComponent) return;
+
+	// 获取当前坐标
+	const FIntPoint CurrentCellCoord = UPlanetBlueprintFunctionLibrary::GetNearestCellCoordFromOrbitAngle(OrbitMovementComponent->GetCurrentAngle(), OrbitData);
+	Blackboard->SetValue<UBlackboardKeyType_Struct>(TEXT("CurrentCellCoord"), FInstancedStruct::Make(CurrentCellCoord));
 }
 
 void UBTService_UpdateSatelliteData::TickNode(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, float DeltaSeconds)
 {
 	Super::TickNode(OwnerComp, NodeMemory, DeltaSeconds);
 
-	if (!AutomationSatellite) return;
-	UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent();
-	if (!Blackboard) return;
-	UOrbitMovementComponent* OrbitMovementComponent = AutomationSatellite->OrbitMovementComponent;
-	if (!OrbitMovementComponent) return;
-
-	// 获取当前坐标
-	const FIntPoint CurrentCellCoord = UPlanetBlueprintFunctionLibrary::GetNearestCellCoordFromOrbitAngle(OrbitMovementComponent->GetCurrentAngle(), OrbitData);
-	Blackboard->SetValue<UBlackboardKeyType_Struct>(TEXT("CurrentCellCoord"), FInstancedStruct::Make(CurrentCellCoord));
+	UpdateCurrentCellCoord(OwnerComp);
 }
 

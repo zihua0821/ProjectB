@@ -17,14 +17,16 @@ UBTTask_HandleFarmAction::UBTTask_HandleFarmAction()
 
 EBTNodeResult::Type UBTTask_HandleFarmAction::ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
 {
-	UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent();
+	const UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent();
 	if (!Blackboard) return EBTNodeResult::Failed;
-	
-	FInstancedStruct TargetCoordStruct = FInstancedStruct(Blackboard->GetValue<UBlackboardKeyType_Struct>(TEXT("TargetCellCoord")));
+
+	const FInstancedStruct TargetCoordStruct = FInstancedStruct(Blackboard->GetValue<UBlackboardKeyType_Struct>(TargetCoordKey.SelectedKeyName));
 	const FIntPoint TargetCoord = TargetCoordStruct.Get<FIntPoint>();
+
+	const EEditMode EditMode = static_cast<EEditMode>(Blackboard->GetValueAsEnum(CurrentActionKey.SelectedKeyName));
 	
-	UObject* PlanetObject = Blackboard->GetValueAsObject(TEXT("PlanetActor"));
-	APlanetActor* Planet = Cast<APlanetActor>(PlanetObject);
+	UObject* PlanetObject = Blackboard->GetValueAsObject(PlanetActorKey.SelectedKeyName);
+	const APlanetActor* Planet = Cast<APlanetActor>(PlanetObject);
 	if (!Planet) return EBTNodeResult::Failed;
 	
 	Planet->HandleLeftMouseClicked(EditMode, TargetCoord);

@@ -53,15 +53,6 @@ void UCropManagerComponent::HandleLeftMouseClicked(const EEditMode EditMode, con
     }
 }
 
-FPlotCropInfo UCropManagerComponent::GetPlotCropInfoFromWorldLocation(const FVector& WorldLocation)
-{
-    if (PlotCropInfoWorldLocationMap.Contains(WorldLocation))
-    {
-        return *PlotCropInfoWorldLocationMap.Find(WorldLocation);
-    }
-    return FPlotCropInfo();
-}
-
 void UCropManagerComponent::BeginPlay()
 {
     Super::BeginPlay();
@@ -128,7 +119,6 @@ void UCropManagerComponent::RemoveCrop(FIntPoint Coords)
     // 移除实例
     PlotCropMap.Remove(Coords);
     const FVector CropLocation = GetComponentTransform().TransformPosition(CropInfo.CropTransform.GetLocation());
-    PlotCropInfoWorldLocationMap.Remove(CropLocation);
     
     // 更新地块状态
     FarmlandComponent->SetPlotState(Coords, EPlotState::CropPlanted, true);
@@ -198,7 +188,6 @@ void UCropManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
     
     // 计算作物世界位置
     FVector CropWorldLocation = GetComponentTransform().TransformPosition(PlotCropTransform.GetLocation());
-    PlotCropInfoWorldLocationMap.Add(CropWorldLocation, CropInfo);
     PlotCropMap.Add(Coords, CropInfo);
    
     // 绑定作物自身的事件
@@ -301,7 +290,6 @@ void UCropManagerComponent::InitCropsFromSaveGameData()
             CropInfo.CropTransform = CurrentCropSaveGameData.Transform;
             PlotCropMap.Add(Coords, CropInfo);
             FVector CropWorldLocation = GetComponentTransform().TransformPosition(CropInfo.CropTransform.GetLocation());
-            PlotCropInfoWorldLocationMap.Add(CropWorldLocation, CropInfo);
             
             // 绑定作物自身的事件
             SaveCrop->OnPlantGrowthStageChanged.AddDynamic(this, &ThisClass::OnCropGrowthStageChanged);

@@ -50,5 +50,5 @@ bool UBTDecorator_IsAtTargetCellCoord::CalculateRawConditionValue(UBehaviorTreeC
 	const float TargetAngleDeg = UPlanetBlueprintFunctionLibrary::CalculateOrbitAngleFromCell(TargetCoord, OrbitData, PlanetActor);
 
 	const bool bIsAtTargetCoord = CurrentCoord == TargetCoord || FMath::IsNearlyEqual(CurrentAngleDeg, TargetAngleDeg, ErrorTolerance);
-	return IsInversed() ? !bIsAtTargetCoord : bIsAtTargetCoord;
+	return bIsAtTargetCoord;
 }

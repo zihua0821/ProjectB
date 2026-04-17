@@ -39,18 +39,3 @@ FTransform IPlanetInterface::GetCellWorldTransform_Implementation(FIntPoint Cell
 {
 	return FTransform();
 }
-
-FIntPoint IPlanetInterface::GetCellCoord_Implementation(FVector CellWorldLocation) const
-{
-	return FIntPoint();
-}
-
-FFarmLandPlotInfo IPlanetInterface::GetCellPlotInfoFromWorldLocation_Implementation(FVector CellWorldLocation) const
-{
-	return FFarmLandPlotInfo();
-}
-
-FPlotCropInfo IPlanetInterface::GetPlotCropInfoFromWorldLocation_Implementation(FVector CellWorldLocation) const
-{
-	return FPlotCropInfo();
-}

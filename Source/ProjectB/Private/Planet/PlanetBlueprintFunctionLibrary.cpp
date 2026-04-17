@@ -3,6 +3,7 @@
 
 #include "Planet/PlanetBlueprintFunctionLibrary.h"
 
+#include "Planet/PlanetConfigDataAsset.h"
 #include "Planet/PlanetInterface.h"
 
 float UPlanetBlueprintFunctionLibrary::CalculateOrbitAngleFromCell(const FIntPoint& CellCoord,
@@ -54,4 +55,43 @@ FIntPoint UPlanetBlueprintFunctionLibrary::GetNearestCellCoordFromOrbitAngle(con
 		}
 	}
 	return BestCell;
+}
+
+FIntPoint UPlanetBlueprintFunctionLibrary::ConvertLocationToCellCoord(const FVector& Location, const UPlanetConfigDataAsset* PlanetConfig, const bool IsWorldLocation,
+	const FTransform& ComponentToPlanet, const float Tolerance)
+{
+	// 1. 坐标类型处理
+	FVector RelativeLocation;
+	if (IsWorldLocation)
+	{
+		RelativeLocation = ComponentToPlanet.TransformPosition(Location);
+	}
+	else
+	{
+		RelativeLocation = Location;
+	}
+    
+	// 3. 球面坐标转换
+	const float Radius = PlanetConfig->Radius;
+	const float LatRad = FMath::Asin(RelativeLocation.Z / Radius);
+	const float LonRad = FMath::Atan2(RelativeLocation.Y, RelativeLocation.X);
+    
+	// 4. 转换为度数
+	const float LatDeg = FMath::RadiansToDegrees(LatRad);
+	float LonDeg = FMath::RadiansToDegrees(LonRad);
+	if (LonDeg < 0.0f) LonDeg += 360.0f;
+	
+	// 5. 计算经纬度步长
+	const float LatStep = (PlanetConfig->MaxLat - PlanetConfig->MinLat) / (PlanetConfig->NumLat - 1);
+	const float LonStep = 360.0f / PlanetConfig->NumLon;
+    
+	// 6. 计算网格索引（考虑精度误差）
+	int32 LatIdx = FMath::FloorToInt((LatDeg - PlanetConfig->MinLat + Tolerance) / LatStep);
+	int32 LonIdx = FMath::FloorToInt((LonDeg + Tolerance) / LonStep);
+    
+	// 7. 处理边界情况
+	LatIdx = FMath::Clamp(LatIdx, 0, PlanetConfig->NumLat - 2);
+	LonIdx = FMath::Clamp(LonIdx, 0, PlanetConfig->NumLon - 1);
+	
+	return FIntPoint(LatIdx, LonIdx);
 }

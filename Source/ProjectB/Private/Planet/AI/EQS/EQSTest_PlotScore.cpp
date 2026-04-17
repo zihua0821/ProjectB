@@ -7,6 +7,8 @@
 #include "Blueprint/AIBlueprintHelperLibrary.h"
 #include "Crops/CropBase.h"
 #include "EnvironmentQuery/Items/EnvQueryItemType_Point.h"
+#include "Planet/PlanetActor.h"
+#include "Planet/PlanetBlueprintFunctionLibrary.h"
 #include "Planet/PlanetInterface.h"
 
 UEQSTest_PlotScore::UEQSTest_PlotScore()
@@ -24,17 +26,22 @@ void UEQSTest_PlotScore::RunTest(FEnvQueryInstance& QueryInstance) const
 	const UBlackboardComponent* Blackboard = UAIBlueprintHelperLibrary::GetBlackboard(OwnerActor);
 	if (!Blackboard) return;
 
-	const UObject* PlanetObject = Blackboard->GetValueAsObject(TEXT("PlanetActor"));
+	const APlanetActor* PlanetActor = Cast<APlanetActor>(Blackboard->GetValueAsObject(TEXT("PlanetActor")));
 	
 	// 2. 遍历所有候选点
 	for (FEnvQueryInstance::ItemIterator It(this, QueryInstance); It; ++It)
 	{
 		float Score = 0.f;
 		// 获取候选点的世界位置
-		const FVector Location = GetItemLocation(QueryInstance, It.GetIndex());
-		const FFarmLandPlotInfo PlotInfo = IPlanetInterface::Execute_GetCellPlotInfoFromWorldLocation(PlanetObject, Location);
+		FIntPoint CellCoord = UPlanetBlueprintFunctionLibrary::ConvertLocationToCellCoord(
+			GetItemLocation(QueryInstance, It.GetIndex()),
+			PlanetActor->PlanetConfig,
+			true,
+			PlanetActor->GetActorTransform()
+			);
+		const FFarmLandPlotInfo PlotInfo = PlanetActor->GetPlotInfo(CellCoord);
 		FPlotStateData StateData = PlotInfo.StateData;
-		const FPlotCropInfo CropInfo = IPlanetInterface::Execute_GetPlotCropInfoFromWorldLocation(PlanetObject, Location);
+		const FPlotCropInfo CropInfo = PlanetActor->GetPlotCropInfo(CellCoord);
 
 		Score += (StateData.HasState(EPlotState::Plowed) ? 1.f : 0.f) * PlowedWeight;
 		Score += (StateData.HasState(EPlotState::CropPlanted) ? 1.f : 0.f) * PlantedWeight;

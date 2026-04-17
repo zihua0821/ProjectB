@@ -67,12 +67,6 @@ public:
 	// 获取单元格坐标
 	FIntPoint GetCellCoordsByIndex(int32 Index) const;
 
-	// 获取单元格坐标
-	FIntPoint GetCellCoord(const FVector& WorldLocation);
-
-	// 通过世界坐标获取地块信息
-	FFarmLandPlotInfo GetPlotInfoFromWorldLocation(const FVector& WorldLocation);
-
 	// ==================== 保存接口 ====================
 	
 	// 获取地块信息保存数据
@@ -165,9 +159,6 @@ private:
 	// 地块信息Map
 	UPROPERTY()
 	TMap<FIntPoint, FFarmLandPlotInfo> PlotInfoIndex;
-
-	// 地块信息Map
-	TMap<FVector, FFarmLandPlotInfo> PlotInfoWorldLocationMap;
 
 	// 单元格信息Map
 	UPROPERTY()

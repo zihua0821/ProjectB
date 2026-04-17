@@ -20,6 +20,16 @@ public:
 
 	virtual EBTNodeResult::Type ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) override;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FarmAction")
-	TEnumAsByte<EEditMode> EditMode = EEditMode::None;
+	// 目标单元格坐标（Struct: FIntPoint）
+	UPROPERTY(EditAnywhere, Category = "Blackboard")
+	FBlackboardKeySelector TargetCoordKey;
+
+	// CurrentAction
+	UPROPERTY(EditAnywhere, Category = "Blackboard")
+	FBlackboardKeySelector CurrentActionKey;
+	
+	// PlanetActor
+	UPROPERTY(EditAnywhere, Category = "Blackboard")
+	FBlackboardKeySelector PlanetActorKey;
+	
 };

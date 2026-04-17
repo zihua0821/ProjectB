@@ -22,5 +22,5 @@ bool UBTDecorator_IsTaskSatelliteQueueEmpty::CalculateRawConditionValue(UBehavio
 	if (!Satellite) return false;
 
 	const TQueue<EEditMode>& SatelliteTaskQueue = Satellite->GetSatelliteTaskQueue();
-	return IsInversed() ? !SatelliteTaskQueue.IsEmpty() : SatelliteTaskQueue.IsEmpty();
+	return SatelliteTaskQueue.IsEmpty();
 }

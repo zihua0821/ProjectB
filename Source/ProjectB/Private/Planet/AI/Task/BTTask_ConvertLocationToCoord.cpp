@@ -5,6 +5,8 @@
 
 #include "BehaviorTree/BlackboardComponent.h"
 #include "BehaviorTree/Blackboard/BlackboardKeyType_Struct.h"
+#include "Planet/PlanetActor.h"
+#include "Planet/PlanetBlueprintFunctionLibrary.h"
 #include "Planet/PlanetInterface.h"
 #include "StructUtils/StructView.h"
 
@@ -19,16 +21,20 @@ EBTNodeResult::Type UBTTask_ConvertLocationToCoord::ExecuteTask(UBehaviorTreeCom
 	if (!Blackboard) return EBTNodeResult::Failed;
 
 	// 1. 读取 EQS 返回的最佳位置
-	FVector BestLocation = Blackboard->GetValueAsVector(InputLocationKey.SelectedKeyName);
+	const FVector BestLocation = Blackboard->GetValueAsVector(InputLocationKey.SelectedKeyName);
 	if (BestLocation.IsNearlyZero()) return EBTNodeResult::Failed;
 
 	// 2. 获取网格管理器
-	UObject* PlanetObject = Blackboard->GetValueAsObject(PlanetActorKey.SelectedKeyName);
-	if (!PlanetObject) return EBTNodeResult::Failed;
+	const APlanetActor* PlanetActor = Cast<APlanetActor>(Blackboard->GetValueAsObject(PlanetActorKey.SelectedKeyName));
+	if (!PlanetActor) return EBTNodeResult::Failed;
 
 	// 3. 将世界位置转换为单元格坐标
-	FIntPoint CellCoord = IPlanetInterface::Execute_GetCellCoord(PlanetObject, BestLocation);
-
+	const FIntPoint CellCoord = UPlanetBlueprintFunctionLibrary::ConvertLocationToCellCoord(
+				BestLocation,
+				PlanetActor->PlanetConfig,
+				true,
+				PlanetActor->GetActorTransform()
+				);
 	// 4. 写入输出黑板键
 	Blackboard->SetValue<UBlackboardKeyType_Struct>(OutputCellCoordKey.SelectedKeyName, FInstancedStruct::Make(CellCoord));
 	
