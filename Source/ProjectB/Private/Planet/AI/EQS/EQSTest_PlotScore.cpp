@@ -43,8 +43,8 @@ void UEQSTest_PlotScore::RunTest(FEnvQueryInstance& QueryInstance) const
 		FPlotStateData StateData = PlotInfo.StateData;
 		const FPlotCropInfo CropInfo = PlanetActor->GetPlotCropInfo(CellCoord);
 
-		Score += (StateData.HasState(EPlotState::Plowed) ? 1.f : 0.f) * PlowedWeight;
-		Score += (StateData.HasState(EPlotState::CropPlanted) ? 1.f : 0.f) * PlantedWeight;
+		Score += (StateData.HasState(EPlotState::Plowed) ? 0.f : 1.f) * PlowedWeight;
+		Score += (StateData.HasState(EPlotState::CropPlanted) ? 0.f : 1.f) * PlantedWeight;
 		Score += FMath::Clamp(1.f - PlotInfo.MoisturePercentage, 0.f, 1.f) * MoistureWeight;
 		Score += FMath::Clamp(1.f - PlotInfo.FertilityPercentage, 0.f, 1.f) * FertilityWeight;
 		if (CropInfo.Crop)

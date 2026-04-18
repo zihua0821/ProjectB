@@ -9,5 +9,5 @@ struct FPlanetInfo
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Planet")
-	int32 PlanetPower = 100;
+	int32 PlanetPower = 9999;
 };
