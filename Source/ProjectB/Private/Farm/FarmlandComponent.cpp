@@ -720,7 +720,7 @@ void UFarmlandComponent::TickComponent(float DeltaTime, enum ELevelTick TickType
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	UpdatePlotLoss(DeltaTime);
+	// UpdatePlotLoss(DeltaTime);
 }
 
 void UFarmlandComponent::CreateDefaultLandCells()
@@ -1070,8 +1070,8 @@ void UFarmlandComponent::OnCropGrownThisTime(FIntPoint Coords, float MoistureCos
 	FFarmLandPlotInfo& PlotInfo = PlotInfoIndex.FindChecked(Coords);
 	PlotInfo.MoisturePercentage = FMath::Clamp(PlotInfo.MoisturePercentage - MoistureCost, 0.f, 1.f);
 	PlotInfo.FertilityPercentage = FMath::Clamp(PlotInfo.FertilityPercentage - FertilityCost, 0.f, 1.f);
-	OnPlotMoistureChanged.Broadcast(Coords, PlotInfo.MoisturePercentage);
-	OnPlotFertilityChanged.Broadcast(Coords, PlotInfo.FertilityPercentage);
+	// OnPlotMoistureChanged.Broadcast(Coords, PlotInfo.MoisturePercentage);
+	// OnPlotFertilityChanged.Broadcast(Coords, PlotInfo.FertilityPercentage);
 	HandlePlotMoistureChanged(Coords);
 	HandlePlotFertilityChanged(Coords);
 }

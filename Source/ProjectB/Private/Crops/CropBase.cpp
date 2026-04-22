@@ -3,25 +3,25 @@
 
 #include "ProjectB/Public/Crops/CropBase.h"
 
+#include "Farm/CropManagerComponent.h"
 #include "Farm/FarmlandComponent.h"
 
 UCropBase::UCropBase(): CropData()
 {
 }
 
-void UCropBase::InitializeCrop(UFarmlandComponent* InComponent, FCropData& InCropData)
+void UCropBase::InitializeCrop(UCropManagerComponent* InCropManagerComponent, FCropData& InCropData)
 {
-	FarmlandComponent = InComponent;
-	if (FarmlandComponent.IsValid())
-	{
-		FarmlandComponent->OnPlotStateChanged.AddDynamic(this, &ThisClass::HandlePlotStateChanged);
-		FarmlandComponent->OnPlotMoistureChanged.AddDynamic(this, &ThisClass::HandlePlotMoistureChanged);
-		FarmlandComponent->OnPlotFertilityChanged.AddDynamic(this, &ThisClass::HandlePlotFertilityChanged);
-	}
+	CropManagerComponent = InCropManagerComponent;
+
 	CropData = InCropData;
 	OnPlantGrowthStageChanged.Broadcast(CropData.Coords, CropData.CropGrowthStage);
 	OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
 	OnCropCropQualityChanged.Broadcast(CropData.Coords, CropData.CropQualityData.Quality);
+	if (CropManagerComponent.IsValid())
+	{
+		CropManagerComponent->OnCropGrowthStageChanged(CropData.Coords, CropData.CropGrowthStage);
+	}
 }
 
 void UCropBase::UpdateCropQuality(float DeltaTime)
@@ -68,12 +68,12 @@ void UCropBase::UpdateCropQuality(float DeltaTime)
 	}
 }
 
-void UCropBase::UpdateCrop(float DeltaTime)
+bool UCropBase::UpdateCrop(float DeltaTime)
 {
 	// ===== 1. 收获后：既不更新品质，也不生长 =====
 	if (CropData.CropGrowthStage == ECropGrowthStage::Harvested)
 	{
-		return;
+		return false;
 	}
 
 	// ===== 2. 种子休眠：种子阶段同时缺水和缺肥时，不更新品质也不生长 =====
@@ -81,7 +81,7 @@ void UCropBase::UpdateCrop(float DeltaTime)
 		CropData.CropStateData.HasState(ECropState::NeedsWater) &&
 		CropData.CropStateData.HasState(ECropState::NeedsFertilizer))
 	{
-		return;
+		return false;
 	}
 
 	// ===== 3. 更新品质数据（所有未收获的阶段都要更新，包括成熟）=====
@@ -90,7 +90,7 @@ void UCropBase::UpdateCrop(float DeltaTime)
 	// ===== 4. 成熟阶段：只更新品质，不生长，不消耗资源 =====
 	if (CropData.CropGrowthStage == ECropGrowthStage::Mature)
 	{
-		return;
+		return false;
 	}
 
 	// ===== 以下为生长逻辑（仅种子和幼苗阶段）=====
@@ -120,7 +120,7 @@ void UCropBase::UpdateCrop(float DeltaTime)
 	// 生长速率为0不生长
 	if (GrowthRate <= 0.f)
 	{
-		return;
+		return false;
 	}
 	
 	CropData.TotalGrowthTime += DeltaTime * GrowthRate;
@@ -134,7 +134,7 @@ void UCropBase::UpdateCrop(float DeltaTime)
 		break;
 	default:
 		UE_LOG(LogTemp, Error, TEXT("Crop is in Wrong CropGrowthStage!"))
-		return;
+		return false;
 	}
 	// 判断是否需要转换成下一阶段
 	if (CropData.CropGrowthStage == ECropGrowthStage::Seed && CropData.CurrentStageGrowthTime >= CropData.GrowthSeedTime) // 种子-发芽
@@ -142,6 +142,10 @@ void UCropBase::UpdateCrop(float DeltaTime)
 		CropData.CropGrowthStage = ECropGrowthStage::Seedling;
 		OnPlantGrowthStageChanged.Broadcast(CropData.Coords, CropData.CropGrowthStage);
 		OnCropCropQualityChanged.Broadcast(CropData.Coords, CropData.CropQualityData.GetQuality(CropData.TotalGrowthTime));
+		if (CropManagerComponent.IsValid())
+		{
+			CropManagerComponent->OnCropGrowthStageChanged(CropData.Coords, CropData.CropGrowthStage);
+		}
 	}
 	else if (CropData.CropGrowthStage == ECropGrowthStage::Seedling && CropData.CurrentStageGrowthTime >= CropData.GrowthSeedlingTime) // 幼苗-成熟
 	{
@@ -150,12 +154,17 @@ void UCropBase::UpdateCrop(float DeltaTime)
 		OnPlantGrowthStageChanged.Broadcast(CropData.Coords, CropData.CropGrowthStage);
 		OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
 		OnCropCropQualityChanged.Broadcast(CropData.Coords, CropData.CropQualityData.GetQuality(CropData.TotalGrowthTime));
+		if (CropManagerComponent.IsValid())
+		{
+			CropManagerComponent->OnCropGrowthStageChanged(CropData.Coords, CropData.CropGrowthStage);
+		}
 	}
 
-	if (OnCropGrownThisTime.IsBound())
-	{
-		OnCropGrownThisTime.Execute(CropData.Coords, CropData.MoistureConsumePerSecond * DeltaTime, CropData.FertilityConsumePerSecond * DeltaTime);
-	}
+	return true;
+	// if (OnCropGrownThisTime.IsBound())
+	// {
+	// 	OnCropGrownThisTime.Execute(CropData.Coords, CropData.MoistureConsumePerSecond * DeltaTime, CropData.FertilityConsumePerSecond * DeltaTime);
+	// }
 }
 
 void UCropBase::ProcessOfflineGrowth(const FTimespan& OfflineDuration)
@@ -243,6 +252,10 @@ void UCropBase::HarvestCrop()
 	CropData.CropStateData.RemoveState(ECropState::ReadyForHarvest);
 	OnPlantGrowthStageChanged.Broadcast(CropData.Coords, CropData.CropGrowthStage);
 	OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
+	if (CropManagerComponent.IsValid())
+	{
+		CropManagerComponent->OnCropGrowthStageChanged(CropData.Coords, CropData.CropGrowthStage);
+	}
 }
 
 void UCropBase::HandleCropPestInfested(bool bIsPestInfested)
@@ -269,44 +282,9 @@ void UCropBase::HandleCropWeedInfested(bool bIsWeedInfested)
 	}
 }
 
-void UCropBase::BeginDestroy()
+void UCropBase::HandlePlotStateChanged(FPlotStateData NewPlotState)
 {
-	if (FarmlandComponent.IsValid())
-	{
-		FarmlandComponent->OnPlotStateChanged.RemoveAll(this);
-		FarmlandComponent->OnPlotMoistureChanged.RemoveAll(this);
-		FarmlandComponent->OnPlotFertilityChanged.RemoveAll(this);
-	}
-	UObject::BeginDestroy();
-}
-
-void UCropBase::HandlePlotStateChanged(FIntPoint Coords, FPlotStateData NewPlotState)
-{
-	if (CropData.Coords != Coords)
-	{
-		// UE_LOG(LogTemp, Error, TEXT("Crop is not in the same plot!"))
-		return;
-	}
-	if (!FarmlandComponent.IsValid())
-	{
-		UE_LOG(LogTemp, Error, TEXT("Crop owner component is invalid!"))
-		return;
-	}
-	const FFarmLandPlotInfo& PlotInfo = FarmlandComponent->GetPlotInfo(Coords);
-	HandleCropMoisture(PlotInfo.MoisturePercentage);
-	HandleCropFertility(PlotInfo.FertilityPercentage);
 	HandleCropPestInfested(NewPlotState.HasState(EPlotState::PestInfested));
 	HandleCropWeedInfested(NewPlotState.HasState(EPlotState::WeedInfested));
 }
 
-void UCropBase::HandlePlotMoistureChanged(FIntPoint Coords, float NewMoisture)
-{
-	if (CropData.Coords != Coords) return; 
-	HandleCropMoisture(NewMoisture);
-}
-
-void UCropBase::HandlePlotFertilityChanged(FIntPoint Coords, float NewFertility)
-{
-	if (CropData.Coords != Coords) return;
-	HandleCropFertility(NewFertility);
-}

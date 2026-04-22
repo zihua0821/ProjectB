@@ -7,6 +7,7 @@
 #include "CropData.h"
 #include "CropBase.generated.h"
 
+class UCropManagerComponent;
 class UFarmlandComponent;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlantGrowthStageChanged, FIntPoint, Coords, ECropGrowthStage,
                                              NewGrowthStage);
@@ -40,17 +41,17 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Crop|Events")
 	FOnCropCropQualityChanged OnCropCropQualityChanged;
 
-	FOnCropGrownThisTime OnCropGrownThisTime;
+	// FOnCropGrownThisTime OnCropGrownThisTime;
 	
 	// ==================== 生命周期 ====================
 	
 	// 初始化农作物
 	UFUNCTION(BlueprintCallable, Category = "Crop|Initialization")
-	virtual void InitializeCrop(UFarmlandComponent* InComponent, FCropData& InCropData);
+	virtual void InitializeCrop(UCropManagerComponent* InCropManagerComponent, FCropData& InCropData);
 
 	// 更新农作物状态（每帧/每tick调用）
 	UFUNCTION(BlueprintCallable, Category = "Crop|Update")
-	virtual void UpdateCrop(float DeltaTime);
+	virtual bool UpdateCrop(float DeltaTime);
     
 	// 处理离线时间生长
 	UFUNCTION(BlueprintCallable, Category = "Crop|Update")
@@ -81,25 +82,22 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Crop|Actions")
 	virtual void HandleCropWeedInfested(bool bIsWeedInfested);
 
-protected:
-	virtual void BeginDestroy() override;
+	UFUNCTION()
+	void HandlePlotStateChanged(FPlotStateData NewPlotState);
 private:
+	// UPROPERTY()
+	// TWeakObjectPtr<UFarmlandComponent> FarmlandComponent;
+
 	UPROPERTY()
-	TWeakObjectPtr<UFarmlandComponent> FarmlandComponent;
+	TWeakObjectPtr<UCropManagerComponent> CropManagerComponent;
 	
 	UPROPERTY()
 	FCropData CropData;
 
 	void UpdateCropQuality(float DeltaTime);
 	
-	UFUNCTION()
-	void HandlePlotStateChanged(FIntPoint Coords, FPlotStateData NewPlotState);
 
-	UFUNCTION()
-	void HandlePlotMoistureChanged(FIntPoint Coords, float NewMoisture);
-
-	UFUNCTION()
-	void HandlePlotFertilityChanged(FIntPoint Coords, float NewFertility);
+	
 };
 
 

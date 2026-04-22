@@ -67,6 +67,9 @@ public:
 	// 获取单元格坐标
 	FIntPoint GetCellCoordsByIndex(int32 Index) const;
 
+	UFUNCTION(BlueprintCallable, Category = "Farmland|Coordinate")
+	TMap<FIntPoint, FFarmLandPlotInfo> GetPlotInfos() const { return PlotInfoIndex; }
+
 	// ==================== 保存接口 ====================
 	
 	// 获取地块信息保存数据

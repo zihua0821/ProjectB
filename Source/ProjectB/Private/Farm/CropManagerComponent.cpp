@@ -113,8 +113,8 @@ void UCropManagerComponent::RemoveCrop(FIntPoint Coords)
     }
 
     // 解绑事件
-    CropInfo.Crop->OnPlantGrowthStageChanged.RemoveAll(this);
-    CropInfo.Crop->OnCropGrownThisTime.Unbind();
+    // CropInfo.Crop->OnPlantGrowthStageChanged.RemoveAll(this);
+    // CropInfo.Crop->OnCropGrownThisTime.Unbind();
 
     // 移除实例
     PlotCropMap.Remove(Coords);
@@ -124,6 +124,8 @@ void UCropManagerComponent::RemoveCrop(FIntPoint Coords)
     FarmlandComponent->SetPlotState(Coords, EPlotState::CropPlanted, true);
     
     OnCropPlantedOrRemoved.Broadcast(Coords);
+
+    // PlantCrop(Coords, BasePlayerController->GetSelectedCropName());
 }
 
 void UCropManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
@@ -191,11 +193,11 @@ void UCropManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
     PlotCropMap.Add(Coords, CropInfo);
    
     // 绑定作物自身的事件
-    NewCrop->OnPlantGrowthStageChanged.AddDynamic(this, &ThisClass::OnCropGrowthStageChanged);
-    NewCrop->OnCropGrownThisTime.BindDynamic(this, &ThisClass::OnCropGrownThisTime);
+    // NewCrop->OnPlantGrowthStageChanged.AddDynamic(this, &ThisClass::OnCropGrowthStageChanged);
+    // NewCrop->OnCropGrownThisTime.BindDynamic(this, &ThisClass::OnCropGrownThisTime);
     
     // 初始化作物（传入本组件引用，以便作物能绑定地块事件）
-    NewCrop->InitializeCrop(FarmlandComponent.Get(), CropData);
+    NewCrop->InitializeCrop(this, CropData);
 
     // 更新地块状态
     FarmlandComponent->SetPlotState(Coords, EPlotState::CropPlanted, true);
@@ -292,11 +294,11 @@ void UCropManagerComponent::InitCropsFromSaveGameData()
             FVector CropWorldLocation = GetComponentTransform().TransformPosition(CropInfo.CropTransform.GetLocation());
             
             // 绑定作物自身的事件
-            SaveCrop->OnPlantGrowthStageChanged.AddDynamic(this, &ThisClass::OnCropGrowthStageChanged);
-            SaveCrop->OnCropGrownThisTime.BindDynamic(this, &ThisClass::OnCropGrownThisTime);
+            // SaveCrop->OnPlantGrowthStageChanged.AddDynamic(this, &ThisClass::OnCropGrowthStageChanged);
+            // SaveCrop->OnCropGrownThisTime.BindDynamic(this, &ThisClass::OnCropGrownThisTime);
             
             // 初始化作物（传入本组件引用，以便作物能绑定地块事件）
-            SaveCrop->InitializeCrop(FarmlandComponent.Get(), CropData);
+            SaveCrop->InitializeCrop(this, CropData);
 
             // 更新地块状态
             FarmlandComponent->SetPlotState(Coords, EPlotState::CropPlanted, true);
@@ -315,7 +317,20 @@ void UCropManagerComponent::UpdateCrops(float DeltaTime)
     {
         if (Pair.Value.Crop)
         {
-            Pair.Value.Crop->UpdateCrop(DeltaTime);
+            if (Pair.Value.Crop->UpdateCrop(DeltaTime))
+            {
+                // const FCropData& CropData = Pair.Value.Crop->GetCropData();
+                // OnCropGrownThisTime(
+                //     Pair.Key,
+                //     CropData.MoistureConsumePerSecond * DeltaTime,
+                //     CropData.FertilityConsumePerSecond * DeltaTime
+                //     );
+                OnCropGrownThisTime(
+                    Pair.Key,
+                    0.f,
+                    0.f
+                    );
+            }
         }
     }
 }
@@ -421,6 +436,14 @@ void UCropManagerComponent::OnCropGrowthStageChanged(FIntPoint Coords, ECropGrow
             NewISM->SetCustomDataValue(Index, CropCustomData::IsLeaf, bWithers ? 1.f : 0.f);
         }
     }
+    // if (NewGrowthStage == ECropGrowthStage::Mature)
+    // {
+    //     HarvestCrop(Coords);
+    // }
+    // if (NewGrowthStage == ECropGrowthStage::Harvested)
+    // {
+    //     RemoveCrop(Coords);
+    // }
 }
 
 UInstancedStaticMeshComponent* UCropManagerComponent::GetOrCreateCropHISMComponent(const FPlotCropInfo& CropInfo)
@@ -459,8 +482,8 @@ UInstancedStaticMeshComponent* UCropManagerComponent::GetOrCreateCropHISMCompone
     UInstancedStaticMeshComponent* TargetComponent = NewObject<UInstancedStaticMeshComponent>(GetOwner());
     TargetComponent->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
     TargetComponent->RegisterComponent();
-    TargetComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    TargetComponent->SetCollisionResponseToAllChannels(ECR_Block);
+    TargetComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    TargetComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
     TargetComponent->SetStaticMesh(Mesh);
     TargetComponent->SetNumCustomDataFloats(CropInfo.CropNumCustomDataFloats);
     CropHISMComponentMap.Add(FStaticMeshKey(Mesh), TargetComponent);
@@ -532,19 +555,15 @@ void UCropManagerComponent::SetCropDisease(FIntPoint Coords, bool bDisease, bool
 void UCropManagerComponent::HandlePlotStateChanged(FIntPoint Coords, FPlotStateData NewPlotState)
 {
     if (!PlotCropMap.Contains(Coords)) return;
-
-    // 移除农作物
     if (NewPlotState.IsEmpty())
     {
         RemoveCrop(Coords);
         return;
     }
-
-    // 更新农作物
-    UCropBase* Crop = PlotCropMap[Coords].Crop;
-    if (!Crop) return;
-    Crop->HandleCropWeedInfested(NewPlotState.HasState(EPlotState::WeedInfested));
-    Crop->HandleCropPestInfested(NewPlotState.HasState(EPlotState::PestInfested));
+    if (UCropBase* Crop = PlotCropMap[Coords].Crop)
+    {
+        Crop->HandlePlotStateChanged(NewPlotState);
+    }
 }
 
 void UCropManagerComponent::HandlePlotMoistureChanged(FIntPoint Coords, float NewMoisture)
@@ -565,8 +584,7 @@ void UCropManagerComponent::HandlePlotFertilityChanged(FIntPoint Coords, float N
     }
 }
 
-// ReSharper disable once CppMemberFunctionMayBeConst
-void UCropManagerComponent::OnCropGrownThisTime(FIntPoint Coords, float MoistureCost, float FertilityCost)
+void UCropManagerComponent::OnCropGrownThisTime(FIntPoint Coords, float MoistureCost, float FertilityCost) const
 {
     if (!FarmlandComponent.IsValid()) return;
     FarmlandComponent->OnCropGrownThisTime(Coords, MoistureCost, FertilityCost);

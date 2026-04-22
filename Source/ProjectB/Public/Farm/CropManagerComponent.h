@@ -61,6 +61,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Crop Manager")
     void RemoveCropDried(FIntPoint Coords);
     
+    // 作物成长阶段改变
+    void OnCropGrowthStageChanged(FIntPoint Coords, ECropGrowthStage NewGrowthStage);
+    
     // ==================== 接口 ====================
     
     // 设置地块配置数据
@@ -135,10 +138,6 @@ private:
     // 设置作物病害
     void SetCropDisease(FIntPoint Coords,bool bDisease, bool bLeafs = false);
 
-    // 作物成长阶段改变
-    UFUNCTION()
-    void OnCropGrowthStageChanged(FIntPoint Coords, ECropGrowthStage NewGrowthStage);
-
     // 地块状态改变
     UFUNCTION()
     void HandlePlotStateChanged(FIntPoint Coords, FPlotStateData NewPlotState);
@@ -153,7 +152,7 @@ private:
 
     // 作物生长
     UFUNCTION()
-    void OnCropGrownThisTime(FIntPoint Coords, float MoistureCost, float FertilityCost);
+    void OnCropGrownThisTime(FIntPoint Coords, float MoistureCost, float FertilityCost) const;
 
     // 从保存数据初始化作物
     void InitCropsFromSaveGameData();
