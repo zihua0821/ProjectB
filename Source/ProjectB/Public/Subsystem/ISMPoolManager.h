@@ -243,4 +243,11 @@ private:
 
 	/** 是否有未处理的变换请求 */
 	bool bHasPendingTransforms = false;
+
+	/**
+	 * 批量compact，避免频繁compact
+	 */
+	void Compact();
+	
+	float TimeSinceLastCompact = 0.0f;
 };

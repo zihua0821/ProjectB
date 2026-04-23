@@ -15,6 +15,26 @@ void UCropBase::InitializeCrop(UCropManagerComponent* InCropManagerComponent, FC
 	CropManagerComponent = InCropManagerComponent;
 
 	CropData = InCropData;
+
+	//-----------------
+	const float SeedlingStart = CropData.GrowthSeedTime;
+	const float MatureStart = CropData.GrowthSeedTime + CropData.GrowthSeedlingTime;
+	if (CropData.TotalGrowthTime < SeedlingStart)
+	{
+		CropData.CropGrowthStage = ECropGrowthStage::Seed;
+		CropData.CurrentStageGrowthTime = CropData.TotalGrowthTime;
+	}
+	else if (CropData.TotalGrowthTime < MatureStart)
+	{
+		CropData.CropGrowthStage = ECropGrowthStage::Seedling;
+		CropData.CurrentStageGrowthTime = CropData.TotalGrowthTime - SeedlingStart;
+	}
+	else
+	{
+		CropData.CropGrowthStage = ECropGrowthStage::Mature;
+		CropData.CurrentStageGrowthTime = CropData.TotalGrowthTime - MatureStart;
+	}
+	//-----------------
 	OnPlantGrowthStageChanged.Broadcast(CropData.Coords, CropData.CropGrowthStage);
 	OnCropStateChanged.Broadcast(CropData.Coords, CropData.CropStateData);
 	OnCropCropQualityChanged.Broadcast(CropData.Coords, CropData.CropQualityData.Quality);

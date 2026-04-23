@@ -171,6 +171,9 @@ void UCropManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
     CropData.GrowthRate_NutrientBurn = FarmlandConfig->GrowthRate_NutrientBurn;
     CropData.GrowthRate_WeedInfested = FarmlandConfig->GrowthRate_WeedInfested;
     CropData.GrowthRate_PestInfested = FarmlandConfig->GrowthRate_PestInfested;
+    //----------
+    CropData.TotalGrowthTime = FMath::RandRange(0.f, Row->GrowthSeedTime + Row->GrowthSeedlingTime);
+    //----------
     
     // 根据地块初始状态调整作物状态
     if (PlotInfo.StateData.HasState(EPlotState::Watered))
@@ -455,11 +458,29 @@ void UCropManagerComponent::OnCropGrowthStageChanged(FIntPoint Coords, ECropGrow
     }
     if (NewGrowthStage == ECropGrowthStage::Mature)
     {
-        HarvestCrop(Coords);
+        FTimerHandle TimerHandle;
+        GetWorld()->GetTimerManager().SetTimer(
+            TimerHandle, // 定时器句柄
+            [this, Coords]() // Lambda 捕获列表 (捕获 this 指针)
+            {
+                HarvestCrop(Coords);
+            },
+            FMath::RandRange(5.f, 10.f), // 延迟时间 (秒)
+            false // 是否循环 (false=只执行一次, true=循环)
+        );
     }
     if (NewGrowthStage == ECropGrowthStage::Harvested)
     {
-        RemoveCrop(Coords);
+        FTimerHandle TimerHandle;
+        GetWorld()->GetTimerManager().SetTimer(
+            TimerHandle, // 定时器句柄
+            [this, Coords]() // Lambda 捕获列表 (捕获 this 指针)
+            {
+                RemoveCrop(Coords);
+            },
+            FMath::RandRange(5.f, 10.f), // 延迟时间 (秒)
+            false // 是否循环 (false=只执行一次, true=循环)
+        );
     }
 }
 

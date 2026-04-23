@@ -25,6 +25,18 @@ void UISMPoolManager::Tick(float DeltaTime)
     Super::Tick(DeltaTime);
 
     FlushPendingTransforms();
+
+    // 每 5 秒检查一次是否需要清理
+    TimeSinceLastCompact += DeltaTime;
+    if (TimeSinceLastCompact >= 5.0f)
+    {
+        TimeSinceLastCompact = 0.0f;
+        // 当空闲槽位超过总数的 20% 时，触发清理
+        if (Slots.Num() > 0 && static_cast<float>(FreeSlotIndices.Num()) / Slots.Num() > 0.2f)
+        {
+            Compact();
+        }
+    }
 }
 
 TStatId UISMPoolManager::GetStatId() const
@@ -112,6 +124,38 @@ void UISMPoolManager::FlushPendingTransforms()
     bHasPendingTransforms = false;
 }
 
+void UISMPoolManager::Compact()
+{
+    for (auto& Pair : MeshKeyToData)
+    {
+        FISMPerMeshData& Data = Pair.Value;
+        UInstancedStaticMeshComponent* ISMComp = Data.ISMComponent;
+
+        // 1. 收集所有属于该 ISM 组件的空闲物理实例 ID
+        TArray<FPrimitiveInstanceId> IdsToRemove;
+        for (const int32 SlotIndex : FreeSlotIndices)
+        {
+            FISMInstanceSlot& Slot = Slots[SlotIndex];
+            if (Slot.ISMComponent == ISMComp && Slot.PhysicalId.IsValid() && Slot.bIsFree)
+            {
+                IdsToRemove.Add(Slot.PhysicalId);
+                
+                // 2. 重置槽位状态，让其可被完全复用
+                Slot.PhysicalId = FPrimitiveInstanceId{};
+                Slot.LastTransform = FTransform::Identity;
+                Slot.SavedCustomData.Empty();
+            }
+        }
+
+        // 3. 执行真正的移除操作
+        if (IdsToRemove.Num() > 0)
+        {
+            ISMComp->RemoveInstancesById(IdsToRemove);
+            UE_LOG(LogTemp, Log, TEXT("[ISMPoolManager] Compact: Removed %d idle instances from [%s]."), IdsToRemove.Num(), *Pair.Key.MeshPath.ToString());
+        }
+    }
+}
+
 UInstancedStaticMeshComponent* UISMPoolManager::CreateISMComponent(UStaticMesh* Mesh, USceneComponent* AttachParent, const int32 NumCustomDataFloats)
 {
     if (!Mesh)
@@ -138,6 +182,7 @@ UInstancedStaticMeshComponent* UISMPoolManager::CreateISMComponent(UStaticMesh* 
     NewISM->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     NewISM->SetCollisionResponseToAllChannels(ECR_Ignore);
     NewISM->SetCanEverAffectNavigation(false);
+    // NewISM->SetCullDistances(3000.0f, 5000.0f);
     NewISM->SetNumCustomDataFloats(NumCustomDataFloats);
     NewISM->SetupAttachment(AttachParent);
     NewISM->RegisterComponent();
@@ -268,8 +313,29 @@ void UISMPoolManager::ReleaseInstance(UStaticMesh* Mesh, const FTransform& Trans
     if (!Slots.IsValidIndex(SlotIndex) || Slots[SlotIndex].bIsFree) return;
 
     FISMInstanceSlot& Slot = Slots[SlotIndex];
-    HideInstance(Slot);
+
+    // 判断是否为“跨 Mesh 释放”：槽位记录的 ISM 组件与本次传入 Mesh 对应的组件不同
+    if (Slot.ISMComponent != Data->ISMComponent)
+    {
+        // 彻底移除物理实例
+        if (Slot.ISMComponent && Slot.PhysicalId.IsValid())
+        {
+            Slot.ISMComponent->RemoveInstanceById(Slot.PhysicalId);
+        }
+        // 重置槽位状态
+        Slot.ISMComponent = nullptr;
+        Slot.PhysicalId = FPrimitiveInstanceId();
+        Slot.LastTransform = FTransform::Identity;
+        Slot.SavedCustomData.Empty();
+    }
+    else
+    {
+        // 同 Mesh 复用：零缩放隐藏
+        HideInstance(Slot);
+    }
+    
     Slot.bIsFree = true;
+    
 
     // 回收槽位索引，并移除位置映射
     FreeSlotIndices.Add(SlotIndex);
