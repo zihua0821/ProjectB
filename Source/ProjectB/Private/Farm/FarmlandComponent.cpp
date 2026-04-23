@@ -745,6 +745,16 @@ void UFarmlandComponent::CreateDefaultLandCells()
 	
 	const int32 NumLatCells = PlanetConfig->NumLat - 1;  
 	const int32 NumLonCells = PlanetConfig->NumLon;       
+
+	const int32 TotalCells = NumLatCells * NumLonCells;
+    
+	// 预分配容器
+	TArray<FTransform> OutlineTransforms;
+	TArray<FIntPoint> OutlineCoords;          // 与实例一一对应的坐标，用于构建 CellIndexMap
+	TArray<TArray<float>> PerInstanceCustomData; // 暂存每个实例的自定义数据
+	OutlineTransforms.Reserve(TotalCells);
+	OutlineCoords.Reserve(TotalCells);
+	PerInstanceCustomData.Reserve(TotalCells);
 	
     // 遍历经纬度网格生成地块
     for (int32 LatIdx = 0; LatIdx <NumLatCells; LatIdx++)
@@ -862,8 +872,9 @@ void UFarmlandComponent::CreateDefaultLandCells()
         	OutlineInstanceTransform.AddToTranslation(FVector(0.f, 0.f, FarmlandConfig->OutlineOffsetZ));
         	OutlineInstanceTransform.SetScale3D(FVector(OutlineScaleX, OutlineScaleY, OutlineScaleZ));
 
-        	int32 OutlineInstanceIdx = LandCellOutlineRenderer->AddInstance(OutlineInstanceTransform);
-        	CellIndexMap.Add(OutlineInstanceIdx, FIntPoint(LatIdx, LonIdx));
+        	// 收集数据
+        	OutlineTransforms.Add(OutlineInstanceTransform);
+        	OutlineCoords.Add(FIntPoint(LatIdx, LonIdx));
 
         	TArray<float> CustomData =
         	{
@@ -884,14 +895,47 @@ void UFarmlandComponent::CreateDefaultLandCells()
         		static_cast<float>(LocalVertexPositions[3].Y),// Y11
         		static_cast<float>(LocalVertexPositions[3].Z),// Z11
         	};
-        	LandCellOutlineRenderer->SetCustomData(OutlineInstanceIdx, CustomData);
-            // 初始化耕地状态
-            if (FarmlandConfig->bInitAllLandCells && PlotSaveGameData.Num() == 0)
-            {
-                PlowLand(FIntPoint(LatIdx, LonIdx));
-            }
+        	PerInstanceCustomData.Add(CustomData);
         }
     }
+
+	// ==================== 批量添加 ISM 实例 ====================
+	if (OutlineTransforms.Num() > 0)
+	{
+		// 使用基于 ID 的批量添加（返回稳定 ID，性能更好）
+		TArray<FPrimitiveInstanceId> InstanceIds = LandCellOutlineRenderer->AddInstancesById(OutlineTransforms, false, false);
+		check(InstanceIds.Num() == OutlineTransforms.Num());
+
+		// 构建 CellIndexMap（ID 与坐标的映射需要转换为索引，因为原映射是基于整型索引的）
+		for (int32 i = 0; i < InstanceIds.Num(); ++i)
+		{
+			// 注意：原有的 CellIndexMap 是 Add(InstanceIndex, Coords)，现在我们保存 Add(InstanceId, Coords) 或者通过 Id 转索引
+			// 建议将 CellIndexMap 的类型改为 TMap<FPrimitiveInstanceId, FIntPoint>，或者保留为索引（需要通过 GetInstanceIndexForId 转换）
+			// 为了最小改动，我们仍存储实例索引，但需通过 ID 获取索引
+			int32 InstanceIndex = LandCellOutlineRenderer->GetInstanceIndexForId(InstanceIds[i]);
+			CellIndexMap.Add(InstanceIndex, OutlineCoords[i]);
+		}
+
+		// 批量设置自定义数据（先构建扁平数据数组）
+		const int32 FloatsPerInstance = PerInstanceCustomData[0].Num(); // 所有实例长度一致
+		TArray<float> AllCustomData;
+		AllCustomData.Reserve(InstanceIds.Num() * FloatsPerInstance);
+		for (const TArray<float>& Data : PerInstanceCustomData)
+		{
+			AllCustomData.Append(Data);
+		}
+
+		// 使用基于 ID 的批量设置自定义数据（一次调用即可）
+		LandCellOutlineRenderer->SetCustomDataById(InstanceIds, AllCustomData);
+        
+		// 注意：SetCustomDataById 内部会标记渲染状态为脏，无需额外调用
+	}
+
+	// 初始化耕地状态
+	if (FarmlandConfig->bInitAllLandCells && PlotSaveGameData.Num() == 0)
+	{
+		for (FIntPoint& Coords : OutlineCoords) PlowLand(Coords);
+	}
 	
 	UE_LOG(LogTemp, Log, TEXT("Initialized %d land cells on sphere (%dx%d grid, total %d)"),
 	   LandCellRenderer->GetInstanceCount(), NumLatCells, NumLonCells, NumLatCells * NumLonCells);

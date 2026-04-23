@@ -6,12 +6,13 @@
 #include "Planet/PlanetData.h"
 #include "Planet/PlanetInterface.h"
 #include "Player/BasePlayerController.h"
+#include "Subsystem/ISMPoolManager.h"
 #include "Tools/ISMTools.h"
 
 UCropManagerComponent::UCropManagerComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f;
+    PrimaryComponentTick.TickInterval = 1.f;
 }
 
 void UCropManagerComponent::Initialize(UFarmlandComponent* InFarmlandComponent)
@@ -98,18 +99,22 @@ void UCropManagerComponent::RemoveCrop(FIntPoint Coords)
     }
     if (CurrentMesh)
     {
-        if (CropHISMComponentMap.Contains(FStaticMeshKey(CurrentMesh)))
-        {
-            if (UInstancedStaticMeshComponent* CurrentInstanceHISMComponent = CropHISMComponentMap.FindChecked(FStaticMeshKey(CurrentMesh)))
-            {
-                UISMTools::RemoveInstanceByTransform(CurrentInstanceHISMComponent, CropInfo.CropTransform);
-            }
-            else
-            {
-                UE_LOG(LogTemp, Log, TEXT("CurrentInstanceHISMComponent not found for %s"), *CurrentMesh->GetName());
-                return;
-            }
-        }
+        UISMPoolManager* PoolManager = GetWorld()->GetSubsystem<UISMPoolManager>();
+        if (!PoolManager) return;
+        PoolManager->ReleaseInstance(CurrentMesh, CropInfo.CropTransform);
+        
+        // if (CropHISMComponentMap.Contains(FStaticMeshKey(CurrentMesh)))
+        // {
+        //     if (UInstancedStaticMeshComponent* CurrentInstanceHISMComponent = CropHISMComponentMap.FindChecked(FStaticMeshKey(CurrentMesh)))
+        //     {
+        //         UISMTools::RemoveInstanceByTransform(CurrentInstanceHISMComponent, CropInfo.CropTransform);
+        //     }
+        //     else
+        //     {
+        //         UE_LOG(LogTemp, Log, TEXT("CurrentInstanceHISMComponent not found for %s"), *CurrentMesh->GetName());
+        //         return;
+        //     }
+        // }
     }
 
     // 解绑事件
@@ -125,7 +130,7 @@ void UCropManagerComponent::RemoveCrop(FIntPoint Coords)
     
     OnCropPlantedOrRemoved.Broadcast(Coords);
 
-    // PlantCrop(Coords, BasePlayerController->GetSelectedCropName());
+    PlantCrop(Coords, BasePlayerController->GetSelectedCropName());
 }
 
 void UCropManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
@@ -406,89 +411,101 @@ void UCropManagerComponent::OnCropGrowthStageChanged(FIntPoint Coords, ECropGrow
     default:
         break;
     }
-
+    
+    UISMPoolManager* PoolManager = GetWorld()->GetSubsystem<UISMPoolManager>();
+    if (!PoolManager) return;
+   
     // 移除旧实例
     if (OldMesh)
     {
-        if (CropHISMComponentMap.Contains(FStaticMeshKey(OldMesh)))
-        {
-            if (UInstancedStaticMeshComponent* OldInstanceHISMComponent = CropHISMComponentMap.FindChecked(FStaticMeshKey(OldMesh)))
-            {
-                UISMTools::RemoveInstanceByTransform(OldInstanceHISMComponent, CropInfo.CropTransform);
-            }
-            else
-            {
-                UE_LOG(LogTemp, Log, TEXT("OldInstanceHISMComponent not found for %s"), *OldMesh->GetName());
-                return;
-            }
-        }
+        PoolManager->ReleaseInstance(OldMesh, CropInfo.CropTransform);
+        
+        // if (CropHISMComponentMap.Contains(FStaticMeshKey(OldMesh)))
+        // {
+        //     if (UInstancedStaticMeshComponent* OldInstanceHISMComponent = CropHISMComponentMap.FindChecked(FStaticMeshKey(OldMesh)))
+        //     {
+        //         UISMTools::RemoveInstanceByTransform(OldInstanceHISMComponent, CropInfo.CropTransform);
+        //     }
+        //     else
+        //     {
+        //         UE_LOG(LogTemp, Log, TEXT("OldInstanceHISMComponent not found for %s"), *OldMesh->GetName());
+        //         return;
+        //     }
+        // }
     }
 
     // 添加新实例
     if (NewMesh)
     {
-        if (UInstancedStaticMeshComponent* NewISM = GetOrCreateCropHISMComponent(CropInfo))
+        const bool bWithers = CropInfo.Crop->GetCropData().CropStateData.HasState(ECropState::Withers);
+        TArray<float> CustomData
         {
-            const int32 Index = NewISM->AddInstance(CropInfo.CropTransform);
-            // 设置自定义数据（如病害、叶片等）
-            const bool bWithers = CropInfo.Crop->GetCropData().CropStateData.HasState(ECropState::Withers);
-            NewISM->SetCustomDataValue(Index, CropCustomData::Disease, bWithers ? 1.f : 0.f);
-            NewISM->SetCustomDataValue(Index, CropCustomData::IsLeaf, bWithers ? 1.f : 0.f);
-        }
+            bWithers ? 1.f : 0.f,
+            bWithers ? 1.f : 0.f
+        };
+        PoolManager->AcquireInstance(NewMesh, this, CropInfo.CropTransform, CropInfo.CropNumCustomDataFloats, CustomData);
+        
+        // if (UInstancedStaticMeshComponent* NewISM = GetOrCreateCropHISMComponent(CropInfo))
+        // {
+        //     const int32 Index = NewISM->AddInstance(CropInfo.CropTransform);
+        //     // 设置自定义数据（如病害、叶片等）
+        //     NewISM->SetCustomDataValue(Index, CropCustomData::Disease, bWithers ? 1.f : 0.f);
+        //     NewISM->SetCustomDataValue(Index, CropCustomData::IsLeaf, bWithers ? 1.f : 0.f);
+        // }
     }
-    // if (NewGrowthStage == ECropGrowthStage::Mature)
-    // {
-    //     HarvestCrop(Coords);
-    // }
-    // if (NewGrowthStage == ECropGrowthStage::Harvested)
-    // {
-    //     RemoveCrop(Coords);
-    // }
+    if (NewGrowthStage == ECropGrowthStage::Mature)
+    {
+        HarvestCrop(Coords);
+    }
+    if (NewGrowthStage == ECropGrowthStage::Harvested)
+    {
+        RemoveCrop(Coords);
+    }
 }
 
-UInstancedStaticMeshComponent* UCropManagerComponent::GetOrCreateCropHISMComponent(const FPlotCropInfo& CropInfo)
-{
-    UStaticMesh* Mesh = nullptr;
-    if (!CropInfo.Crop)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Crop is null"))
-        return nullptr;
-    }
-    switch (CropInfo.Crop->GetCropData().CropGrowthStage) {
-    case ECropGrowthStage::None:
-        Mesh = nullptr;
-        break;
-    case ECropGrowthStage::Seed:
-        Mesh = CropInfo.CropMeshVariant.SeedMesh;
-        break;
-    case ECropGrowthStage::Seedling:
-        Mesh = CropInfo.CropMeshVariant.SeedlingMesh;
-        break;
-    case ECropGrowthStage::Mature:
-        Mesh = CropInfo.CropMeshVariant.MatureMesh;
-        break;
-    case ECropGrowthStage::Harvested:
-        Mesh = CropInfo.CropMeshVariant.HarvestedMesh;
-        break;
-    }
-    if (Mesh == nullptr)
-    {
-        return nullptr;
-    }
-    if (CropHISMComponentMap.Contains(FStaticMeshKey(Mesh)))
-    {
-        return CropHISMComponentMap.FindChecked(FStaticMeshKey(Mesh));
-    }
-    UInstancedStaticMeshComponent* TargetComponent = NewObject<UInstancedStaticMeshComponent>(GetOwner());
-    TargetComponent->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
-    TargetComponent->RegisterComponent();
-    TargetComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    TargetComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
-    TargetComponent->SetStaticMesh(Mesh);
-    TargetComponent->SetNumCustomDataFloats(CropInfo.CropNumCustomDataFloats);
-    CropHISMComponentMap.Add(FStaticMeshKey(Mesh), TargetComponent);
-    return TargetComponent;
-}
+// UInstancedStaticMeshComponent* UCropManagerComponent::GetOrCreateCropHISMComponent(const FPlotCropInfo& CropInfo)
+// {
+//     UStaticMesh* Mesh = nullptr;
+//     if (!CropInfo.Crop)
+//     {
+//         UE_LOG(LogTemp, Error, TEXT("Crop is null"))
+//         return nullptr;
+//     }
+//     switch (CropInfo.Crop->GetCropData().CropGrowthStage) {
+//     case ECropGrowthStage::None:
+//         Mesh = nullptr;
+//         break;
+//     case ECropGrowthStage::Seed:
+//         Mesh = CropInfo.CropMeshVariant.SeedMesh;
+//         break;
+//     case ECropGrowthStage::Seedling:
+//         Mesh = CropInfo.CropMeshVariant.SeedlingMesh;
+//         break;
+//     case ECropGrowthStage::Mature:
+//         Mesh = CropInfo.CropMeshVariant.MatureMesh;
+//         break;
+//     case ECropGrowthStage::Harvested:
+//         Mesh = CropInfo.CropMeshVariant.HarvestedMesh;
+//         break;
+//     }
+//     if (Mesh == nullptr)
+//     {
+//         return nullptr;
+//     }
+//     if (CropHISMComponentMap.Contains(FStaticMeshKey(Mesh)))
+//     {
+//         return CropHISMComponentMap.FindChecked(FStaticMeshKey(Mesh));
+//     }
+//     UInstancedStaticMeshComponent* TargetComponent = NewObject<UInstancedStaticMeshComponent>(GetOwner());
+//     TargetComponent->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
+//     TargetComponent->RegisterComponent();
+//     TargetComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+//     TargetComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
+//     TargetComponent->SetStaticMesh(Mesh);
+//     TargetComponent->SetNumCustomDataFloats(CropInfo.CropNumCustomDataFloats);
+//     CropHISMComponentMap.Add(FStaticMeshKey(Mesh), TargetComponent);
+//     return TargetComponent;
+// }
 
 void UCropManagerComponent::SetCropDisease(FIntPoint Coords, bool bDisease, bool bLeafs)
 {
@@ -517,36 +534,44 @@ void UCropManagerComponent::SetCropDisease(FIntPoint Coords, bool bDisease, bool
         Mesh = CropInfo.CropMeshVariant.HarvestedMesh;
         break;
     }
-    UInstancedStaticMeshComponent* CropRenderer = nullptr;
-    if (CropHISMComponentMap.Contains(FStaticMeshKey(Mesh)))
-    {
-        CropRenderer = *CropHISMComponentMap.Find(FStaticMeshKey(Mesh));
-    }
-    if (!CropRenderer)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Crop renderer not found"));
-        return;
-    }
-    int32 CropIndex;
-    UISMTools::GetInstanceIndexByTransform(CropRenderer, CropInfo.CropTransform, CropIndex);
+    UISMPoolManager* PoolManager = GetWorld()->GetSubsystem<UISMPoolManager>();
+    if (!PoolManager) return;
+    
+    // UInstancedStaticMeshComponent* CropRenderer = nullptr;
+    // if (CropHISMComponentMap.Contains(FStaticMeshKey(Mesh)))
+    // {
+    //     CropRenderer = *CropHISMComponentMap.Find(FStaticMeshKey(Mesh));
+    // }
+    // if (!CropRenderer)
+    // {
+    //     UE_LOG(LogTemp, Error, TEXT("Crop renderer not found"));
+    //     return;
+    // }
+    // int32 CropIndex;
+    // UISMTools::GetInstanceIndexByTransform(CropRenderer, CropInfo.CropTransform, CropIndex);
     if (bDisease)
     {
-        CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::Disease, 1.f);
+        PoolManager->UpdateInstanceCustomData(Mesh, CropInfo.CropTransform, CropCustomData::Disease, 1.f);
+        // CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::Disease, 1.f);
         if (bLeafs)
         {
-            CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::IsLeaf, 1.f);
+            PoolManager->UpdateInstanceCustomData(Mesh, CropInfo.CropTransform, CropCustomData::IsLeaf, 1.f);
+            // CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::IsLeaf, 1.f);
             CropInfo.Crop->GetCropDataRef().CropStateData.AddState(ECropState::NeedsWater);
         }
         else
         {
-            CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::IsLeaf, 0.f);
+            PoolManager->UpdateInstanceCustomData(Mesh, CropInfo.CropTransform, CropCustomData::IsLeaf, 0.f);
+            // CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::IsLeaf, 0.f);
             CropInfo.Crop->GetCropDataRef().CropStateData.AddState(ECropState::NeedsWater);
         }
     }
     else
     {
-        CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::Disease, 0.f);
-        CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::IsLeaf, 0.f);
+        PoolManager->UpdateInstanceCustomData(Mesh, CropInfo.CropTransform, CropCustomData::Disease, 0.f);
+        PoolManager->UpdateInstanceCustomData(Mesh, CropInfo.CropTransform, CropCustomData::IsLeaf, 0.f);
+        // CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::Disease, 0.f);
+        // CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::IsLeaf, 0.f);
         CropInfo.Crop->GetCropDataRef().CropStateData.RemoveState(ECropState::NeedsWater);
     }
 	

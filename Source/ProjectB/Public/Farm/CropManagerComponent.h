@@ -118,9 +118,9 @@ private:
     UPROPERTY()
     TMap<FIntPoint, FPlotCropInfo> PlotCropMap;
 
-    // 作物渲染组件映射
-    UPROPERTY()
-    TMap<FStaticMeshKey, UInstancedStaticMeshComponent*> CropHISMComponentMap;
+    // // 作物渲染组件映射
+    // UPROPERTY()
+    // TMap<FStaticMeshKey, UInstancedStaticMeshComponent*> CropHISMComponentMap;
     
     // 农作物保存数据
     UPROPERTY()
@@ -133,7 +133,7 @@ private:
     void UpdateCrops(float DeltaTime);
     
     // 获取或者创建作物渲染组件
-    UInstancedStaticMeshComponent* GetOrCreateCropHISMComponent(const FPlotCropInfo& CropInfo);
+    // UInstancedStaticMeshComponent* GetOrCreateCropHISMComponent(const FPlotCropInfo& CropInfo);
 
     // 设置作物病害
     void SetCropDisease(FIntPoint Coords,bool bDisease, bool bLeafs = false);
