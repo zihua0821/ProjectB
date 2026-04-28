@@ -80,3 +80,6 @@ Packed/
 
 # OpenClaw Cron 任务文件
 .last-commit
+
+# 占位mesh文件
+Content/Mesh/PlaceholderMeshes/
