@@ -11,6 +11,7 @@
 #include "Tools/FarmSaveGame.h"
 #include "PlanetActor.generated.h"
 
+class UCellManagerComponent;
 class UOrbitManagerComponent;
 class UCropManagerComponent;
 class UFarmlandConfigDataAsset;
@@ -32,6 +33,10 @@ protected:
 	virtual void PostInitializeComponents() override;
 public:
 
+	// 获取cell组件
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	UCellManagerComponent* GetCellManagerComponent() const { return CellManagerComponent; }
+	
 	// 获取地块组件
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	UFarmlandComponent* GetFarmlandComponent() const { return FarmlandComponent; }
@@ -102,6 +107,10 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UStaticMeshComponent> SphereMeshComponent;
 
+	// cell组件
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UCellManagerComponent> CellManagerComponent;
+	
 	// 地块组件
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UFarmlandComponent> FarmlandComponent;

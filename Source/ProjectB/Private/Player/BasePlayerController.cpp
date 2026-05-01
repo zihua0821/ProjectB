@@ -4,6 +4,7 @@
 #include "ProjectB/Public/Player/BasePlayerController.h"
 
 #include "Crops/CropBase.h"
+#include "Farm/CellManagerComponent.h"
 #include "Farm/FarmlandActor.h"
 #include "Farm/FarmlandComponent.h"
 #include "Planet/PlanetActor.h"
@@ -116,16 +117,17 @@ bool ABasePlayerController::TraceForFarmlandAndCell(FVector& OutHitLocation, APl
                     }
                     
                     // 如果找到了FarmlandActor，计算单元格坐标
-                    if (OutPlanetActor && OutPlanetActor->GetFarmlandComponent())
+                    if (OutPlanetActor)
                     {
-                        // 直接使用 ISM 碰撞结果
-                        UFarmlandComponent* FarmlandComp = OutPlanetActor->GetFarmlandComponent();
-                        float HitDistance;
+	                    if (const UCellManagerComponent* CellManagerComponent = OutPlanetActor->GetCellManagerComponent())
+	                    {
+	                    	float HitDistance;
                         
-                        if (FarmlandComp->GetPlotByRaycast(TraceStart, HitResult.Location, OutCellCoords, HitDistance))
-                        {
-                            return true;
-                        }
+	                    	if (CellManagerComponent->GetCellCoordsByRaycast(TraceStart, HitResult.Location, OutCellCoords, HitDistance))
+	                    	{
+	                    		return true;
+	                    	}
+	                    }
                     }
                 }
             }

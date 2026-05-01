@@ -655,15 +655,15 @@ void UFarmlandComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	BasePlayerController = Cast<ABasePlayerController>(GetWorld()->GetFirstPlayerController());
-	if (BasePlayerController)
-	{
-		BasePlayerController->OnEditModeChanged.AddDynamic(this, &ThisClass::OnEditModeChanged);
-	}
-	InitializeLandCells();
-
-	StartPestsSpreadTimers();
-	StartWeedsSpreadTimers();
+	// BasePlayerController = Cast<ABasePlayerController>(GetWorld()->GetFirstPlayerController());
+	// if (BasePlayerController)
+	// {
+	// 	BasePlayerController->OnEditModeChanged.AddDynamic(this, &ThisClass::OnEditModeChanged);
+	// }
+	// InitializeLandCells();
+	//
+	// StartPestsSpreadTimers();
+	// StartWeedsSpreadTimers();
 }
 
 void UFarmlandComponent::UpdatePlotLoss(float DeltaTime)

@@ -156,41 +156,40 @@ void UISMPoolManager::Compact()
     }
 }
 
-UInstancedStaticMeshComponent* UISMPoolManager::CreateISMComponent(UStaticMesh* Mesh, USceneComponent* AttachParent, const int32 NumCustomDataFloats)
+UInstancedStaticMeshComponent* UISMPoolManager::CreateISMComponent(UStaticMesh* Mesh, const int32 NumCustomDataFloats, const FISMComponentParams& ISMParams)
 {
     if (!Mesh)
     {
         UE_LOG(LogTemp, Warning, TEXT("ISMPoolManager::CreateISMComponent - Invalid Mesh"));
         return nullptr;
     }
-    if (!AttachParent)
+    if (!ISMParams.AttachParent)
     {
         UE_LOG(LogTemp, Warning, TEXT("ISMPoolManager::CreateISMComponent - AttachParent is null"));
         return nullptr;
     }
 
-    AActor* Owner = AttachParent->GetOwner();
-    if (!Owner)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ISMPoolManager::CreateISMComponent - AttachParent has no Owner"));
-        return nullptr;
-    }
-
     // 动态创建 ISM 组件，标记为 Transient 以避免被序列化到关卡中
-    UInstancedStaticMeshComponent* NewISM = NewObject<UInstancedStaticMeshComponent>(Owner, NAME_None, RF_Transient);
+    UInstancedStaticMeshComponent* NewISM = NewObject<UInstancedStaticMeshComponent>(ISMParams.AttachParent, NAME_None, RF_Transient);
     NewISM->SetStaticMesh(Mesh);
-    NewISM->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    NewISM->SetCollisionResponseToAllChannels(ECR_Ignore);
-    NewISM->SetCanEverAffectNavigation(false);
-    // NewISM->SetCullDistances(3000.0f, 5000.0f);
+    NewISM->SetCollisionEnabled(ISMParams.CollisionEnabled);
+    NewISM->SetCollisionObjectType(ISMParams.CollisionObjectType);
+    NewISM->SetCollisionResponseToAllChannels(ISMParams.CollisionResponseToAllChannels);
+    NewISM->SetCanEverAffectNavigation(ISMParams.bCanEverAffectNavigation);
+    NewISM->bDisallowNanite = ISMParams.bDisallowNanite;
+    NewISM->SetCastShadow(ISMParams.bCastShadow);
+    if (ISMParams.MinDrawDistance > 0.f || ISMParams.MaxDrawDistance > 0.f)
+    {
+        NewISM->SetCullDistances(ISMParams.MinDrawDistance, ISMParams.MaxDrawDistance);
+    }
     NewISM->SetNumCustomDataFloats(NumCustomDataFloats);
-    NewISM->SetupAttachment(AttachParent);
+    NewISM->SetupAttachment(ISMParams.AttachParent);
     NewISM->RegisterComponent();
 
     return NewISM;
 }
 
-UISMPoolManager::FISMPerMeshData& UISMPoolManager::GetOrCreatePerMeshData(UStaticMesh* Mesh, USceneComponent* AttachParent, int32 NumCustomDataFloats)
+UISMPoolManager::FISMPerMeshData& UISMPoolManager::GetOrCreatePerMeshData(UStaticMesh* Mesh, int32 NumCustomDataFloats, const FISMComponentParams& ISMParams)
 {
     // 尝试查找已有数据
     if (FISMPerMeshData* Existing = MeshKeyToData.Find(FISMMeshKey(Mesh)))
@@ -200,7 +199,7 @@ UISMPoolManager::FISMPerMeshData& UISMPoolManager::GetOrCreatePerMeshData(UStati
 
     // 新建数据并插入映射表
     FISMPerMeshData NewData;
-    NewData.ISMComponent = CreateISMComponent(Mesh, AttachParent, NumCustomDataFloats);
+    NewData.ISMComponent = CreateISMComponent(Mesh, NumCustomDataFloats, ISMParams);
     NewData.NumCustomDataFloats = NumCustomDataFloats;
     return MeshKeyToData.Add(FISMMeshKey(Mesh), MoveTemp(NewData));
 }
@@ -262,7 +261,7 @@ void UISMPoolManager::AcquireInstance(UStaticMesh* Mesh, USceneComponent* Attach
     SCOPE_CYCLE_COUNTER(STAT_ISMPoolManager_AcquireInstance);
     if (!Mesh) return;
 
-    FISMPerMeshData& Data = GetOrCreatePerMeshData(Mesh, AttachParent, NumCustomDataFloats);
+    FISMPerMeshData& Data = GetOrCreatePerMeshData(Mesh, NumCustomDataFloats, FISMComponentParams());
     const FVector QuantizedLoc = QuantizeLocation(Transform.GetLocation());
 
     // 防止同一位置重复申请
@@ -394,6 +393,18 @@ void UISMPoolManager::UpdateInstanceCustomData(UStaticMesh* Mesh, const FTransfo
     }
 }
 
+void UISMPoolManager::UpdateInstanceCustomData(UStaticMesh* Mesh, int32 InstanceIndex, int32 CustomDataIndex,
+    float Value)
+{
+    if (!Mesh) return;
+
+    const FISMPerMeshData* Data = MeshKeyToData.Find(FISMMeshKey(Mesh));
+    if (!Data) return;
+    
+    Data->ISMComponent->SetCustomDataValue(InstanceIndex, CustomDataIndex, Value);
+
+}
+
 bool UISMPoolManager::HasInstance(UStaticMesh* Mesh, const FTransform& Transform)
 {
     if (!Mesh) return false;
@@ -403,4 +414,47 @@ bool UISMPoolManager::HasInstance(UStaticMesh* Mesh, const FTransform& Transform
 
     const FVector QuantizedLoc = QuantizeLocation(Transform.GetLocation());
     return Data->LocationToSlotIndex.Contains(QuantizedLoc);
+}
+
+TArray<FPrimitiveInstanceId> UISMPoolManager::BatchAddInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms,
+    const int32 NumCustomDataFloats,const FISMComponentParams& ISMParams,
+    const TArray<float>& CustomData)
+{
+    TArray<FPrimitiveInstanceId> InstanceIds;
+
+    const FISMPerMeshData& Data = GetOrCreatePerMeshData(Mesh, NumCustomDataFloats, ISMParams);
+    const TObjectPtr<UInstancedStaticMeshComponent> ISMComp = Data.ISMComponent;
+    if (!ISMComp || Transforms.Num() == 0) return InstanceIds;
+
+    // 批量创建实例，返回稳定 ID
+    InstanceIds = ISMComp->AddInstancesById(Transforms, true);
+
+    // 如果需要设置自定义数据
+    if (CustomData.Num() > 0)
+    {
+        const int32 ExpectedCount = InstanceIds.Num() * NumCustomDataFloats;
+        if (CustomData.Num() == ExpectedCount)
+        {
+            ISMComp->SetCustomDataById(InstanceIds, CustomData);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("BatchAddInstances: CustomData size mismatch. Expected %d, got %d"),
+                ExpectedCount, CustomData.Num());
+        }
+    }
+
+    return InstanceIds;
+}
+
+bool UISMPoolManager::LineTraceISMInstances(UStaticMesh* Mesh, FHitResult& OutHit, const FVector& Start,
+    const FVector& End, const FCollisionQueryParams& Params)
+{
+    if (const FISMPerMeshData* Existing = MeshKeyToData.Find(FISMMeshKey(Mesh)))
+    {
+        const TObjectPtr<UInstancedStaticMeshComponent> ISMComp = Existing->ISMComponent;
+        return ISMComp && ISMComp->LineTraceComponent(OutHit, Start, End, Params);
+    }
+   
+    return false;
 }

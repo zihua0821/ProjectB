@@ -45,6 +45,43 @@ FORCEINLINE uint32 GetTypeHash(const FISMMeshKey& Key)
 }
 
 /**
+ * ISM 组件参数结构体。
+ */
+USTRUCT(BlueprintType)
+struct FISMComponentParams
+{
+	GENERATED_BODY()
+
+	/** 挂载父组件（留空则挂载到调用者指定的根） */
+	UPROPERTY()
+	TObjectPtr<USceneComponent> AttachParent = nullptr;
+	
+	/** 碰撞启用状态（NoCollision / QueryOnly / PhysicsOnly / QueryAndPhysics） */
+	ECollisionEnabled::Type CollisionEnabled = ECollisionEnabled::NoCollision;
+
+	/** 碰撞对象类型（当启用了查询碰撞时有效） */
+	ECollisionChannel CollisionObjectType = ECC_WorldDynamic;
+
+	/** 对所有通道的默认碰撞响应 */
+	ECollisionResponse CollisionResponseToAllChannels = ECR_Ignore;
+
+	/** 是否影响导航网格 */
+	bool bCanEverAffectNavigation = false;
+
+	/** 是否禁用 Nanite（轮廓高亮等特殊效果需要） */
+	bool bDisallowNanite = false;
+
+	/** 是否投射阴影 */
+	bool bCastShadow = true;
+
+	/** 最小绘制距离（0 表示不设置） */
+	float MinDrawDistance = 0.f;
+
+	/** 最大绘制距离（0 表示不设置） */
+	float MaxDrawDistance = 0.f;
+};
+
+/**
  * ISM 实例对象池管理器（WorldSubsystem）
  * 
  * 功能：
@@ -118,6 +155,16 @@ public:
      */
 	void UpdateInstanceCustomData(UStaticMesh* Mesh, const FTransform& Transform, int32 CustomDataIndex, float Value);
 
+	/**
+     * 更新实例的单个自定义数据值。
+     * 
+     * @param Mesh            静态网格体指针。
+     * @param InstanceIndex   实例索引（从 0 开始）。
+     * @param CustomDataIndex 自定义数据索引（从 0 开始，需小于 NumCustomDataFloats）。
+     * @param Value           新的浮点值。
+     */
+	void UpdateInstanceCustomData(UStaticMesh* Mesh, int32 InstanceIndex, int32 CustomDataIndex, float Value);
+	
     /**
      * 检查指定位置是否存在有效（非空闲）的实例。
      * 
@@ -127,6 +174,38 @@ public:
      */
 	bool HasInstance(UStaticMesh* Mesh, const FTransform& Transform);
 
+	/**
+	 * 批量添加实例到指定 ISM 组件，并可选设置自定义数据
+	 * @param Mesh                静态网格体指针。
+	 * @param Transforms          世界空间变换数组
+	 * @param NumCustomDataFloats 每个实例的自定义浮点数据数量（仅在首次创建 ISM 组件时生效）。
+	 * @param ISMParams           ISM 组件参数
+  	 * @param CustomData          扁平自定义数据，长度 = Transforms.Num() * NumCustomDataFloats
+	 * @return 新创建实例的稳定 Id 数组
+	*/
+	TArray<FPrimitiveInstanceId> BatchAddInstances(
+		UStaticMesh* Mesh,
+		const TArray<FTransform>& Transforms,
+		const int32 NumCustomDataFloats,
+		const FISMComponentParams& ISMParams,
+		const TArray<float>& CustomData = TArray<float>()
+	);
+
+	/**
+	 * ISM组件射线检测
+	 * @param Mesh                静态网格体指针
+	 * @param OutHit              射线命中结果
+	 * @param Start               射线起点
+	 * @param End                 射线终点
+	 * @param Params              碰撞参数
+	*/
+	bool LineTraceISMInstances(
+		UStaticMesh* Mesh,
+		FHitResult& OutHit,
+		const FVector& Start,
+		const FVector& End,
+		const FCollisionQueryParams& Params
+		);
 protected:
     /**
      * 实例槽位信息。
@@ -173,17 +252,17 @@ protected:
      * 获取或创建指定 Mesh 对应的 FISMPerMeshData。
      * 若不存在，则调用 CreateISMComponent 创建 ISM 组件并初始化数据。
      */
-    FISMPerMeshData& GetOrCreatePerMeshData(UStaticMesh* Mesh, USceneComponent* AttachParent, int32 NumCustomDataFloats);
+    FISMPerMeshData& GetOrCreatePerMeshData(UStaticMesh* Mesh, int32 NumCustomDataFloats, const FISMComponentParams& ISMParams);
 
     /**
      * 创建并初始化一个 ISM 组件。
      * 
      * @param Mesh              静态网格体。
-     * @param AttachParent      挂载父级。
      * @param NumCustomDataFloats 自定义数据数量。
+     * @param ISMParams           ISM 组件参数。
      * @return                  已注册的 ISM 组件，失败返回 nullptr。
      */
-	static UInstancedStaticMeshComponent* CreateISMComponent(UStaticMesh* Mesh, USceneComponent* AttachParent, int32 NumCustomDataFloats);
+	static UInstancedStaticMeshComponent* CreateISMComponent(UStaticMesh* Mesh, int32 NumCustomDataFloats, const FISMComponentParams& ISMParams);
 
     /**
      * 分配一个空闲槽位。

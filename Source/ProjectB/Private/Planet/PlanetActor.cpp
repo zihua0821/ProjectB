@@ -3,6 +3,7 @@
 
 #include "Planet/PlanetActor.h"
 
+#include "Farm/CellManagerComponent.h"
 #include "Farm/CropManagerComponent.h"
 #include "Farm/FarmlandComponent.h"
 #include "Planet/OrbitManagerComponent.h"
@@ -22,13 +23,17 @@ APlanetActor::APlanetActor()
 	SphereMeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	// SphereMeshComponent->SetCastShadow(false); // 可选：球体本身不投射阴影
 
+	// CellManagerComponent
+	CellManagerComponent = CreateDefaultSubobject<UCellManagerComponent>(TEXT("CellManagerComponent"));
+	CellManagerComponent->SetupAttachment(RootSceneComponent);
+	
 	// FarmlandComponent
-	FarmlandComponent = CreateDefaultSubobject<UFarmlandComponent>(TEXT("FarmlandComponent"));
-	FarmlandComponent->SetupAttachment(RootSceneComponent);
-
-	// CropManagerComponent
-	CropManagerComponent = CreateDefaultSubobject<UCropManagerComponent>(TEXT("CropManagerComponent"));
-	CropManagerComponent->SetupAttachment(RootSceneComponent);
+	// FarmlandComponent = CreateDefaultSubobject<UFarmlandComponent>(TEXT("FarmlandComponent"));
+	// FarmlandComponent->SetupAttachment(RootSceneComponent);
+	//
+	// // CropManagerComponent
+	// CropManagerComponent = CreateDefaultSubobject<UCropManagerComponent>(TEXT("CropManagerComponent"));
+	// CropManagerComponent->SetupAttachment(RootSceneComponent);
 	
 	// OrbitManagerComponent
 	OrbitManagerComponent = CreateDefaultSubobject<UOrbitManagerComponent>(TEXT("OrbitManagerComponent"));
@@ -39,60 +44,59 @@ void APlanetActor::BeginPlay()
 	Super::BeginPlay();
 
 	SetupComponents();
+	if (CellManagerComponent)
+	{
+		CellManagerComponent->Initialize(PlanetConfig, FarmlandConfig, CropDataTable);
+	}
 }
 
 void APlanetActor::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
 
-	ensure(FarmlandConfig);
-	if (FarmlandComponent)
-	{
-		FarmlandComponent->SetFarmlandConfig(FarmlandConfig);
-	}
-	ensure(PlanetConfig);
-	if (FarmlandComponent)
-	{
-		FarmlandComponent->SetPlanetConfig(PlanetConfig);
-	}
-	ensure(CropDataTable);
-	if (CropManagerComponent)
-	{
-		CropManagerComponent->SetFarmlandConfig(FarmlandConfig);
-		CropManagerComponent->SetCropDataTable(CropDataTable);
-	}
-	if (FarmlandComponent && CropManagerComponent)
-	{
-		CropManagerComponent->Initialize(FarmlandComponent);
-	}
-	if (OrbitManagerComponent && FarmlandComponent)
-	{
-		OrbitManagerComponent->SetCellManager(FarmlandComponent);
-		OrbitManagerComponent->SetPlanetConfig(PlanetConfig);
-	}
+	// ensure(FarmlandConfig);
+	// if (FarmlandComponent)
+	// {
+	// 	FarmlandComponent->SetFarmlandConfig(FarmlandConfig);
+	// }
+	// ensure(PlanetConfig);
+	// if (FarmlandComponent)
+	// {
+	// 	FarmlandComponent->SetPlanetConfig(PlanetConfig);
+	// }
+	// ensure(CropDataTable);
+	// if (CropManagerComponent)
+	// {
+	// 	CropManagerComponent->SetFarmlandConfig(FarmlandConfig);
+	// 	CropManagerComponent->SetCropDataTable(CropDataTable);
+	// }
+	// if (FarmlandComponent && CropManagerComponent)
+	// {
+	// 	CropManagerComponent->Initialize(FarmlandComponent);
+	// }
+	// if (OrbitManagerComponent && FarmlandComponent)
+	// {
+	// 	OrbitManagerComponent->SetCellManager(FarmlandComponent);
+	// 	OrbitManagerComponent->SetPlanetConfig(PlanetConfig);
+	// }
 }
 
 void APlanetActor::HandleLeftMouseClicked(const EEditMode EditMode, const FIntPoint PlowCoords) const
 {
-	if (!FarmlandComponent)
+	if (!CellManagerComponent)
 	{
 		return;
 	}
-	FarmlandComponent->HandleLeftMouseClicked(EditMode, PlowCoords);
-	if (!CropManagerComponent)
-	{
-		return;
-	}
-	CropManagerComponent->HandleLeftMouseClicked(EditMode, PlowCoords);
+	CellManagerComponent->HandleLeftMouseClicked(EditMode, PlowCoords);
 }
 
 void APlanetActor::OutlinePlot(FIntPoint Coords, bool bOutline) const
 {
-	if (!FarmlandComponent)
+	if (!CellManagerComponent)
 	{
 		return;
 	}
-	FarmlandComponent->UpdateOutline(Coords, bOutline);
+	CellManagerComponent->UpdateOutline(Coords, bOutline);
 }
 
 FFarmLandPlotInfo APlanetActor::GetPlotInfo(const FIntPoint& PlotCoords) const
