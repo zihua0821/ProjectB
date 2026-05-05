@@ -156,52 +156,52 @@ void UISMPoolManager::Compact()
     }
 }
 
-UInstancedStaticMeshComponent* UISMPoolManager::CreateISMComponent(UStaticMesh* Mesh, const int32 NumCustomDataFloats, const FISMComponentParams& ISMParams)
+UInstancedStaticMeshComponent* UISMPoolManager::CreateISMComponent(UStaticMesh* Mesh, const int32 NumCustomDataFloats, const FISMComponentParamsOld& ISMParamsOld)
 {
     if (!Mesh)
     {
         UE_LOG(LogTemp, Warning, TEXT("ISMPoolManager::CreateISMComponent - Invalid Mesh"));
         return nullptr;
     }
-    if (!ISMParams.AttachParent)
+    if (!ISMParamsOld.AttachParent)
     {
         UE_LOG(LogTemp, Warning, TEXT("ISMPoolManager::CreateISMComponent - AttachParent is null"));
         return nullptr;
     }
 
     // 动态创建 ISM 组件，标记为 Transient 以避免被序列化到关卡中
-    UInstancedStaticMeshComponent* NewISM = NewObject<UInstancedStaticMeshComponent>(ISMParams.AttachParent, NAME_None, RF_Transient);
+    UInstancedStaticMeshComponent* NewISM = NewObject<UInstancedStaticMeshComponent>(ISMParamsOld.AttachParent, NAME_None, RF_Transient);
     NewISM->SetStaticMesh(Mesh);
-    NewISM->SetCollisionEnabled(ISMParams.CollisionEnabled);
-    NewISM->SetCollisionObjectType(ISMParams.CollisionObjectType);
-    NewISM->SetCollisionResponseToAllChannels(ISMParams.CollisionResponseToAllChannels);
-    NewISM->SetCanEverAffectNavigation(ISMParams.bCanEverAffectNavigation);
-    NewISM->bDisallowNanite = ISMParams.bDisallowNanite;
-    NewISM->SetCastShadow(ISMParams.bCastShadow);
-    if (ISMParams.MinDrawDistance > 0.f || ISMParams.MaxDrawDistance > 0.f)
+    NewISM->SetCollisionEnabled(ISMParamsOld.CollisionEnabled);
+    NewISM->SetCollisionObjectType(ISMParamsOld.CollisionObjectType);
+    NewISM->SetCollisionResponseToAllChannels(ISMParamsOld.CollisionResponseToAllChannels);
+    NewISM->SetCanEverAffectNavigation(ISMParamsOld.bCanEverAffectNavigation);
+    NewISM->bDisallowNanite = ISMParamsOld.bDisallowNanite;
+    NewISM->SetCastShadow(ISMParamsOld.bCastShadow);
+    if (ISMParamsOld.MinDrawDistance > 0.f || ISMParamsOld.MaxDrawDistance > 0.f)
     {
-        NewISM->SetCullDistances(ISMParams.MinDrawDistance, ISMParams.MaxDrawDistance);
+        NewISM->SetCullDistances(ISMParamsOld.MinDrawDistance, ISMParamsOld.MaxDrawDistance);
     }
     NewISM->SetNumCustomDataFloats(NumCustomDataFloats);
-    NewISM->SetupAttachment(ISMParams.AttachParent);
+    NewISM->SetupAttachment(ISMParamsOld.AttachParent);
     NewISM->RegisterComponent();
 
     return NewISM;
 }
 
-UISMPoolManager::FISMPerMeshData& UISMPoolManager::GetOrCreatePerMeshData(UStaticMesh* Mesh, int32 NumCustomDataFloats, const FISMComponentParams& ISMParams)
+UISMPoolManager::FISMPerMeshData& UISMPoolManager::GetOrCreatePerMeshData(UStaticMesh* Mesh, int32 NumCustomDataFloats, const FISMComponentParamsOld& ISMParamsOld)
 {
     // 尝试查找已有数据
-    if (FISMPerMeshData* Existing = MeshKeyToData.Find(FISMMeshKey(Mesh)))
+    if (FISMPerMeshData* Existing = MeshKeyToData.Find(FISMMeshKeyOld(Mesh)))
     {
         return *Existing;
     }
 
     // 新建数据并插入映射表
     FISMPerMeshData NewData;
-    NewData.ISMComponent = CreateISMComponent(Mesh, NumCustomDataFloats, ISMParams);
+    NewData.ISMComponent = CreateISMComponent(Mesh, NumCustomDataFloats, ISMParamsOld);
     NewData.NumCustomDataFloats = NumCustomDataFloats;
-    return MeshKeyToData.Add(FISMMeshKey(Mesh), MoveTemp(NewData));
+    return MeshKeyToData.Add(FISMMeshKeyOld(Mesh), MoveTemp(NewData));
 }
 
 int32 UISMPoolManager::AllocateSlot()
@@ -261,7 +261,7 @@ void UISMPoolManager::AcquireInstance(UStaticMesh* Mesh, USceneComponent* Attach
     SCOPE_CYCLE_COUNTER(STAT_ISMPoolManager_AcquireInstance);
     if (!Mesh) return;
 
-    FISMPerMeshData& Data = GetOrCreatePerMeshData(Mesh, NumCustomDataFloats, FISMComponentParams());
+    FISMPerMeshData& Data = GetOrCreatePerMeshData(Mesh, NumCustomDataFloats, FISMComponentParamsOld());
     const FVector QuantizedLoc = QuantizeLocation(Transform.GetLocation());
 
     // 防止同一位置重复申请
@@ -301,7 +301,7 @@ void UISMPoolManager::ReleaseInstance(UStaticMesh* Mesh, const FTransform& Trans
     SCOPE_CYCLE_COUNTER(STAT_ISMPoolManager_ReleaseInstance);
     if (!Mesh) return;
 
-    FISMPerMeshData* Data = MeshKeyToData.Find(FISMMeshKey(Mesh));
+    FISMPerMeshData* Data = MeshKeyToData.Find(FISMMeshKeyOld(Mesh));
     if (!Data) return;
 
     const FVector QuantizedLoc = QuantizeLocation(Transform.GetLocation());
@@ -346,7 +346,7 @@ void UISMPoolManager::UpdateInstanceTransform(UStaticMesh* Mesh, const FTransfor
 {
     if (!Mesh) return;
 
-    FISMPerMeshData* Data = MeshKeyToData.Find(FISMMeshKey(Mesh));
+    FISMPerMeshData* Data = MeshKeyToData.Find(FISMMeshKeyOld(Mesh));
     if (!Data) return;
 
     const FVector OldLoc = QuantizeLocation(OldTransform.GetLocation());
@@ -373,7 +373,7 @@ void UISMPoolManager::UpdateInstanceCustomData(UStaticMesh* Mesh, const FTransfo
 {
     if (!Mesh) return;
 
-    FISMPerMeshData* Data = MeshKeyToData.Find(FISMMeshKey(Mesh));
+    FISMPerMeshData* Data = MeshKeyToData.Find(FISMMeshKeyOld(Mesh));
     if (!Data) return;
 
     const FVector QuantizedLoc = QuantizeLocation(Transform.GetLocation());
@@ -398,7 +398,7 @@ void UISMPoolManager::UpdateInstanceCustomData(UStaticMesh* Mesh, int32 Instance
 {
     if (!Mesh) return;
 
-    const FISMPerMeshData* Data = MeshKeyToData.Find(FISMMeshKey(Mesh));
+    const FISMPerMeshData* Data = MeshKeyToData.Find(FISMMeshKeyOld(Mesh));
     if (!Data) return;
     
     Data->ISMComponent->SetCustomDataValue(InstanceIndex, CustomDataIndex, Value);
@@ -409,7 +409,7 @@ bool UISMPoolManager::HasInstance(UStaticMesh* Mesh, const FTransform& Transform
 {
     if (!Mesh) return false;
 
-    const FISMPerMeshData* Data = MeshKeyToData.Find(FISMMeshKey(Mesh));
+    const FISMPerMeshData* Data = MeshKeyToData.Find(FISMMeshKeyOld(Mesh));
     if (!Data) return false;
 
     const FVector QuantizedLoc = QuantizeLocation(Transform.GetLocation());
@@ -417,12 +417,12 @@ bool UISMPoolManager::HasInstance(UStaticMesh* Mesh, const FTransform& Transform
 }
 
 TArray<FPrimitiveInstanceId> UISMPoolManager::BatchAddInstances(UStaticMesh* Mesh, const TArray<FTransform>& Transforms,
-    const int32 NumCustomDataFloats,const FISMComponentParams& ISMParams,
+    const int32 NumCustomDataFloats,const FISMComponentParamsOld& ISMParamsOld,
     const TArray<float>& CustomData)
 {
     TArray<FPrimitiveInstanceId> InstanceIds;
 
-    const FISMPerMeshData& Data = GetOrCreatePerMeshData(Mesh, NumCustomDataFloats, ISMParams);
+    const FISMPerMeshData& Data = GetOrCreatePerMeshData(Mesh, NumCustomDataFloats, ISMParamsOld);
     const TObjectPtr<UInstancedStaticMeshComponent> ISMComp = Data.ISMComponent;
     if (!ISMComp || Transforms.Num() == 0) return InstanceIds;
 
@@ -450,7 +450,7 @@ TArray<FPrimitiveInstanceId> UISMPoolManager::BatchAddInstances(UStaticMesh* Mes
 bool UISMPoolManager::LineTraceISMInstances(UStaticMesh* Mesh, FHitResult& OutHit, const FVector& Start,
     const FVector& End, const FCollisionQueryParams& Params)
 {
-    if (const FISMPerMeshData* Existing = MeshKeyToData.Find(FISMMeshKey(Mesh)))
+    if (const FISMPerMeshData* Existing = MeshKeyToData.Find(FISMMeshKeyOld(Mesh)))
     {
         const TObjectPtr<UInstancedStaticMeshComponent> ISMComp = Existing->ISMComponent;
         return ISMComp && ISMComp->LineTraceComponent(OutHit, Start, End, Params);

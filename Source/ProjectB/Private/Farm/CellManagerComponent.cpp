@@ -5,13 +5,13 @@
 #include "Mass/CellMassFragments.h"
 #include "Farm/FarmlandConfigDataAsset.h"
 #include "Planet/PlanetConfigDataAsset.h"
-#include "Subsystem/ISMPoolManager.h"
 #include "Crops/CropData.h"
 #include "Engine/DataTable.h"
 #include "Planet/PlanetInterface.h"
 #include "Player/BasePlayerController.h"
 #include "ProjectB/ProjectB.h"
 #include "Subsystem/GlobalConfigSubsystem.h"
+#include "Subsystem/ISMManager.h"
 
 UCellManagerComponent::UCellManagerComponent()
 {
@@ -45,12 +45,15 @@ void UCellManagerComponent::Initialize(UPlanetConfigDataAsset* InPlanetConfig, U
 	
 	if (UGlobalConfigSubsystem* ConfigSub = GetWorld()->GetSubsystem<UGlobalConfigSubsystem>())
 	{
-		ConfigSub->SetConfigs(FarmlandConfig, PlanetConfig);
+		ConfigSub->SetConfigs(FarmlandConfig, PlanetConfig, CropDataTable);
+		ConfigSub->SetISMAttachParent(this);
 	}
 	
 	CreateMassCell();
 
 	UE_LOG(LogTemp, Log, TEXT("CellManagerComponent initialized: %d cells"), CellEntities.Num());
+
+	PrecreateCropISMComponents();
 }
 
 void UCellManagerComponent::CreateMassCell()
@@ -260,8 +263,8 @@ void UCellManagerComponent::CreateMassCell()
     }
 
 	// ==================== 批量添加 ISM 实例 ====================
-	UISMPoolManager* PoolManager = GetWorld()->GetSubsystem<UISMPoolManager>();
-	if (!PoolManager) return;
+	UISMManager* ISMManager = GetWorld()->GetSubsystem<UISMManager>();
+	if (!ISMManager) return;
 	
 	if (OutlineTransforms.Num() > 0)
 	{
@@ -273,7 +276,7 @@ void UCellManagerComponent::CreateMassCell()
 		CellISMParams.bCastShadow = false;
 
 		// 单元格
-		PoolManager->BatchAddInstances(FarmlandConfig->OutlineMesh, OutlineTransforms, 16, CellISMParams, AllCellCustomData);
+		ISMManager->BatchAddInstances(FarmlandConfig->OutlineMesh, OutlineTransforms, 16, CellISMParams, AllCellCustomData);
 	}
 
 	if (PlotTransforms.Num() > 0)
@@ -281,7 +284,7 @@ void UCellManagerComponent::CreateMassCell()
 		FISMComponentParams PlotISMParams;
 		PlotISMParams.AttachParent = this;
 		// 地块
-		PoolManager->BatchAddInstances(FarmlandConfig->LandCellMesh, PlotTransforms, FarmlandConfig->NumCustomDataFloats, PlotISMParams, AllPlotCustomData);
+		ISMManager->BatchAddInstances(FarmlandConfig->LandCellMesh, PlotTransforms, FarmlandConfig->NumCustomDataFloats, PlotISMParams, AllPlotCustomData);
 	}
 }
 
@@ -361,29 +364,29 @@ void UCellManagerComponent::UpdateOutline(FIntPoint Coords, bool bEnable)
 {
 	FMassEntityHandle Entity;
 	if (!GetCellEntity(Coords, Entity)) return;
-	
-	UISMPoolManager* PoolManager = GetWorld()->GetSubsystem<UISMPoolManager>();
-	if (!PoolManager) return;
+
+	const UISMManager* ISMManager = GetWorld()->GetSubsystem<UISMManager>();
+	if (!ISMManager) return;
 
 	const int32 InstanceIndex = Coords.X * PlanetConfig->NumLon + Coords.Y;
 	if (bEnable && BasePlayerController->GetEditMode() != EEditMode::None)
 	{
 		CurrentOutlineCoords = Coords;
-		PoolManager->UpdateInstanceCustomData(FarmlandConfig->OutlineMesh, InstanceIndex, CellOutlineCustomData::Opacity, 0.1f);
+		ISMManager->UpdateInstanceCustomData(FarmlandConfig->OutlineMesh, InstanceIndex, CellOutlineCustomData::Opacity, 0.1f);
 		UpdateOutlineColor(Coords);
 	}
 	else
 	{
 		CurrentOutlineCoords = FIntPoint(-1, -1);
-		PoolManager->UpdateInstanceCustomData(FarmlandConfig->OutlineMesh, InstanceIndex, CellOutlineCustomData::Opacity, 0.f);
+		ISMManager->UpdateInstanceCustomData(FarmlandConfig->OutlineMesh, InstanceIndex, CellOutlineCustomData::Opacity, 0.f);
 	}
 }
 
 bool UCellManagerComponent::GetCellCoordsByRaycast(const FVector& RayStart, const FVector& RayEnd,
 	FIntPoint& OutCellCoords, float& OutHitDistance) const
 {
-	UISMPoolManager* PoolManager = GetWorld()->GetSubsystem<UISMPoolManager>();
-	if (!PoolManager) return false;
+	const UISMManager* ISMManager = GetWorld()->GetSubsystem<UISMManager>();
+	if (!ISMManager) return false;
 
 	const FVector NewRayEnd = FMath::Lerp(RayStart, RayEnd, 1.1f);
 	// 使用 ISM 的 HitTest 进行精确检测
@@ -391,7 +394,7 @@ bool UCellManagerComponent::GetCellCoordsByRaycast(const FVector& RayStart, cons
 	const FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FarmlandClick), false);
     
 	// 执行射线检测（针对 ISM 组件）
-	if (PoolManager->LineTraceISMInstances(FarmlandConfig->OutlineMesh, HitResult, RayStart, NewRayEnd, QueryParams))
+	if (ISMManager->LineTraceISMInstances(FarmlandConfig->OutlineMesh, HitResult, RayStart, NewRayEnd, QueryParams))
 	{
 		OutHitDistance = HitResult.Distance;
         
@@ -610,7 +613,7 @@ void UCellManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
     FMassEntityHandle Entity;
     if (!GetCellEntity(Coords, Entity)) return;
 
-    FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+    const FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
 
     // 检查地块是否可种植：必须有 FPlotStateFragment 且已耕地，且没有作物
     FPlotStateFragment* PlotState = EntityManager.GetFragmentDataPtr<FPlotStateFragment>(Entity);
@@ -632,66 +635,145 @@ void UCellManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
 	IPlanetInterface::Execute_CallPlanetInfoChanged(OwnerActor.Get());
 	
     // 通过命令缓冲添加作物 Tag 和全部 Fragment
-    EntityManager.Defer().AddFragment<FCropIdentifierFragment>(Entity);
+    EntityManager.Defer().AddFragment<FCropStaticConfigFragment>(Entity);
     EntityManager.Defer().AddFragment<FCropStateFragment>(Entity);
     EntityManager.Defer().AddFragment<FCropGrowthTimerFragment>(Entity);
     EntityManager.Defer().AddFragment<FCropQualityFragment>(Entity);
+	EntityManager.Defer().AddFragment<FCropRenderFragment>(Entity);
 
     // 初始化所有作物数据
     EntityManager.Defer().PushCommand<FMassDeferredSetCommand>(
-        [Entity, CropID, Row, PlotState](FMassEntityManager& EM)
+        [Entity, CropID, Row, PlotState](const FMassEntityManager& EM)
         {
             if (!EM.IsEntityActive(Entity)) return;
 
             // 标识数据
-            FCropIdentifierFragment& Id = EM.GetFragmentDataChecked<FCropIdentifierFragment>(Entity);
-            Id.CropID = CropID;
-            Id.VariantsIndex = FMath::RandRange(0, Row->MeshVariants.Num() - 1);
+        	const int32 VariantsIndex = FMath::RandRange(0, Row->MeshVariants.Num() - 1);
+        	const FCropMeshVariant& Variant = Row->MeshVariants[VariantsIndex];
+        	
+            FCropStaticConfigFragment& CropStaticConfig = EM.GetFragmentDataChecked<FCropStaticConfigFragment>(Entity);
+            CropStaticConfig.CropID = CropID;
+        	CropStaticConfig.GrowthSeedTime = Row->GrowthSeedTime;
+			CropStaticConfig.GrowthSeedlingTime = Row->GrowthSeedlingTime;
+			CropStaticConfig.MoistureConsumePerSecond = Row->MoistureConsumePerSecond;
+			CropStaticConfig.FertilityConsumePerSecond = Row->FertilityConsumePerSecond;
+        	CropStaticConfig.SeedMesh      = Variant.SeedMesh;
+			CropStaticConfig.SeedlingMesh  = Variant.SeedlingMesh;
+			CropStaticConfig.MatureMesh    = Variant.MatureMesh;
+			CropStaticConfig.HarvestedMesh = Variant.HarvestedMesh;
+        	CropStaticConfig.CropNumCustomDataFloats = Row->CropNumCustomDataFloats;
 
             // 生长阶段与状态
             FCropStateFragment& CropState = EM.GetFragmentDataChecked<FCropStateFragment>(Entity);
             CropState.CropGrowthStage = ECropGrowthStage::Seed;
-            CropState.CropStateData.Reset();
             CropState.CropStateData.AddState(ECropState::NeedsWater);
             CropState.CropStateData.AddState(ECropState::NeedsFertilizer);
 
             // 根据地块初始状态调整作物状态
-        	
-        	// 捕获地块初始状态（在命令执行时读取，确保正确）
-			const bool bInitiallyWatered = PlotState->StateData.HasState(EPlotState::Watered);
-			const bool bInitiallyFertilized = PlotState->StateData.HasState(EPlotState::Fertilized);
-			const bool bHasWeeds = PlotState->StateData.HasState(EPlotState::WeedInfested);
-			const bool bHasPests = PlotState->StateData.HasState(EPlotState::PestInfested);
-            if (bInitiallyWatered)
+            if (PlotState->StateData.HasState(EPlotState::Watered))
                 CropState.CropStateData.RemoveState(ECropState::NeedsWater);
-            if (bInitiallyFertilized)
+            if (PlotState->StateData.HasState(EPlotState::Fertilized))
                 CropState.CropStateData.RemoveState(ECropState::NeedsFertilizer);
-            if (bHasWeeds)
+            if (PlotState->StateData.HasState(EPlotState::WeedInfested))
                 CropState.CropStateData.AddState(ECropState::WeedInfested);
-            if (bHasPests)
+            if (PlotState->StateData.HasState(EPlotState::PestInfested))
                 CropState.CropStateData.AddState(ECropState::PestInfested);
 
-            // 生长计时
-        	// 计算随机初始生长时间
-        	const float InitialGrowthTime = FMath::RandRange(0.f, Row->GrowthSeedTime + Row->GrowthSeedlingTime);
-
+        	//-----------------
+            // 生长计算随机初始生长时间
             FCropGrowthTimerFragment& Timer = EM.GetFragmentDataChecked<FCropGrowthTimerFragment>(Entity);
-            Timer.TotalGrowthTime = InitialGrowthTime;
-            Timer.CurrentStageGrowthTime = InitialGrowthTime;
-
-            // 品质数据
-            FCropQualityFragment& Quality = EM.GetFragmentDataChecked<FCropQualityFragment>(Entity);
-            Quality.QualityData.Reset();
+            Timer.TotalGrowthTime = FMath::RandRange(0.f, Row->GrowthSeedTime + Row->GrowthSeedlingTime);
+            const float SeedlingStart = CropStaticConfig.GrowthSeedTime;
+            const float MatureStart = CropStaticConfig.GrowthSeedTime + CropStaticConfig.GrowthSeedlingTime;
+            if (Timer.TotalGrowthTime < SeedlingStart)
+            {
+	            CropState.CropGrowthStage = ECropGrowthStage::Seed;
+	            Timer.CurrentStageGrowthTime = Timer.TotalGrowthTime;
+            }
+            else if (Timer.TotalGrowthTime < MatureStart)
+            {
+	            CropState.CropGrowthStage = ECropGrowthStage::Seedling;
+	            Timer.CurrentStageGrowthTime = Timer.TotalGrowthTime - SeedlingStart;
+            }
+            else
+            {
+	            CropState.CropGrowthStage = ECropGrowthStage::Mature;
+	            Timer.CurrentStageGrowthTime = Timer.TotalGrowthTime - MatureStart;
+            }
+            //-----------------
         });
 }
 
 bool UCellManagerComponent::HarvestCrop(FIntPoint Coords)
 {
-	return false;
+	if (!OwnerActor.IsValid()) return  false;
+    FMassEntityHandle Entity;
+    if (!GetCellEntity(Coords, Entity)) return false;
+
+    FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+
+    // 检查是否有作物且为成熟阶段
+    FCropStateFragment* CropState = EntityManager.GetFragmentDataPtr<FCropStateFragment>(Entity);
+    if (!CropState || CropState->CropGrowthStage != ECropGrowthStage::Mature) return false;
+
+    FCropStaticConfigFragment* CropId = EntityManager.GetFragmentDataPtr<FCropStaticConfigFragment>(Entity);
+    if (!CropId) return false;
+
+    // 从数据表读取售价配置
+    const FCropTableRow* Row = CropDataTable->FindRow<FCropTableRow>(CropId->CropID, TEXT("HarvestCrop"));
+    if (!Row) return false;
+
+    // 读取品质数据并计算售价
+    FCropQualityFragment* Quality = EntityManager.GetFragmentDataPtr<FCropQualityFragment>(Entity);
+    FCropGrowthTimerFragment* Timer = EntityManager.GetFragmentDataPtr<FCropGrowthTimerFragment>(Entity);
+    if (!Quality || !Timer) return false;
+
+    float SalePriceMultiplier = 1.0f;
+    switch (Quality->QualityData.GetQuality(Timer->TotalGrowthTime))
+    {
+    case ECropQuality::Poor:      SalePriceMultiplier = FarmlandConfig->SalePriceMultiplier_Poor; break;
+    case ECropQuality::Normal:    SalePriceMultiplier = FarmlandConfig->SalePriceMultiplier_Normal; break;
+    case ECropQuality::Good:      SalePriceMultiplier = FarmlandConfig->SalePriceMultiplier_Good; break;
+    case ECropQuality::Excellent: SalePriceMultiplier = FarmlandConfig->SalePriceMultiplier_Excellent; break;
+    }
+    const int32 CropSalePrice = FMath::RoundToInt32(Row->BaseSalePrice * SalePriceMultiplier);
+
+	// 处理星球能量增加
+	IPlanetInterface* PlanetInterface = Cast<IPlanetInterface>(OwnerActor.Get());
+	auto& [PlanetPower] = PlanetInterface->GetPlanetInfoRef();
+	PlanetPower += CropSalePrice;
+	IPlanetInterface::Execute_CallPlanetInfoChanged(OwnerActor.Get());
+
+    // 将作物状态改为已收获（渲染处理器会自动处理 Mesh 切换）
+    CropState->CropGrowthStage = ECropGrowthStage::Harvested;
+    CropState->CropStateData.RemoveState(ECropState::ReadyForHarvest);
+
+    // 延迟自动移除（可选：通过定时器或标记）
+    // 这里简单处理：收获后直接移除，如果希望保留枯萎效果则跳过移除
+    EntityManager.Defer().RemoveFragment<FCropStaticConfigFragment>(Entity);
+    EntityManager.Defer().RemoveFragment<FCropStateFragment>(Entity);
+    EntityManager.Defer().RemoveFragment<FCropGrowthTimerFragment>(Entity);
+    EntityManager.Defer().RemoveFragment<FCropQualityFragment>(Entity);
+
+    return true;
 }
 
 void UCellManagerComponent::RemoveCrop(FIntPoint Coords)
 {
+	FMassEntityHandle Entity;
+	if (!GetCellEntity(Coords, Entity)) return;
+
+	FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+
+	// 检查是否有作物
+	FCropStateFragment* CropState = EntityManager.GetFragmentDataPtr<FCropStateFragment>(Entity);
+	if (!CropState) return;
+
+	// 通过命令缓冲移除所有作物 Fragment
+	EntityManager.Defer().RemoveFragment<FCropStaticConfigFragment>(Entity);
+	EntityManager.Defer().RemoveFragment<FCropStateFragment>(Entity);
+	EntityManager.Defer().RemoveFragment<FCropGrowthTimerFragment>(Entity);
+	EntityManager.Defer().RemoveFragment<FCropQualityFragment>(Entity);
 }
 
 void UCellManagerComponent::CropDried(FIntPoint Coords)
@@ -707,8 +789,8 @@ void UCellManagerComponent::UpdateOutlineColor(FIntPoint Coords)
 	FMassEntityHandle Entity;
 	if (!GetCellEntity(Coords, Entity)) return;
 	
-	UISMPoolManager* PoolManager = GetWorld()->GetSubsystem<UISMPoolManager>();
-	if (!PoolManager) return;
+	UISMManager* ISMManager = GetWorld()->GetSubsystem<UISMManager>();
+	if (!ISMManager) return;
 
 	FLinearColor OutlineColor = FLinearColor::Green;
 	switch (BasePlayerController->GetEditMode()) {
@@ -760,7 +842,7 @@ void UCellManagerComponent::UpdateOutlineColor(FIntPoint Coords)
 	case EEditMode::UnCropDried:
 		OutlineColor = FLinearColor::Red;
 		break;
-	case RemoveCrop:
+	case EEditMode::RemoveCrop:
 		OutlineColor = FLinearColor::Red;
 		break;
 	default:
@@ -768,13 +850,46 @@ void UCellManagerComponent::UpdateOutlineColor(FIntPoint Coords)
 	}
 
 	const int32 InstanceIndex = Coords.X * PlanetConfig->NumLon + Coords.Y;
-	PoolManager->UpdateInstanceCustomData(FarmlandConfig->OutlineMesh, InstanceIndex, CellOutlineCustomData::R, OutlineColor.R);
-	PoolManager->UpdateInstanceCustomData(FarmlandConfig->OutlineMesh, InstanceIndex, CellOutlineCustomData::G, OutlineColor.G);
-	PoolManager->UpdateInstanceCustomData(FarmlandConfig->OutlineMesh, InstanceIndex, CellOutlineCustomData::B, OutlineColor.B);
+	ISMManager->UpdateInstanceCustomData(FarmlandConfig->OutlineMesh, InstanceIndex, CellOutlineCustomData::R, OutlineColor.R);
+	ISMManager->UpdateInstanceCustomData(FarmlandConfig->OutlineMesh, InstanceIndex, CellOutlineCustomData::G, OutlineColor.G);
+	ISMManager->UpdateInstanceCustomData(FarmlandConfig->OutlineMesh, InstanceIndex, CellOutlineCustomData::B, OutlineColor.B);
 
 }
 
 void UCellManagerComponent::OnEditModeChanged(EEditMode NewEditMode)
 {
 	UpdateOutlineColor(CurrentOutlineCoords);
+}
+
+void UCellManagerComponent::PrecreateCropISMComponents()
+{
+	if (!CropDataTable) return;
+	UISMManager* ISMMgr = GetWorld()->GetSubsystem<UISMManager>();
+	if (!ISMMgr) return;
+
+	FISMComponentParams CropParams;
+	CropParams.AttachParent = this;
+	CropParams.CollisionEnabled = ECollisionEnabled::NoCollision;
+	CropParams.bCastShadow = true;
+
+	TMap<UStaticMesh*, int32> UniqueMeshes;
+	// 收集所有作物变体中所有阶段的网格体
+	for (auto& RowPair : CropDataTable->GetRowMap())
+	{
+		const FCropTableRow* Row = reinterpret_cast<FCropTableRow*>(RowPair.Value);
+		if (!Row) continue;
+		int32 CropNumCustomDataFloats = Row->CropNumCustomDataFloats;
+		for (const FCropMeshVariant& Variant : Row->MeshVariants)
+		{
+			if (Variant.SeedMesh) UniqueMeshes.Add(Variant.SeedMesh, CropNumCustomDataFloats);
+			if (Variant.SeedlingMesh) UniqueMeshes.Add(Variant.SeedlingMesh, CropNumCustomDataFloats);
+			if (Variant.MatureMesh) UniqueMeshes.Add(Variant.MatureMesh, CropNumCustomDataFloats);
+			if (Variant.HarvestedMesh) UniqueMeshes.Add(Variant.HarvestedMesh, CropNumCustomDataFloats);
+		}
+	}
+	// 为每个唯一网格创建 ISM 组件
+	for (const auto& Pair : UniqueMeshes)
+	{
+		ISMMgr->GetOrCreateISMComponent(Pair.Key, Pair.Value, CropParams);
+	}
 }

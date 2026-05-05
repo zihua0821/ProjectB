@@ -14,7 +14,7 @@ DECLARE_CYCLE_STAT(TEXT("UISMPoolManager - ReleaseInstance"), STAT_ISMPoolManage
  * 使用 FSoftObjectPath 而非 UStaticMesh* 作为键，确保在资产重载或存档加载时键值稳定。
  */
 USTRUCT(BlueprintType)
-struct FISMMeshKey
+struct FISMMeshKeyOld
 {
 	GENERATED_BODY()
 	
@@ -23,23 +23,23 @@ struct FISMMeshKey
 	FSoftObjectPath MeshPath;
 	
 	/** 默认构造函数 */
-	FISMMeshKey() = default;
+	FISMMeshKeyOld() = default;
 
 	/** 从 FSoftObjectPath 显式构造 */
-	explicit FISMMeshKey(const FSoftObjectPath& InMeshPath) : MeshPath(InMeshPath) {}
+	explicit FISMMeshKeyOld(const FSoftObjectPath& InMeshPath) : MeshPath(InMeshPath) {}
 
 	/** 从 UStaticMesh* 显式构造（自动转换为软引用路径） */
-	explicit FISMMeshKey(UStaticMesh* InMesh) : MeshPath(FSoftObjectPath(InMesh)) {}
+	explicit FISMMeshKeyOld(UStaticMesh* InMesh) : MeshPath(FSoftObjectPath(InMesh)) {}
 
 	/** 相等比较，仅比较 MeshPath */
-	bool operator==(const FISMMeshKey& Other) const
+	bool operator==(const FISMMeshKeyOld& Other) const
 	{
 		return MeshPath == Other.MeshPath;
 	}
 };
 
 /** 哈希函数，基于 MeshPath 计算 */
-FORCEINLINE uint32 GetTypeHash(const FISMMeshKey& Key)
+FORCEINLINE uint32 GetTypeHash(const FISMMeshKeyOld& Key)
 {
 	return GetTypeHash(Key.MeshPath);
 }
@@ -48,7 +48,7 @@ FORCEINLINE uint32 GetTypeHash(const FISMMeshKey& Key)
  * ISM 组件参数结构体。
  */
 USTRUCT(BlueprintType)
-struct FISMComponentParams
+struct FISMComponentParamsOld
 {
 	GENERATED_BODY()
 
@@ -187,7 +187,7 @@ public:
 		UStaticMesh* Mesh,
 		const TArray<FTransform>& Transforms,
 		const int32 NumCustomDataFloats,
-		const FISMComponentParams& ISMParams,
+		const FISMComponentParamsOld& ISMParams,
 		const TArray<float>& CustomData = TArray<float>()
 	);
 
@@ -252,7 +252,7 @@ protected:
      * 获取或创建指定 Mesh 对应的 FISMPerMeshData。
      * 若不存在，则调用 CreateISMComponent 创建 ISM 组件并初始化数据。
      */
-    FISMPerMeshData& GetOrCreatePerMeshData(UStaticMesh* Mesh, int32 NumCustomDataFloats, const FISMComponentParams& ISMParams);
+    FISMPerMeshData& GetOrCreatePerMeshData(UStaticMesh* Mesh, int32 NumCustomDataFloats, const FISMComponentParamsOld& ISMParams);
 
     /**
      * 创建并初始化一个 ISM 组件。
@@ -262,7 +262,7 @@ protected:
      * @param ISMParams           ISM 组件参数。
      * @return                  已注册的 ISM 组件，失败返回 nullptr。
      */
-	static UInstancedStaticMeshComponent* CreateISMComponent(UStaticMesh* Mesh, int32 NumCustomDataFloats, const FISMComponentParams& ISMParams);
+	static UInstancedStaticMeshComponent* CreateISMComponent(UStaticMesh* Mesh, int32 NumCustomDataFloats, const FISMComponentParamsOld& ISMParams);
 
     /**
      * 分配一个空闲槽位。
@@ -303,7 +303,7 @@ protected:
 	void FlushPendingTransforms();
 private:
     /** MeshKey → 对应数据（ISM 组件及槽位映射） */
-    TMap<FISMMeshKey, FISMPerMeshData> MeshKeyToData;
+    TMap<FISMMeshKeyOld, FISMPerMeshData> MeshKeyToData;
 
     /** 所有实例槽位数组，索引即为逻辑实例 ID（对外不可见） */
     TArray<FISMInstanceSlot> Slots;

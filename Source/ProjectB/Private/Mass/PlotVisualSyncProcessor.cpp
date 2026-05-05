@@ -3,11 +3,11 @@
 #include "MassEntityManager.h"
 #include "MassExecutionContext.h"
 #include "Mass/CellMassFragments.h"
-#include "Subsystem/ISMPoolManager.h"
 #include "Crops/CropData.h"
 #include "Farm/FarmlandConfigDataAsset.h"
 #include "Planet/PlanetConfigDataAsset.h"
 #include "Subsystem/GlobalConfigSubsystem.h"
+#include "Subsystem/ISMManager.h"
 
 UPlotVisualSyncProcessor::UPlotVisualSyncProcessor()
 {
@@ -29,8 +29,8 @@ void UPlotVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
     const UWorld* World = EntityManager.GetWorld();
     if (!World) return;
 
-    UISMPoolManager* PoolManager = World->GetSubsystem<UISMPoolManager>();
-    if (!PoolManager) return;
+    UISMManager* ISMManager = World->GetSubsystem<UISMManager>();
+    if (!ISMManager) return;
 
     const UGlobalConfigSubsystem* ConfigSub = World->GetSubsystem<UGlobalConfigSubsystem>();
     if (!ConfigSub) return;
@@ -38,7 +38,7 @@ void UPlotVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
     UFarmlandConfigDataAsset* FarmlandConfig = ConfigSub->GetFarmlandConfig();
     UPlanetConfigDataAsset* PlanetConfig = ConfigSub->GetPlanetConfig();
 
-    EntityQuery.ForEachEntityChunk(EntityManager, Context, [PoolManager, FarmlandConfig, PlanetConfig](FMassExecutionContext& InContext)
+    EntityQuery.ForEachEntityChunk(EntityManager, Context, [ISMManager, FarmlandConfig, PlanetConfig](FMassExecutionContext& InContext)
     {
         const TConstArrayView<FCellStaticFragment> StaticList = InContext.GetFragmentView<FCellStaticFragment>();
         const TArrayView<FPlotStateFragment> StateList = InContext.GetMutableFragmentView<FPlotStateFragment>();
@@ -56,7 +56,7 @@ void UPlotVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
                 if (State.StateData.HasState(EPlotState::Plowed) != State.PreStateData.HasState(EPlotState::Plowed))
                 {
                     const float Opacity = State.StateData.HasState(EPlotState::Plowed) ? 1.0f : 0.0f;
-                    PoolManager->UpdateInstanceCustomData(FarmlandConfig->LandCellMesh, PlotIndex,PlotCustomData::Opacity, Opacity);
+                    ISMManager->UpdateInstanceCustomData(FarmlandConfig->LandCellMesh, PlotIndex,PlotCustomData::Opacity, Opacity);
                     if (!Opacity)
                     {
                         const FMassEntityHandle Entity = InContext.GetEntity(i);
@@ -68,14 +68,14 @@ void UPlotVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
                 if (State.StateData.HasState(EPlotState::Watered) != State.PreStateData.HasState(EPlotState::Watered))
                 {
                     const float Wetness = State.StateData.HasState(EPlotState::Watered) ? 1.0f : 0.0f;
-                    PoolManager->UpdateInstanceCustomData(FarmlandConfig->LandCellMesh, PlotIndex,PlotCustomData::Wetness, Wetness);
+                    ISMManager->UpdateInstanceCustomData(FarmlandConfig->LandCellMesh, PlotIndex,PlotCustomData::Wetness, Wetness);
                 }
 
                 // 肥力可视化
                 if (State.StateData.HasState(EPlotState::Fertilized) != State.PreStateData.HasState(EPlotState::Fertilized))
                 {
                     const float Fertility = State.StateData.HasState(EPlotState::Fertilized) ? 1.0f : 0.0f;
-                    PoolManager->UpdateInstanceCustomData(FarmlandConfig->LandCellMesh, PlotIndex,PlotCustomData::Fertility, Fertility);
+                    ISMManager->UpdateInstanceCustomData(FarmlandConfig->LandCellMesh, PlotIndex,PlotCustomData::Fertility, Fertility);
                 }
 
                 if (State.StateData.HasState(EPlotState::WeedInfested) != State.PreStateData.HasState(EPlotState::WeedInfested))

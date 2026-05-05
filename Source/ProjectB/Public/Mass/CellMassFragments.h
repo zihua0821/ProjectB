@@ -71,7 +71,7 @@ struct FCropTag : public FMassTag
  * 作物静态标识（种植后不变）
  */
 USTRUCT(BlueprintType)
-struct FCropIdentifierFragment : public FMassFragment
+struct FCropStaticConfigFragment : public FMassFragment
 {
 	GENERATED_BODY()
 
@@ -79,9 +79,37 @@ struct FCropIdentifierFragment : public FMassFragment
 	UPROPERTY()
 	FName CropID;
 
-	/** 网格变体索引 */
+	/** 种子阶段所需时间 */
 	UPROPERTY()
-	int32 VariantsIndex = 0;
+	float GrowthSeedTime = 0.0f;
+
+	/** 幼苗阶段所需时间 */
+	UPROPERTY()
+	float GrowthSeedlingTime = 0.0f;
+
+	/** 每秒水分消耗 */
+	UPROPERTY()
+	float MoistureConsumePerSecond = 0.0f;
+
+	/** 每秒肥力消耗 */
+	UPROPERTY()
+	float FertilityConsumePerSecond = 0.0f;
+
+	// 各生长阶段的网格体
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> SeedMesh = nullptr;
+
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> SeedlingMesh = nullptr;
+
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> MatureMesh = nullptr;
+
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> HarvestedMesh = nullptr;
+
+	UPROPERTY()
+	int32 CropNumCustomDataFloats = 0;
 };
 
 /**
@@ -99,6 +127,10 @@ struct FCropStateFragment : public FMassFragment
 	/** 需水、需肥、病害、可收获等状态位 */
 	UPROPERTY()
 	FCropStateData CropStateData;
+
+	/** 上次渲染的生长阶段，用于判断是否需要切换 Mesh */
+	UPROPERTY()
+	ECropGrowthStage LastRenderedStage = ECropGrowthStage::None;
 };
 
 /**
@@ -131,3 +163,18 @@ struct FCropQualityFragment : public FMassFragment
 	FCropQualityData QualityData;
 };
 
+/**
+ * 作物渲染状态（由渲染处理器维护）
+ */
+USTRUCT(BlueprintType)
+struct FCropRenderFragment : public FMassFragment
+{
+	GENERATED_BODY()
+
+	/** 当前 ISM 实例稳定 ID */
+	FPrimitiveInstanceId InstanceId;
+
+	/** 当前显示的网格体 */
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> CurrentMesh = nullptr;
+};

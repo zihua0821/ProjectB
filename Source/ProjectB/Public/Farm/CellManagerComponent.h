@@ -110,6 +110,8 @@ private:
 	
 	UFUNCTION()
 	void OnEditModeChanged(EEditMode NewEditMode);
+	
+	void PrecreateCropISMComponents();
 
 	// ---- 配置 ----
 	UPROPERTY()
@@ -120,11 +122,6 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UDataTable> CropDataTable;
-
-	// ---- ISM 挂载 ----
-	/** 用于承载所有 ISM 组件的静态根节点（始终位于世界原点） */
-	UPROPERTY()
-	TObjectPtr<USceneComponent> ISMRoot;
 
 	// ---- Mass 实体列表 ----
 	TArray<FMassEntityHandle> CellEntities;

@@ -4,8 +4,9 @@
 #include "Subsystem/GlobalConfigSubsystem.h"
 
 void UGlobalConfigSubsystem::SetConfigs(UFarmlandConfigDataAsset* InFarmlandConfig,
-	UPlanetConfigDataAsset* InPlanetConfig)
+	UPlanetConfigDataAsset* InPlanetConfig, UDataTable* InCropTable)
 {
 	FarmlandConfig = InFarmlandConfig;
 	PlanetConfig = InPlanetConfig;
+	CropDataTable = InCropTable;
 }
