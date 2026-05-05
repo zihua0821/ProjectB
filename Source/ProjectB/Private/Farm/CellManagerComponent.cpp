@@ -1,16 +1,17 @@
-﻿// CellManagerComponent.cpp
-#include "Farm/CellManagerComponent.h"
+﻿#include "Farm/CellManagerComponent.h"
+#include "MassCommandBuffer.h"
 #include "MassEntityManager.h"
 #include "MassEntitySubsystem.h"
 #include "Mass/CellMassFragments.h"
-// #include "FarmGlobalConfigSubsystem.h"
 #include "Farm/FarmlandConfigDataAsset.h"
 #include "Planet/PlanetConfigDataAsset.h"
 #include "Subsystem/ISMPoolManager.h"
 #include "Crops/CropData.h"
 #include "Engine/DataTable.h"
+#include "Planet/PlanetInterface.h"
 #include "Player/BasePlayerController.h"
 #include "ProjectB/ProjectB.h"
+#include "Subsystem/GlobalConfigSubsystem.h"
 
 UCellManagerComponent::UCellManagerComponent()
 {
@@ -20,7 +21,8 @@ UCellManagerComponent::UCellManagerComponent()
 void UCellManagerComponent::BeginPlay()
 {
 	Super::BeginPlay();
-	// 初始化会在外部调用 Initialize()，此处留空
+
+	OwnerActor = GetOwner();
 
 	BasePlayerController = Cast<ABasePlayerController>(GetWorld()->GetFirstPlayerController());
 	if (BasePlayerController)
@@ -41,6 +43,11 @@ void UCellManagerComponent::Initialize(UPlanetConfigDataAsset* InPlanetConfig, U
 	FarmlandConfig = InFarmConfig;
 	CropDataTable = InCropTable;
 	
+	if (UGlobalConfigSubsystem* ConfigSub = GetWorld()->GetSubsystem<UGlobalConfigSubsystem>())
+	{
+		ConfigSub->SetConfigs(FarmlandConfig, PlanetConfig);
+	}
+	
 	CreateMassCell();
 
 	UE_LOG(LogTemp, Log, TEXT("CellManagerComponent initialized: %d cells"), CellEntities.Num());
@@ -57,6 +64,8 @@ void UCellManagerComponent::CreateMassCell()
 	// 批量创建实体
 	TArray<const UScriptStruct*> FragmentTypes;
 	FragmentTypes.Add(FCellStaticFragment::StaticStruct());
+	// FragmentTypes.Add(FPlotStateFragment::StaticStruct());
+	// FragmentTypes.Add(FCropPlotTag::StaticStruct());
 	FMassArchetypeHandle ArchetypeHandle = EntityManager.CreateArchetype(FragmentTypes);
 	TArray<FMassEntityHandle> Entities;
 	EntityManager.BatchCreateEntities(
@@ -86,10 +95,15 @@ void UCellManagerComponent::CreateMassCell()
     
 	// 预分配容器
 	TArray<FTransform> OutlineTransforms;
-	TArray<float> AllCustomData;
+	TArray<FTransform> PlotTransforms;
+	TArray<float> AllCellCustomData;
+	TArray<float> AllPlotCustomData;
+	
 	CellEntities.SetNum(TotalCells);
 	OutlineTransforms.Reserve(TotalCells);
-	AllCustomData.Reserve(TotalCells * 16);
+	PlotTransforms.Reserve(TotalCells);
+	AllCellCustomData.Reserve(TotalCells * 16);
+	AllPlotCustomData.Reserve(TotalCells * FarmlandConfig->NumCustomDataFloats);
 	
     // 遍历经纬度网格生成地块
     for (int32 LatIdx = 0; LatIdx <NumLatCells; LatIdx++)
@@ -132,6 +146,8 @@ void UCellManagerComponent::CreateMassCell()
         	CellTransform.SetLocation(PlotLocation);
         	CellTransform.SetRotation(PlotRotation.Quaternion());
         	CellTransform.SetScale3D(FVector(BaseScaleFactorX * LatitudeScale, ScaleFactorY, ScaleFactorZ));
+
+        	PlotTransforms.Add(CellTransform);
         	
         	// 写入静态 Fragment
         	FCellStaticFragment& StaticFrag = EntityManager.GetFragmentDataChecked<FCellStaticFragment>(Entity);
@@ -139,18 +155,13 @@ void UCellManagerComponent::CreateMassCell()
         	StaticFrag.Transform = CellTransform;
         	StaticFrag.CellType = ECellType::Empty;
 
-        	// 根据配置默认创建农场地块
-        	if (FarmlandConfig->bInitAllLandCells)
-        	{
-        		EntityManager.AddTagToEntity(Entity, FCropPlotTag::StaticStruct());
-        		EntityManager.AddFragmentToEntity(
-					Entity, FPlotStateFragment::StaticStruct(),
-					[](void* Fragment, const UScriptStruct&)
-					{
-						static_cast<FPlotStateFragment*>(Fragment)->StateData.AddState(EPlotState::Plowed);
-					});
-        		StaticFrag.CellType = ECellType::Crop;
-        	}
+        	// FPlotStateFragment& PlotState = EntityManager.GetFragmentDataChecked<FPlotStateFragment>(Entity);
+        	// // 根据配置默认创建农场地块
+        	// if (FarmlandConfig->bInitAllLandCells)
+        	// {
+        	// 	PlotState.StateData.AddState(EPlotState::Plowed);
+        	// 	StaticFrag.CellType = ECellType::Crop;
+        	// }
 
         	const int32 FlatIndex = LatIdx * NumLonCells + LonIdx;
         	CellEntities[FlatIndex] = Entity;
@@ -217,7 +228,7 @@ void UCellManagerComponent::CreateMassCell()
         	// 收集数据
         	OutlineTransforms.Add(OutlineInstanceTransform);
 
-        	TArray<float> CustomData =
+        	TArray<float> CellCustomData =
         	{
         		0.f,										  // Opacity
         		1.f,										  // R
@@ -236,24 +247,41 @@ void UCellManagerComponent::CreateMassCell()
         		static_cast<float>(LocalVertexPositions[3].Y),// Y11
         		static_cast<float>(LocalVertexPositions[3].Z),// Z11
         	};
-        	AllCustomData.Append(CustomData);
+        	AllCellCustomData.Append(CellCustomData);
+
+        	TArray<float> PlotCustomData =
+			{
+        		0.f,										  // Opacity
+				0.f,										  // Wetness
+				0.f,										  // Fertility
+			};
+        	AllPlotCustomData.Append(PlotCustomData);
         }
     }
 
 	// ==================== 批量添加 ISM 实例 ====================
+	UISMPoolManager* PoolManager = GetWorld()->GetSubsystem<UISMPoolManager>();
+	if (!PoolManager) return;
+	
 	if (OutlineTransforms.Num() > 0)
 	{
-		UISMPoolManager* PoolManager = GetWorld()->GetSubsystem<UISMPoolManager>();
-		if (!PoolManager) return;
-		
-		FISMComponentParams ISMParams;
-		ISMParams.AttachParent = this;
-		ISMParams.CollisionObjectType = ECC_Cell;
-		ISMParams.CollisionEnabled = ECollisionEnabled::QueryOnly;
-		ISMParams.bDisallowNanite = true;
-		ISMParams.bCastShadow = false;
-		
-		PoolManager->BatchAddInstances(FarmlandConfig->OutlineMesh, OutlineTransforms, 16, ISMParams, AllCustomData);
+		FISMComponentParams CellISMParams;
+		CellISMParams.AttachParent = this;
+		CellISMParams.CollisionObjectType = ECC_Cell;
+		CellISMParams.CollisionEnabled = ECollisionEnabled::QueryOnly;
+		CellISMParams.bDisallowNanite = true;
+		CellISMParams.bCastShadow = false;
+
+		// 单元格
+		PoolManager->BatchAddInstances(FarmlandConfig->OutlineMesh, OutlineTransforms, 16, CellISMParams, AllCellCustomData);
+	}
+
+	if (PlotTransforms.Num() > 0)
+	{
+		FISMComponentParams PlotISMParams;
+		PlotISMParams.AttachParent = this;
+		// 地块
+		PoolManager->BatchAddInstances(FarmlandConfig->LandCellMesh, PlotTransforms, FarmlandConfig->NumCustomDataFloats, PlotISMParams, AllPlotCustomData);
 	}
 }
 
@@ -261,40 +289,57 @@ void UCellManagerComponent::HandleLeftMouseClicked(const EEditMode EditMode, con
 {
 	switch (EditMode)
 	{
-	case Reset:
+	case EEditMode::None:
+		break;
+	case EEditMode::Reset:
 		ResetLand(Coords);
 		break;
-	case Plow:
+	case EEditMode::Plow:
 		PlowLand(Coords);
 		break;
-	case UnPlow:
+	case EEditMode::UnPlow:
 		RemoveLand(Coords);
 		break;
-	case Wet:
+	case EEditMode::Wet:
 		WetLand(Coords);
 		break;
-	case UnWet:
+	case EEditMode::UnWet:
 		LandDried(Coords);
 		break;
-	case Fertilize:
+	case EEditMode::Fertilize:
 		FertilizeLand(Coords);
 		break;
-	case UnFertilize:
+	case EEditMode::UnFertilize:
 		ClearFertilize(Coords);
 		break;
-	case Weed:
+	case EEditMode::Weed:
 		GenerateWeeds(Coords);
 		break;
-	case UnWeed:
+	case EEditMode::UnWeed:
 		ClearWeeds(Coords);
 		break;
-	case Pest:
+	case EEditMode::Pest:
 		GeneratePest(Coords);
 		break;
-	case UnPest:
+	case EEditMode::UnPest:
 		ClearPest(Coords);
 		break;
-	default:
+	case EEditMode::PlantCrop:
+		PlantCrop(Coords, BasePlayerController->GetSelectedCropName());
+		break;
+	case EEditMode::HarvestCrop:
+		HarvestCrop(Coords);
+		break;
+	case EEditMode::CropDried:
+		CropDried(Coords);
+		break;
+	case EEditMode::UnCropDried:
+		RemoveCropDried(Coords);
+		break;
+	case EEditMode::RemoveCrop:
+		RemoveCrop(Coords);
+		break;
+	case EEditMode::Count:
 		break;
 	}
 }
@@ -378,77 +423,282 @@ bool UCellManagerComponent::GetCellEntity(const FIntPoint Coords, FMassEntityHan
 
 void UCellManagerComponent::ResetLand(FIntPoint Coords)
 {
+	ClearWeeds(Coords);
+	ClearPest(Coords);
+	RemoveLand(Coords);
 }
 
 void UCellManagerComponent::PlowLand(FIntPoint Coords)
 {
 	FMassEntityHandle Entity;
 	if (!GetCellEntity(Coords, Entity)) return;
-	FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
-	const FMassArchetypeHandle Archetype = EntityManager.GetArchetypeForEntity(Entity);
-	if (!Archetype.IsValid()) return;
-	const FMassArchetypeCompositionDescriptor& Composition = EntityManager.GetArchetypeComposition(Archetype);
-	if (Composition.Tags.Contains(*FCropPlotTag::StaticStruct())) return;
 
-	// 添加 CropPlotTag
-	EntityManager.AddTagToEntity(Entity, FCropPlotTag::StaticStruct());
-	EntityManager.AddFragmentToEntity(
-			Entity, FPlotStateFragment::StaticStruct(),
-			[](void* Fragment, const UScriptStruct&)
-			{
-				static_cast<FPlotStateFragment*>(Fragment)->StateData.AddState(EPlotState::Plowed);
-			});
-	// 更新 CellType
-	EntityManager.GetFragmentDataChecked<FCellStaticFragment>(Entity).CellType = ECellType::Crop;
+	const FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+	if (EntityManager.GetFragmentDataPtr<FPlotStateFragment>(Entity)) return;
+	
+	EntityManager.Defer().AddFragment<FPlotStateFragment>(Entity);
+	
+	EntityManager.Defer().PushCommand<FMassDeferredSetCommand>(
+	   [Entity](const FMassEntityManager& EM)
+	   {
+		   if (!EM.IsEntityActive(Entity)) return;
+
+		   FPlotStateFragment& State = EM.GetFragmentDataChecked<FPlotStateFragment>(Entity);
+		   if (!State.StateData.HasState(EPlotState::Plowed))
+		   {
+			   State.StateData.AddState(EPlotState::Plowed);
+			   EM.GetFragmentDataChecked<FCellStaticFragment>(Entity).CellType = ECellType::Crop;
+		   }
+	   }
+   );
 }
 
 void UCellManagerComponent::RemoveLand(FIntPoint Coords)
 {
 	FMassEntityHandle Entity;
 	if (!GetCellEntity(Coords, Entity)) return;
-	FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+	
+	const FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+	
+	FPlotStateFragment* PlotStateFragment = EntityManager.GetFragmentDataPtr<FPlotStateFragment>(Entity);
+	if (PlotStateFragment == nullptr) return;
+	
 	const FMassArchetypeHandle Archetype = EntityManager.GetArchetypeForEntity(Entity);
 	if (!Archetype.IsValid()) return;
 	const FMassArchetypeCompositionDescriptor& Composition = EntityManager.GetArchetypeComposition(Archetype);
-	if (!Composition.Tags.Contains(*FCropPlotTag::StaticStruct())) return;
 
 	// 如果有作物则不允许移除耕地
 	if (Composition.Tags.Contains(*FCropTag::StaticStruct())) return;
+
+	if (!PlotStateFragment->StateData.HasState(EPlotState::Plowed)) return;
 	
-	EntityManager.RemoveTagFromEntity(Entity, FCropPlotTag::StaticStruct());
-	EntityManager.RemoveFragmentFromEntity(Entity, FPlotStateFragment::StaticStruct());
+	PlotStateFragment->StateData.RemoveState(EPlotState::Plowed);
+
+	// 恢复单元格类型为空地
 	EntityManager.GetFragmentDataChecked<FCellStaticFragment>(Entity).CellType = ECellType::Empty;
 }
 
 void UCellManagerComponent::WetLand(FIntPoint Coords)
 {
+	FMassEntityHandle Entity;
+	if (!GetCellEntity(Coords, Entity)) return;
+
+	const FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+
+	FPlotStateFragment* PlotStateFragment = EntityManager.GetFragmentDataPtr<FPlotStateFragment>(Entity);
+	if (PlotStateFragment == nullptr) return;
+	
+	if (!PlotStateFragment->StateData.HasState(EPlotState::Plowed)) return;
+
+	PlotStateFragment->MoisturePercentage = FMath::Clamp(PlotStateFragment->MoisturePercentage + FarmlandConfig->IncreasedMoistureWithEachIrrigation, 0.0f, 1.0f);
+	PlotStateFragment->StateData.AddState(EPlotState::Watered);
 }
 
 void UCellManagerComponent::LandDried(FIntPoint Coords)
 {
+	FMassEntityHandle Entity;
+	if (!GetCellEntity(Coords, Entity)) return;
+
+	const FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+	
+	FPlotStateFragment* PlotStateFragment = EntityManager.GetFragmentDataPtr<FPlotStateFragment>(Entity);
+	if (PlotStateFragment == nullptr) return;
+
+	if (!PlotStateFragment->StateData.HasState(EPlotState::Plowed)) return;
+
+	PlotStateFragment->StateData.RemoveState(EPlotState::Watered);
 }
 
 void UCellManagerComponent::FertilizeLand(FIntPoint Coords)
 {
+	FMassEntityHandle Entity;
+	if (!GetCellEntity(Coords, Entity)) return;
+
+	const FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+	
+	FPlotStateFragment* PlotStateFragment = EntityManager.GetFragmentDataPtr<FPlotStateFragment>(Entity);
+	if (PlotStateFragment == nullptr) return;
+	
+	if (!PlotStateFragment->StateData.HasState(EPlotState::Plowed)) return;
+
+	PlotStateFragment->FertilityPercentage = FMath::Clamp(PlotStateFragment->FertilityPercentage + FarmlandConfig->IncreasedFertilityWithEachFertilization, 0.0f, 1.0f);
+	PlotStateFragment->StateData.AddState(EPlotState::Fertilized);
 }
 
 void UCellManagerComponent::ClearFertilize(FIntPoint Coords)
 {
+	FMassEntityHandle Entity;
+	if (!GetCellEntity(Coords, Entity)) return;
+
+	const FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+	
+	FPlotStateFragment* PlotStateFragment = EntityManager.GetFragmentDataPtr<FPlotStateFragment>(Entity);
+	if (PlotStateFragment == nullptr) return;
+	
+	if (!PlotStateFragment->StateData.HasState(EPlotState::Plowed)) return;
+
+	PlotStateFragment->StateData.RemoveState(EPlotState::Fertilized);
 }
 
 void UCellManagerComponent::GenerateWeeds(FIntPoint Coords)
 {
+	FMassEntityHandle Entity;
+	if (!GetCellEntity(Coords, Entity)) return;
+
+	const FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+
+	FPlotStateFragment* PlotStateFragment = EntityManager.GetFragmentDataPtr<FPlotStateFragment>(Entity);
+	if (PlotStateFragment == nullptr) return;
+
+	if (!PlotStateFragment->StateData.HasState(EPlotState::Plowed)) return;
+
+	if (PlotStateFragment->StateData.HasState(EPlotState::WeedInfested)) return;
+
+	PlotStateFragment->StateData.AddState(EPlotState::WeedInfested);
 }
 
 void UCellManagerComponent::ClearWeeds(FIntPoint Coords)
 {
+	FMassEntityHandle Entity;
+	if (!GetCellEntity(Coords, Entity)) return;
+
+	const FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+
+	FPlotStateFragment* PlotStateFragment = EntityManager.GetFragmentDataPtr<FPlotStateFragment>(Entity);
+	if (PlotStateFragment == nullptr) return;
+	
+	if (!PlotStateFragment->StateData.HasState(EPlotState::Plowed)) return;
+
+	PlotStateFragment->StateData.RemoveState(EPlotState::WeedInfested);
 }
 
 void UCellManagerComponent::GeneratePest(FIntPoint Coords)
 {
+	FMassEntityHandle Entity;
+	if (!GetCellEntity(Coords, Entity)) return;
+
+	const FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+
+	FPlotStateFragment* PlotStateFragment = EntityManager.GetFragmentDataPtr<FPlotStateFragment>(Entity);
+	if (PlotStateFragment == nullptr) return;
+
+	if (!PlotStateFragment->StateData.HasState(EPlotState::Plowed)) return;
+
+	if (PlotStateFragment->StateData.HasState(EPlotState::PestInfested)) return;
+
+	PlotStateFragment->StateData.AddState(EPlotState::PestInfested);
 }
 
 void UCellManagerComponent::ClearPest(FIntPoint Coords)
+{
+	FMassEntityHandle Entity;
+	if (!GetCellEntity(Coords, Entity)) return;
+
+	const FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+	
+	FPlotStateFragment* PlotStateFragment = EntityManager.GetFragmentDataPtr<FPlotStateFragment>(Entity);
+	if (PlotStateFragment == nullptr) return;
+	
+	if (!PlotStateFragment->StateData.HasState(EPlotState::Plowed)) return;
+
+	PlotStateFragment->StateData.RemoveState(EPlotState::PestInfested);
+}
+
+void UCellManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
+{
+	if (!OwnerActor.IsValid()) return;
+    FMassEntityHandle Entity;
+    if (!GetCellEntity(Coords, Entity)) return;
+
+    FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+
+    // 检查地块是否可种植：必须有 FPlotStateFragment 且已耕地，且没有作物
+    FPlotStateFragment* PlotState = EntityManager.GetFragmentDataPtr<FPlotStateFragment>(Entity);
+    if (!PlotState || !PlotState->StateData.HasState(EPlotState::Plowed)) return;
+
+    // 检查是否已有作物
+    if (EntityManager.GetFragmentDataPtr<FCropStateFragment>(Entity)) return;
+
+    // 从数据表读取作物配置
+    FName CropID = FName(CropName);
+    const FCropTableRow* Row = CropDataTable->FindRow<FCropTableRow>(CropID, TEXT("PlantCrop"));
+    if (!Row) return;
+
+	// 处理星球能量消耗
+	IPlanetInterface* PlanetInterface = Cast<IPlanetInterface>(OwnerActor.Get());
+	auto& [PlanetPower] = PlanetInterface->GetPlanetInfoRef();
+	if (PlanetPower < Row->SeedPrice) return;
+	PlanetPower -= Row->SeedPrice;
+	IPlanetInterface::Execute_CallPlanetInfoChanged(OwnerActor.Get());
+	
+    // 通过命令缓冲添加作物 Tag 和全部 Fragment
+    EntityManager.Defer().AddFragment<FCropIdentifierFragment>(Entity);
+    EntityManager.Defer().AddFragment<FCropStateFragment>(Entity);
+    EntityManager.Defer().AddFragment<FCropGrowthTimerFragment>(Entity);
+    EntityManager.Defer().AddFragment<FCropQualityFragment>(Entity);
+
+    // 初始化所有作物数据
+    EntityManager.Defer().PushCommand<FMassDeferredSetCommand>(
+        [Entity, CropID, Row, PlotState](FMassEntityManager& EM)
+        {
+            if (!EM.IsEntityActive(Entity)) return;
+
+            // 标识数据
+            FCropIdentifierFragment& Id = EM.GetFragmentDataChecked<FCropIdentifierFragment>(Entity);
+            Id.CropID = CropID;
+            Id.VariantsIndex = FMath::RandRange(0, Row->MeshVariants.Num() - 1);
+
+            // 生长阶段与状态
+            FCropStateFragment& CropState = EM.GetFragmentDataChecked<FCropStateFragment>(Entity);
+            CropState.CropGrowthStage = ECropGrowthStage::Seed;
+            CropState.CropStateData.Reset();
+            CropState.CropStateData.AddState(ECropState::NeedsWater);
+            CropState.CropStateData.AddState(ECropState::NeedsFertilizer);
+
+            // 根据地块初始状态调整作物状态
+        	
+        	// 捕获地块初始状态（在命令执行时读取，确保正确）
+			const bool bInitiallyWatered = PlotState->StateData.HasState(EPlotState::Watered);
+			const bool bInitiallyFertilized = PlotState->StateData.HasState(EPlotState::Fertilized);
+			const bool bHasWeeds = PlotState->StateData.HasState(EPlotState::WeedInfested);
+			const bool bHasPests = PlotState->StateData.HasState(EPlotState::PestInfested);
+            if (bInitiallyWatered)
+                CropState.CropStateData.RemoveState(ECropState::NeedsWater);
+            if (bInitiallyFertilized)
+                CropState.CropStateData.RemoveState(ECropState::NeedsFertilizer);
+            if (bHasWeeds)
+                CropState.CropStateData.AddState(ECropState::WeedInfested);
+            if (bHasPests)
+                CropState.CropStateData.AddState(ECropState::PestInfested);
+
+            // 生长计时
+        	// 计算随机初始生长时间
+        	const float InitialGrowthTime = FMath::RandRange(0.f, Row->GrowthSeedTime + Row->GrowthSeedlingTime);
+
+            FCropGrowthTimerFragment& Timer = EM.GetFragmentDataChecked<FCropGrowthTimerFragment>(Entity);
+            Timer.TotalGrowthTime = InitialGrowthTime;
+            Timer.CurrentStageGrowthTime = InitialGrowthTime;
+
+            // 品质数据
+            FCropQualityFragment& Quality = EM.GetFragmentDataChecked<FCropQualityFragment>(Entity);
+            Quality.QualityData.Reset();
+        });
+}
+
+bool UCellManagerComponent::HarvestCrop(FIntPoint Coords)
+{
+	return false;
+}
+
+void UCellManagerComponent::RemoveCrop(FIntPoint Coords)
+{
+}
+
+void UCellManagerComponent::CropDried(FIntPoint Coords)
+{
+}
+
+void UCellManagerComponent::RemoveCropDried(FIntPoint Coords)
 {
 }
 
@@ -513,8 +763,8 @@ void UCellManagerComponent::UpdateOutlineColor(FIntPoint Coords)
 	case RemoveCrop:
 		OutlineColor = FLinearColor::Red;
 		break;
-	case Count:
-		break;
+	default:
+		OutlineColor = FLinearColor::White;
 	}
 
 	const int32 InstanceIndex = Coords.X * PlanetConfig->NumLon + Coords.Y;

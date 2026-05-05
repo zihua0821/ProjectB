@@ -91,6 +91,21 @@ private:
 	// 清除虫害
 	void ClearPest(FIntPoint Coords);
 
+	// 种植作物
+	void PlantCrop(FIntPoint Coords, const FString& CropName);
+
+	// 收获作物
+	bool HarvestCrop(FIntPoint Coords);
+
+	// 移除作物
+	void RemoveCrop(FIntPoint Coords);
+
+	// 作物干掉
+	void CropDried(FIntPoint Coords);
+
+	// 移除作物干掉
+	void RemoveCropDried(FIntPoint Coords);
+
 	void UpdateOutlineColor(FIntPoint Coords);
 	
 	UFUNCTION()
@@ -120,4 +135,8 @@ private:
 	// 玩家控制器
 	UPROPERTY()
 	TObjectPtr<ABasePlayerController>  BasePlayerController;
+
+	// 父级Actor
+	UPROPERTY()
+	TWeakObjectPtr<AActor> OwnerActor;
 };

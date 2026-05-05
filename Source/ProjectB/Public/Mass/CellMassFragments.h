@@ -32,16 +32,6 @@ struct FCellStaticFragment : public FMassFragment
 // ========== 农场地块 Fragment & Tag ==========
 
 /**
- * 标记实体是“农场地块”
- * 有此标签的实体才会有 FPlotStateFragment 及作物 Fragment
- */
-USTRUCT(BlueprintType)
-struct FCropPlotTag : public FMassTag
-{
-	GENERATED_BODY()
-};
-
-/**
  * 农场地块动态状态（湿度、肥力、状态位）
  * 仅当 FCropPlotTag 存在时有效
  */
@@ -53,6 +43,9 @@ struct FPlotStateFragment : public FMassFragment
 	/** 耕地、浇水、施肥、杂草、虫害等状态位 */
 	UPROPERTY()
 	FPlotStateData StateData;
+
+	UPROPERTY()
+	FPlotStateData PreStateData;
 
 	/** 水分百分比 [0,1] */
 	UPROPERTY()
