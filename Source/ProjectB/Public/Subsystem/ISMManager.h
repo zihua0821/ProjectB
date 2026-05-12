@@ -4,6 +4,9 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "ISMManager.generated.h"
 
+// 定义每个桶的实例容量
+#define INSTANCES_PER_BUCKET 256
+
 /**
  * 用于唯一标识一种 ISM 组件配置的键。
  * 
@@ -42,6 +45,61 @@ FORCEINLINE uint32 GetTypeHash(const FISMMeshKey& Key)
 }
 
 /**
+ * 全局唯一的 ISM 实例句柄
+ * 由桶编号和桶内实例 ID 组成
+ */
+USTRUCT(BlueprintType)
+struct FGlobalInstanceId
+{
+	GENERATED_BODY()
+
+	/** 桶在 FISMBucketGroup::Buckets 中的索引 */
+	UPROPERTY()
+	int32 BucketIndex = INDEX_NONE;
+
+	/** 桶内实例 ID（局部唯一） */
+	FPrimitiveInstanceId LocalId;
+
+	FGlobalInstanceId() = default;
+	FGlobalInstanceId(const int32 InBucketIndex, const FPrimitiveInstanceId InId)
+		: BucketIndex(InBucketIndex), LocalId(InId) {}
+
+	bool IsValid() const { return BucketIndex != INDEX_NONE && LocalId.IsValid(); }
+
+	bool operator==(const FGlobalInstanceId& Other) const
+	{
+		return BucketIndex == Other.BucketIndex && LocalId == Other.LocalId;
+	}
+};
+
+FORCEINLINE uint32 GetTypeHash(const FGlobalInstanceId& Key)
+{
+	return HashCombine(GetTypeHash(Key.BucketIndex), GetTypeHash(Key.LocalId.Id));
+}
+
+/**
+ * 用于管理一个Mesh下的所有ISM桶
+ */
+USTRUCT(BlueprintType)
+struct FISMBucketGroup
+{
+	GENERATED_BODY()
+	
+	/** 存储 ISM 组件的桶数组 */
+	UPROPERTY()
+	TArray<TObjectPtr<UInstancedStaticMeshComponent>> Buckets;
+
+	/** 总实例数量 */
+	int32 TotalInstanceCount = 0;
+
+	/** 记录自定义数据数量，所有桶共享 */
+	int32 NumCustomDataFloats = 0;
+
+	/** 禁用分桶，即使实例数超过桶容量也强制使用单一 ISM 组件 */
+	bool bDisableBuckets = false;
+};
+
+/**
  * ISM 组件参数结构体。
  */
 USTRUCT(BlueprintType)
@@ -76,6 +134,10 @@ struct FISMComponentParams
 
 	/** 最大绘制距离（0 表示不设置） */
 	float MaxDrawDistance = 0.f;
+
+	/** 用于作物等需要大量批量替换实例的 Mesh，强制不分桶 */
+	UPROPERTY()
+	bool bDisableBuckets = false;
 };
 
 /**
@@ -110,12 +172,17 @@ public:
 
     /**
      * 更新实例的单个自定义数据值。
-     * @param Mesh            静态网格体指针
-     * @param InstanceIndex   实例索引（从 0 开始）
+     * @param Mesh                静态网格体指针
+     * @param InstanceId      实例id
      * @param CustomDataIndex 自定义数据索引（从 0 开始，需小于 NumCustomDataFloats）
      * @param Value           新的浮点值
      */
-    void UpdateInstanceCustomData(UStaticMesh* Mesh, int32 InstanceIndex, int32 CustomDataIndex, float Value) const;
+    void UpdateInstanceCustomData(
+		UStaticMesh* Mesh,
+    	FGlobalInstanceId InstanceId,
+    	int32 CustomDataIndex,
+    	float Value
+    	);
 	
     /**
      * 批量添加实例，返回稳定 ID
@@ -124,9 +191,9 @@ public:
      * @param NumCustomDataFloats 每个实例的自定义数据浮点数量
      * @param ISMParams           ISM 组件参数（仅在 ISM 组件不存在时用于创建）
      * @param CustomData          扁平自定义数据数组，长度 = Transforms.Num() * NumCustomDataFloats
-     * @return                    新创建实例的稳定 ID 数组
+     * @return                    新创建实例的 ID 数组
      */
-    TArray<FPrimitiveInstanceId> BatchAddInstances(
+    TArray<FGlobalInstanceId> BatchAddInstances(
         UStaticMesh* Mesh,
         const TArray<FTransform>& Transforms,
         const int32 NumCustomDataFloats,
@@ -136,25 +203,13 @@ public:
 
     /**
      * 批量移除实例
-     * @param Mesh        静态网格体指针
+     * @param Mesh                静态网格体指针
      * @param InstanceIds 要移除的实例 ID 数组
      */
     void BatchRemoveInstances(
-        UStaticMesh* Mesh,
-        const TArray<FPrimitiveInstanceId>& InstanceIds
-    ) const;
-
-    /**
-     * 批量更新实例变换
-     * @param Mesh        静态网格体指针
-     * @param InstanceIds 要更新的实例 ID 数组
-     * @param Transforms  新的变换数组（与 InstanceIds 一一对应）
-     */
-    void BatchUpdateInstanceTransforms(
-        UStaticMesh* Mesh,
-        const TArray<FPrimitiveInstanceId>& InstanceIds,
-        const TArray<FTransform>& Transforms
-    ) const;
+		UStaticMesh* Mesh,
+        const TArray<FGlobalInstanceId>& InstanceIds
+    );
 
     /**
      * 批量设置实例自定义数据
@@ -164,26 +219,15 @@ public:
      */
     void BatchSetInstanceCustomData(
         UStaticMesh* Mesh,
-        const TArray<FPrimitiveInstanceId>& InstanceIds,
+        const TArray<FGlobalInstanceId>& InstanceIds,
         const TArray<float>& CustomData
     ) const;
 
-    /**
-     * ISM 组件射线检测
-     * @param Mesh   静态网格体指针
-     * @param OutHit 射线命中结果
-     * @param Start  射线起点
-     * @param End    射线终点
-     * @param Params 碰撞参数
-     * @return       是否命中
-     */
-    bool LineTraceISMInstances(
-        UStaticMesh* Mesh,
-        FHitResult& OutHit,
-        const FVector& Start,
-        const FVector& End,
-        const FCollisionQueryParams& Params
-    ) const;
+	/** 刷新所有被标记为脏的 ISM 桶的渲染状态 */
+	void FlushDirtyBuckets();
+
+	UFUNCTION(BlueprintCallable)
+	void DebugPrintBucketStats();
 
 private:
     /**
@@ -195,7 +239,14 @@ private:
      */
     static UInstancedStaticMeshComponent* CreateISMComponent(UStaticMesh* Mesh, int32 NumCustomDataFloats, const FISMComponentParams& Params);
 
+	UInstancedStaticMeshComponent* GetOrCreateBucket(UStaticMesh* Mesh, int32 BucketIndex, int32 NumCustomDataFloats,
+												 const FISMComponentParams& Params);
+
     /** Mesh -> ISM 组件映射，使用软引用路径作为键 */
     UPROPERTY()
-    TMap<FISMMeshKey, TObjectPtr<UInstancedStaticMeshComponent>> MeshToISM;
+	TMap<FISMMeshKey, FISMBucketGroup> MeshToBucketGroups;
+
+	/** 用于收集需要刷新渲染状态的桶 */
+	UPROPERTY()
+	TSet<TObjectPtr<UInstancedStaticMeshComponent>> DirtyBuckets;
 };

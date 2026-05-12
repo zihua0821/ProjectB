@@ -8,6 +8,7 @@
 #include "Tools/FarmSaveGame.h"
 #include "CellManagerComponent.generated.h"
 
+class UMassEntityConfigAsset;
 class ABasePlayerController;
 class UPlanetConfigDataAsset;
 class UFarmlandConfigDataAsset;
@@ -45,12 +46,16 @@ public:
 
 	// 编辑模式与轮廓
 	void UpdateOutline(FIntPoint Coords, bool bEnable);
-
-	/** 通过射线检测获取单元格坐标 */
-	bool GetCellCoordsByRaycast(const FVector& RayStart, const FVector& RayEnd, FIntPoint& OutCellCoords, float& OutHitDistance) const;
+	
+	bool GetCellCoordsFromScreenMouse(FIntPoint& OutCellCoords, float& OutWorldDistance) const;
 
 	bool GetCellEntity(FIntPoint Coords, FMassEntityHandle& OutEntity);
 
+	UFUNCTION(BlueprintCallable)
+	TArray<FIntPoint> GetAllCoords();
+
+	UFUNCTION(BlueprintCallable)
+	void Test();
 protected:
 	virtual void BeginPlay() override;
 
@@ -106,12 +111,12 @@ private:
 	// 移除作物干掉
 	void RemoveCropDried(FIntPoint Coords);
 
-	void UpdateOutlineColor(FIntPoint Coords);
+	FLinearColor GetOutlineColorForEditMode() const;
 	
 	UFUNCTION()
 	void OnEditModeChanged(EEditMode NewEditMode);
 	
-	void PrecreateCropISMComponents();
+	void PrecreateISMComponents();
 
 	// ---- 配置 ----
 	UPROPERTY()
@@ -136,4 +141,11 @@ private:
 	// 父级Actor
 	UPROPERTY()
 	TWeakObjectPtr<AActor> OwnerActor;
+
+	FTimerHandle MatureQueueProcessTimer;
+	void ProcessMatureQueue();
+	void OnAutoHarvest(FIntPoint Coords);
+	void OnRemoveCrop(FIntPoint Coords);
+	void OnRePlantCrop(FIntPoint Coords);
+
 };

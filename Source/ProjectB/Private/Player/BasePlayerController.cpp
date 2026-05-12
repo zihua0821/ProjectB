@@ -44,7 +44,9 @@ void ABasePlayerController::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
+	// double StartTime = FPlatformTime::Seconds();
 	UpdateHoveredPlot();
+	// UE_LOG(LogTemp, Warning, TEXT("UpdateHoveredPlot took: %.3f ms"), (FPlatformTime::Seconds() - StartTime) * 1000.0);
 }
 
 void ABasePlayerController::OnLeftMouseClick()
@@ -89,10 +91,10 @@ bool ABasePlayerController::TraceForFarmlandAndCell(FVector& OutHitLocation, APl
         	// 指定只检测 WorldDynamic 类型
         	FCollisionObjectQueryParams ObjectQueryParams;
         	ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
-
+ 
         	// 设置参数
         	FCollisionQueryParams QueryParams;
-        	QueryParams.bTraceComplex = true;
+        	QueryParams.bTraceComplex = false;
         	QueryParams.bReturnPhysicalMaterial = false;
         	// 忽略玩家自身
         	if (GetPawn())
@@ -119,15 +121,14 @@ bool ABasePlayerController::TraceForFarmlandAndCell(FVector& OutHitLocation, APl
                     // 如果找到了FarmlandActor，计算单元格坐标
                     if (OutPlanetActor)
                     {
-	                    if (const UCellManagerComponent* CellManagerComponent = OutPlanetActor->GetCellManagerComponent())
-	                    {
-	                    	float HitDistance;
-                        
-	                    	if (CellManagerComponent->GetCellCoordsByRaycast(TraceStart, HitResult.Location, OutCellCoords, HitDistance))
-	                    	{
-	                    		return true;
-	                    	}
-	                    }
+                    	if (const UCellManagerComponent* CellManagerComponent = OutPlanetActor->GetCellManagerComponent())
+                    	{
+                    		float HitDistance;
+                    		if (CellManagerComponent->GetCellCoordsFromScreenMouse(OutCellCoords, HitDistance))
+                    		{
+                    			return true;
+                    		}
+                    	}
                     }
                 }
             }

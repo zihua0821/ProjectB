@@ -34,6 +34,7 @@ public:
 	/** 获取ISM挂载父组件 */
 	USceneComponent* GetISMAttachParent() const { return ISMAttachParent; }
 
+	TQueue<FIntPoint, EQueueMode::Mpsc> MatureCropQueue;
 private:
 	UPROPERTY()
 	TObjectPtr<UFarmlandConfigDataAsset> FarmlandConfig;

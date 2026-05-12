@@ -40,7 +40,7 @@ void UCropGrowthProcessor::Execute(FMassEntityManager& EntityManager, FMassExecu
     EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& InContext)
     {
         const int32 Num = InContext.GetNumEntities();
-        const TConstArrayView<FCellStaticFragment>& StaticList = InContext.GetFragmentView<FCellStaticFragment>();
+        const TConstArrayView<FCellStaticFragment>& CellStaticList = InContext.GetFragmentView<FCellStaticFragment>();
         const TArrayView<FPlotStateFragment> PlotStateList = InContext.GetMutableFragmentView<FPlotStateFragment>();
         const TConstArrayView<FCropStaticConfigFragment>& CropStaticConfigList = InContext.GetFragmentView<FCropStaticConfigFragment>();
         const TArrayView<FCropStateFragment> CropStateList = InContext.GetMutableFragmentView<FCropStateFragment>();
@@ -49,12 +49,22 @@ void UCropGrowthProcessor::Execute(FMassEntityManager& EntityManager, FMassExecu
 
         for (int32 i = 0; i < Num; ++i)
         {
+            const FCellStaticFragment& CellStatic = CellStaticList[i];
             FPlotStateFragment& PlotState = PlotStateList[i];
             FCropStateFragment& CropState = CropStateList[i];
             FCropGrowthTimerFragment& Timer = TimerList[i];
             FCropQualityFragment& Quality = QualityList[i];
             const FCropStaticConfigFragment& CropStaticConfig = CropStaticConfigList[i];
 
+            if (CropState.CropGrowthStage == ECropGrowthStage::None)
+            {
+                const FMassEntityHandle Entity = InContext.GetEntity(i);
+                InContext.Defer().RemoveFragment<FCropStaticConfigFragment>(Entity);
+                InContext.Defer().RemoveFragment<FCropStateFragment>(Entity);
+                InContext.Defer().RemoveFragment<FCropGrowthTimerFragment>(Entity);
+                InContext.Defer().RemoveFragment<FCropQualityFragment>(Entity);
+                continue;
+            }
             // 1. 已收获不再处理
             if (CropState.CropGrowthStage == ECropGrowthStage::Harvested)
                 continue;
@@ -131,11 +141,24 @@ void UCropGrowthProcessor::Execute(FMassEntityManager& EntityManager, FMassExecu
                     CropState.CropGrowthStage = ECropGrowthStage::Mature;
                     CropState.CropStateData.AddState(ECropState::ReadyForHarvest);
                     Quality.QualityData.GetQuality(Timer.TotalGrowthTime);
+
+                    // 推迟到游戏线程执行，通知管理器
+                    Context.Defer().PushCommand<FMassDeferredSetCommand>(
+                        [Coords = CellStatic.Coords, CellStatic](FMassEntityManager& EM)
+                        {
+                            if (const UWorld* World = EM.GetWorld())
+                            {
+                                if (UGlobalConfigSubsystem* Config = World->GetSubsystem<UGlobalConfigSubsystem>())
+                                {
+                                    Config->MatureCropQueue.Enqueue(CellStatic.Coords);
+                                }
+                            }
+                        });
                 }
 
                 // 9. 消耗地块资源
-                PlotState.MoisturePercentage = FMath::Clamp(PlotState.MoisturePercentage - CropStaticConfig.MoistureConsumePerSecond * DeltaTime, 0.0f, 1.0f);
-                PlotState.FertilityPercentage = FMath::Clamp(PlotState.FertilityPercentage - CropStaticConfig.FertilityConsumePerSecond * DeltaTime, 0.0f, 1.0f);
+                // PlotState.MoisturePercentage = FMath::Clamp(PlotState.MoisturePercentage - CropStaticConfig.MoistureConsumePerSecond * DeltaTime, 0.0f, 1.0f);
+                // PlotState.FertilityPercentage = FMath::Clamp(PlotState.FertilityPercentage - CropStaticConfig.FertilityConsumePerSecond * DeltaTime, 0.0f, 1.0f);
 
                 // 注意：如果水分或肥力过低，应触发移除 Watered/Fertilized 状态？暂由自然流失处理器统一处理
             }

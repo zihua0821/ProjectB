@@ -1,7 +1,9 @@
 ﻿#include "Farm/CellManagerComponent.h"
 #include "MassCommandBuffer.h"
+#include "MassEntityConfigAsset.h"
 #include "MassEntityManager.h"
 #include "MassEntitySubsystem.h"
+#include "MassRepresentationSubsystem.h"
 #include "Mass/CellMassFragments.h"
 #include "Farm/FarmlandConfigDataAsset.h"
 #include "Planet/PlanetConfigDataAsset.h"
@@ -12,6 +14,7 @@
 #include "ProjectB/ProjectB.h"
 #include "Subsystem/GlobalConfigSubsystem.h"
 #include "Subsystem/ISMManager.h"
+#include "MassRepresentation/Public/MassRepresentationFragments.h"
 
 UCellManagerComponent::UCellManagerComponent()
 {
@@ -28,6 +31,89 @@ void UCellManagerComponent::BeginPlay()
 	if (BasePlayerController)
 	{
 		BasePlayerController->OnEditModeChanged.AddDynamic(this, &ThisClass::OnEditModeChanged);
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		// 每 0.5 秒检查一次队列，避免高频轮询
+		World->GetTimerManager().SetTimer(MatureQueueProcessTimer,
+			this,
+			&UCellManagerComponent::ProcessMatureQueue,
+			0.5f, true);
+	}
+}
+
+void UCellManagerComponent::ProcessMatureQueue()
+{
+	UGlobalConfigSubsystem* ConfigSub = GetWorld()->GetSubsystem<UGlobalConfigSubsystem>();
+	if (!ConfigSub) return;
+
+	FIntPoint Coords;
+	// 队列是 MPSC 安全的，游戏线程消费无问题
+	while (ConfigSub->MatureCropQueue.Dequeue(Coords))
+	{
+		// 可选：检查地块是否仍然有效
+		FMassEntityHandle Entity;
+		if (!GetCellEntity(Coords, Entity)) continue;
+
+		// 随机延迟 5~10 秒后收获
+		FTimerHandle TimerHandle;
+		GetWorld()->GetTimerManager().SetTimer(
+			TimerHandle,
+			FTimerDelegate::CreateUObject(this, &UCellManagerComponent::OnAutoHarvest, Coords),
+			FMath::RandRange(1.0f, 5.0f),
+			false
+			);
+	}
+}
+
+void UCellManagerComponent::OnAutoHarvest(FIntPoint Coords)
+{
+	HarvestCrop(Coords); 
+
+	FTimerHandle TimerHandle;
+	GetWorld()->GetTimerManager().SetTimer(
+		TimerHandle,
+		FTimerDelegate::CreateUObject(this, &UCellManagerComponent::OnRemoveCrop, Coords),
+		FMath::RandRange(1.0f, 5.0f),
+		false
+		);
+	
+}
+
+void UCellManagerComponent::OnRemoveCrop(FIntPoint Coords)
+{
+	RemoveCrop(Coords);
+	
+	FTimerHandle TimerHandle;
+	GetWorld()->GetTimerManager().SetTimer(
+		TimerHandle,
+		FTimerDelegate::CreateUObject(this, &UCellManagerComponent::OnRePlantCrop, Coords),
+		FMath::RandRange(1.0f, 5.0f),
+		false
+		);
+}
+
+void UCellManagerComponent::OnRePlantCrop(FIntPoint Coords)
+{
+	FMassEntityHandle Entity;
+	if (!GetCellEntity(Coords, Entity)) return;
+
+	FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+	
+	FPlotStateFragment* PlotState = EntityManager.GetFragmentDataPtr<FPlotStateFragment>(Entity);
+	if (PlotState && PlotState->StateData.HasState(EPlotState::Plowed))
+	{
+		TArray<FName> CropNames;
+		for (auto& RowPair : CropDataTable->GetRowMap())
+		{
+			const FCropTableRow* Row = reinterpret_cast<FCropTableRow*>(RowPair.Value);
+			if (!Row) continue;
+			CropNames.Add(Row->CropID);
+		}
+		const FString RandomCrop = CropNames[FMath::RandRange(0, CropNames.Num() - 1)].ToString();
+		// const FString RandomCrop = FString("Corn");
+		PlantCrop(Coords, RandomCrop);
 	}
 }
 
@@ -53,7 +139,7 @@ void UCellManagerComponent::Initialize(UPlanetConfigDataAsset* InPlanetConfig, U
 
 	UE_LOG(LogTemp, Log, TEXT("CellManagerComponent initialized: %d cells"), CellEntities.Num());
 
-	PrecreateCropISMComponents();
+	PrecreateISMComponents();
 }
 
 void UCellManagerComponent::CreateMassCell()
@@ -63,12 +149,23 @@ void UCellManagerComponent::CreateMassCell()
 	const int32 NumLatCells = PlanetConfig->NumLat - 1;
 	const int32 NumLonCells = PlanetConfig->NumLon;
 	const int32 TotalCells = NumLatCells * NumLonCells;
+
+	UMassRepresentationSubsystem* RepresentationSubsystem = GetWorld()->GetSubsystem<UMassRepresentationSubsystem>();
+	
+	FStaticMeshInstanceVisualizationDesc CellVisualDesc;
+	// 配置网格体
+	CellVisualDesc.Meshes.AddZeroed(1);
+	CellVisualDesc.Meshes[0].Mesh = FarmlandConfig->LandCellMesh;
+
+	FStaticMeshInstanceVisualizationDescHandle VisualHandle = RepresentationSubsystem->FindOrAddStaticMeshDesc(CellVisualDesc);
 	
 	// 批量创建实体
 	TArray<const UScriptStruct*> FragmentTypes;
 	FragmentTypes.Add(FCellStaticFragment::StaticStruct());
-	// FragmentTypes.Add(FPlotStateFragment::StaticStruct());
-	// FragmentTypes.Add(FCropPlotTag::StaticStruct());
+	FragmentTypes.Add(FHighlightFragment::StaticStruct());
+	FragmentTypes.Add(FPlotRenderFragment::StaticStruct());
+	FragmentTypes.Add(FMassRepresentationFragment::StaticStruct());
+	
 	FMassArchetypeHandle ArchetypeHandle = EntityManager.CreateArchetype(FragmentTypes);
 	TArray<FMassEntityHandle> Entities;
 	EntityManager.BatchCreateEntities(
@@ -90,22 +187,13 @@ void UCellManagerComponent::CreateMassCell()
     // 自动计算经纬度步长
     const float LatStep = (PlanetConfig->MaxLat - PlanetConfig->MinLat) / (PlanetConfig->NumLat - 1);
     const float LonStep = 360.0f / PlanetConfig->NumLon;
-
-	// 转换为弧度
-	const float LatStepRad = FMath::DegreesToRadians(LatStep);
-	const float LonStepRad = FMath::DegreesToRadians(LonStep);
 	
-    
 	// 预分配容器
-	TArray<FTransform> OutlineTransforms;
 	TArray<FTransform> PlotTransforms;
-	TArray<float> AllCellCustomData;
 	TArray<float> AllPlotCustomData;
 	
 	CellEntities.SetNum(TotalCells);
-	OutlineTransforms.Reserve(TotalCells);
 	PlotTransforms.Reserve(TotalCells);
-	AllCellCustomData.Reserve(TotalCells * 16);
 	AllPlotCustomData.Reserve(TotalCells * FarmlandConfig->NumCustomDataFloats);
 	
     // 遍历经纬度网格生成地块
@@ -158,100 +246,13 @@ void UCellManagerComponent::CreateMassCell()
         	StaticFrag.Transform = CellTransform;
         	StaticFrag.CellType = ECellType::Empty;
 
-        	// FPlotStateFragment& PlotState = EntityManager.GetFragmentDataChecked<FPlotStateFragment>(Entity);
-        	// // 根据配置默认创建农场地块
-        	// if (FarmlandConfig->bInitAllLandCells)
-        	// {
-        	// 	PlotState.StateData.AddState(EPlotState::Plowed);
-        	// 	StaticFrag.CellType = ECellType::Crop;
-        	// }
+        	FMassRepresentationFragment& RepFragment = EntityManager.GetFragmentDataChecked<FMassRepresentationFragment>(Entity);
+        	RepFragment.StaticMeshDescHandle = VisualHandle;
+        	RepFragment.PrevLODSignificance = 0.0f;
 
         	const int32 FlatIndex = LatIdx * NumLonCells + LonIdx;
         	CellEntities[FlatIndex] = Entity;
         	
-        	// ==================== 计算地块四个顶点（用于 ISM 高亮） ====================
-        	// 当前地块的经纬度边界
-        	const float MinLat = PlanetConfig->MinLat + LatIdx * LatStep;
-        	const float MaxLat = MinLat + LatStep;
-        	const float MinLon = LonIdx * LonStep;
-        	const float MaxLon = MinLon + LonStep;
-
-        	// 四个角点的经纬度（单位：度）
-        	// 顺序：V1=左下 (南西), V2=右下 (南东), V3=左上 (北西), V4=右上 (北东)
-        	const float LatDegrees[4] = { MinLat, MinLat, MaxLat, MaxLat };
-        	const float LonDegrees[4] = { MinLon, MaxLon, MinLon, MaxLon };
-
-        	// 转换为球面坐标（四个顶点，相对于世界原点）
-        	FVector VertexPositions[4];
-        	for (int32 i = 0; i < 4; i++)
-        	{
-        		const float LatRad = FMath::DegreesToRadians(LatDegrees[i]);
-        		const float LonRad = FMath::DegreesToRadians(LonDegrees[i]);
-        		const float CosLat = FMath::Cos(LatRad);
-        		const float SinLat = FMath::Sin(LatRad);
-        		const float CosLon = FMath::Cos(LonRad);
-        		const float SinLon = FMath::Sin(LonRad);
-
-        		VertexPositions[i] = FVector(
-					PlanetConfig->Radius * CosLat * CosLon,
-					PlanetConfig->Radius * CosLat * SinLon,
-					PlanetConfig->Radius * SinLat
-				);
-        	}
-
-        	// 转换到组件局部空间
-        	FVector LocalVertexPositions[4];
-        	for (int32 i = 0; i < 4; i++)
-        	{
-        		LocalVertexPositions[i] = GetComponentTransform().InverseTransformPosition(VertexPositions[i]);
-        	}
-        	
-        	// 创建轮廓
-        	// 当前地块中心纬度（用于计算经度方向宽度）
-        	const float CurrentLatRad = FMath::DegreesToRadians(CurrentLatDeg);
-
-        	// 计算单元格实际尺寸（球面几何）
-        	const float CellHeight = PlanetConfig->Radius * LatStepRad;                    // 南北向
-        	const float CellWidth = PlanetConfig->Radius * FMath::Cos(CurrentLatRad) * LonStepRad;  // 东西向
-
-        	// 获取轮廓网格体自身尺寸
-        	FBoxSphereBounds OutlineBounds = FarmlandConfig->OutlineMesh->GetBounds();
-        	const FVector OutlineExtent = OutlineBounds.BoxExtent;
-
-        	// 计算轮廓缩放（匹配单元格实际大小）
-        	const float OutlineScaleX = CellWidth / (OutlineExtent.X * 2.f);
-        	const float OutlineScaleY = CellHeight / (OutlineExtent.Y * 2.f);
-        	const float OutlineScaleZ = 1.0f;
-
-        	// 创建轮廓实例（使用独立计算的缩放）
-        	FTransform OutlineInstanceTransform = CellTransform;
-        	OutlineInstanceTransform.AddToTranslation(FVector(0.f, 0.f, FarmlandConfig->OutlineOffsetZ));
-        	OutlineInstanceTransform.SetScale3D(FVector(OutlineScaleX, OutlineScaleY, OutlineScaleZ));
-
-        	// 收集数据
-        	OutlineTransforms.Add(OutlineInstanceTransform);
-
-        	TArray<float> CellCustomData =
-        	{
-        		0.f,										  // Opacity
-        		1.f,										  // R
-        		1.f,										  // G
-        		1.f,										  // B
-        		static_cast<float>(LocalVertexPositions[0].X),// X00
-        		static_cast<float>(LocalVertexPositions[0].Y),// Y00
-        		static_cast<float>(LocalVertexPositions[0].Z),// Z00
-        		static_cast<float>(LocalVertexPositions[1].X),// X01
-        		static_cast<float>(LocalVertexPositions[1].Y),// Y01
-        		static_cast<float>(LocalVertexPositions[1].Z),// Z01
-        		static_cast<float>(LocalVertexPositions[2].X),// X10
-        		static_cast<float>(LocalVertexPositions[2].Y),// Y10
-        		static_cast<float>(LocalVertexPositions[2].Z),// Z10
-        		static_cast<float>(LocalVertexPositions[3].X),// X11
-        		static_cast<float>(LocalVertexPositions[3].Y),// Y11
-        		static_cast<float>(LocalVertexPositions[3].Z),// Z11
-        	};
-        	AllCellCustomData.Append(CellCustomData);
-
         	TArray<float> PlotCustomData =
 			{
         		0.f,										  // Opacity
@@ -265,26 +266,25 @@ void UCellManagerComponent::CreateMassCell()
 	// ==================== 批量添加 ISM 实例 ====================
 	UISMManager* ISMManager = GetWorld()->GetSubsystem<UISMManager>();
 	if (!ISMManager) return;
-	
-	if (OutlineTransforms.Num() > 0)
-	{
-		FISMComponentParams CellISMParams;
-		CellISMParams.AttachParent = this;
-		CellISMParams.CollisionObjectType = ECC_Cell;
-		CellISMParams.CollisionEnabled = ECollisionEnabled::QueryOnly;
-		CellISMParams.bDisallowNanite = true;
-		CellISMParams.bCastShadow = false;
-
-		// 单元格
-		ISMManager->BatchAddInstances(FarmlandConfig->OutlineMesh, OutlineTransforms, 16, CellISMParams, AllCellCustomData);
-	}
 
 	if (PlotTransforms.Num() > 0)
 	{
 		FISMComponentParams PlotISMParams;
 		PlotISMParams.AttachParent = this;
 		// 地块
-		ISMManager->BatchAddInstances(FarmlandConfig->LandCellMesh, PlotTransforms, FarmlandConfig->NumCustomDataFloats, PlotISMParams, AllPlotCustomData);
+		TArray<FGlobalInstanceId> PlotIds = ISMManager->BatchAddInstances(
+			FarmlandConfig->LandCellMesh,
+			PlotTransforms,
+			FarmlandConfig->NumCustomDataFloats,
+			PlotISMParams,
+			AllPlotCustomData
+			);
+		for (int32 i = 0; i < PlotIds.Num(); i++)
+		{
+			const FMassEntityHandle Entity = CellEntities[i];
+			FPlotRenderFragment& RenderFrag = EntityManager.GetFragmentDataChecked<FPlotRenderFragment>(Entity);
+			RenderFrag.InstanceId = PlotIds[i];
+		}
 	}
 }
 
@@ -360,54 +360,98 @@ void UCellManagerComponent::ApplySaveData(const TArray<FFarmLandPlotSaveGameData
 	// 加载数据后修改对应实体 Fragment
 }
 
-void UCellManagerComponent::UpdateOutline(FIntPoint Coords, bool bEnable)
+void UCellManagerComponent::UpdateOutline(const FIntPoint Coords, const bool bEnable)
 {
 	FMassEntityHandle Entity;
 	if (!GetCellEntity(Coords, Entity)) return;
 
-	const UISMManager* ISMManager = GetWorld()->GetSubsystem<UISMManager>();
-	if (!ISMManager) return;
-
-	const int32 InstanceIndex = Coords.X * PlanetConfig->NumLon + Coords.Y;
-	if (bEnable && BasePlayerController->GetEditMode() != EEditMode::None)
+	if (bEnable)
 	{
 		CurrentOutlineCoords = Coords;
-		ISMManager->UpdateInstanceCustomData(FarmlandConfig->OutlineMesh, InstanceIndex, CellOutlineCustomData::Opacity, 0.1f);
-		UpdateOutlineColor(Coords);
 	}
-	else
-	{
-		CurrentOutlineCoords = FIntPoint(-1, -1);
-		ISMManager->UpdateInstanceCustomData(FarmlandConfig->OutlineMesh, InstanceIndex, CellOutlineCustomData::Opacity, 0.f);
-	}
+	const FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+
+	// 构建一个命令，延迟修改实体的高亮 Fragment
+	EntityManager.Defer().PushCommand<FMassDeferredSetCommand>(
+		[&, Entity, bEnable](const FMassEntityManager& EM)
+		{
+			if (!EM.IsEntityActive(Entity)) return;
+
+			if (FHighlightFragment* HighlightFragment = EM.GetFragmentDataPtr<FHighlightFragment>(Entity))
+			{
+				HighlightFragment->bHighlighted = bEnable;
+
+				if (bEnable)
+				{
+					HighlightFragment->HighlightColor = GetOutlineColorForEditMode();
+				}
+			}
+		}
+	);
 }
 
-bool UCellManagerComponent::GetCellCoordsByRaycast(const FVector& RayStart, const FVector& RayEnd,
-	FIntPoint& OutCellCoords, float& OutHitDistance) const
+bool UCellManagerComponent::GetCellCoordsFromScreenMouse(FIntPoint& OutCellCoords, float& OutWorldDistance) const
 {
-	const UISMManager* ISMManager = GetWorld()->GetSubsystem<UISMManager>();
-	if (!ISMManager) return false;
+    if (!PlanetConfig) return false;
 
-	const FVector NewRayEnd = FMath::Lerp(RayStart, RayEnd, 1.1f);
-	// 使用 ISM 的 HitTest 进行精确检测
-	FHitResult HitResult;
-	const FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FarmlandClick), false);
-    
-	// 执行射线检测（针对 ISM 组件）
-	if (ISMManager->LineTraceISMInstances(FarmlandConfig->OutlineMesh, HitResult, RayStart, NewRayEnd, QueryParams))
-	{
-		OutHitDistance = HitResult.Distance;
-        
-		if (HitResult.Item >= 0 && HitResult.Item < CellEntities.Num())
-		{
-			// 通过扁平索引计算坐标
-			OutCellCoords.X = HitResult.Item / PlanetConfig->NumLon; // LatIdx
-			OutCellCoords.Y = HitResult.Item % PlanetConfig->NumLon; // LonIdx
-			return true;
-		}
-	}
-    
-	return false;
+    APlayerController* PC = GetWorld()->GetFirstPlayerController();
+    if (!PC) return false;
+
+    float MouseX, MouseY;
+    if (!PC->GetMousePosition(MouseX, MouseY)) return false;
+
+    FVector WorldLoc, WorldDir;
+    if (!PC->DeprojectScreenPositionToWorld(MouseX, MouseY, WorldLoc, WorldDir)) return false;
+
+    // 射线与球面求交 (星球中心在原点，半径为 PlanetConfig->Radius)
+    const float R = PlanetConfig->Radius;
+    const FVector Origin(0, 0, 0);   // 假设星球中心在世界原点，如果不是，需加上星球Actor的位置
+
+    // 二次方程求解: |RayStart + t * RayDir|^2 = R^2
+    const float a = FVector::DotProduct(WorldDir, WorldDir);
+    const float b = 2.0f * FVector::DotProduct(WorldLoc, WorldDir);
+    const float c = FVector::DotProduct(WorldLoc, WorldLoc) - R * R;
+
+    const float Discriminant = b * b - 4.0f * a * c;
+    if (Discriminant < 0.0f) return false;   // 未击中球体
+
+    const float t = (-b - FMath::Sqrt(Discriminant)) / (2.0f * a); // 取近处交点
+    if (t < 0.0f) return false;   // 交点在射线后面
+
+    FVector Intersection = WorldLoc + t * WorldDir;
+    OutWorldDistance = t;
+
+    // 交点转球坐标 (经纬度)
+    FVector Dir = Intersection.GetSafeNormal();
+    // 纬度: asin(Z / R)，单位弧度
+    float LatRad = FMath::Asin(FMath::Clamp(Dir.Z, -1.0f, 1.0f));
+    // 经度: atan2(Y, X)，范围 (-pi, pi]
+    float LonRad = FMath::Atan2(Dir.Y, Dir.X);
+
+    // 转为角度
+    float LatDeg = FMath::RadiansToDegrees(LatRad);
+    float LonDeg = FMath::RadiansToDegrees(LonRad);
+    // 经度规范化到 [0, 360)
+    if (LonDeg < 0.0f) LonDeg += 360.0f;
+
+    // 根据配置的 MinLat, MaxLat, NumLat, NumLon 计算单元格坐标
+    const float LatStep = (PlanetConfig->MaxLat - PlanetConfig->MinLat) / (PlanetConfig->NumLat - 1);
+    const float LonStep = 360.0f / PlanetConfig->NumLon;
+
+    // 检查是否在纬度范围内
+    if (LatDeg < PlanetConfig->MinLat || LatDeg > PlanetConfig->MaxLat)
+        return false;   // 超出单元格区域
+
+    int32 LatIdx = FMath::FloorToInt((LatDeg - PlanetConfig->MinLat) / LatStep);
+    int32 LonIdx = FMath::FloorToInt(LonDeg / LonStep);
+
+    // 边界保护
+    LatIdx = FMath::Clamp(LatIdx, 0, PlanetConfig->NumLat - 2);
+    LonIdx = LonIdx % PlanetConfig->NumLon;
+
+    OutCellCoords.X = LatIdx;
+    OutCellCoords.Y = LonIdx;
+    return true;
 }
 
 bool UCellManagerComponent::GetCellEntity(const FIntPoint Coords, FMassEntityHandle& OutEntity)
@@ -422,6 +466,56 @@ bool UCellManagerComponent::GetCellEntity(const FIntPoint Coords, FMassEntityHan
 	}
 	
 	return false;
+}
+
+TArray<FIntPoint> UCellManagerComponent::GetAllCoords()
+{
+	TArray<FIntPoint> Coords;
+	if (!PlanetConfig) return Coords;
+
+	const int32 NumLatCells = PlanetConfig->NumLat - 1;
+	const int32 NumLonCells = PlanetConfig->NumLon;
+	Coords.Reserve(NumLatCells * NumLonCells);
+
+	for (int32 Lat = 0; Lat < NumLatCells; ++Lat)
+	{
+		for (int32 Lon = 0; Lon < NumLonCells; ++Lon)
+		{
+			Coords.Add(FIntPoint(Lat, Lon));
+		}
+	}
+	return Coords;
+}
+
+void UCellManagerComponent::Test()
+{
+	if (!PlanetConfig) return;
+
+	// 1. 获取所有坐标
+	TArray<FIntPoint> AllCoords = GetAllCoords();
+	if (AllCoords.Num() == 0) return;
+
+	// 2. 批量耕地（全部通过 Defer 入队，帧末执行）
+	for (const FIntPoint& Coords : AllCoords)
+	{
+		PlowLand(Coords); // 直接调用已有的耕地方法
+	}
+
+	// 3. 延迟一帧后批量种植
+	// 使用 Timer 延迟 0.05 秒（足够让 Defer 命令完成）
+	FTimerDelegate PlantDelegate;
+	PlantDelegate.BindLambda([this, AllCoords]()
+	{
+		for (const FIntPoint& Coords : AllCoords)
+		{
+			WetLand(Coords);
+			FertilizeLand(Coords);
+			PlantCrop(Coords, BasePlayerController->GetSelectedCropName());
+		}
+	});
+
+	FTimerHandle TestPlantTimer;
+	GetWorld()->GetTimerManager().SetTimer(TestPlantTimer, PlantDelegate, 1.f, false);
 }
 
 void UCellManagerComponent::ResetLand(FIntPoint Coords)
@@ -747,14 +841,7 @@ bool UCellManagerComponent::HarvestCrop(FIntPoint Coords)
     // 将作物状态改为已收获（渲染处理器会自动处理 Mesh 切换）
     CropState->CropGrowthStage = ECropGrowthStage::Harvested;
     CropState->CropStateData.RemoveState(ECropState::ReadyForHarvest);
-
-    // 延迟自动移除（可选：通过定时器或标记）
-    // 这里简单处理：收获后直接移除，如果希望保留枯萎效果则跳过移除
-    EntityManager.Defer().RemoveFragment<FCropStaticConfigFragment>(Entity);
-    EntityManager.Defer().RemoveFragment<FCropStateFragment>(Entity);
-    EntityManager.Defer().RemoveFragment<FCropGrowthTimerFragment>(Entity);
-    EntityManager.Defer().RemoveFragment<FCropQualityFragment>(Entity);
-
+	
     return true;
 }
 
@@ -769,11 +856,8 @@ void UCellManagerComponent::RemoveCrop(FIntPoint Coords)
 	FCropStateFragment* CropState = EntityManager.GetFragmentDataPtr<FCropStateFragment>(Entity);
 	if (!CropState) return;
 
-	// 通过命令缓冲移除所有作物 Fragment
-	EntityManager.Defer().RemoveFragment<FCropStaticConfigFragment>(Entity);
-	EntityManager.Defer().RemoveFragment<FCropStateFragment>(Entity);
-	EntityManager.Defer().RemoveFragment<FCropGrowthTimerFragment>(Entity);
-	EntityManager.Defer().RemoveFragment<FCropQualityFragment>(Entity);
+	// 将作物状态改为已收获（渲染处理器会自动处理 Mesh 切换）
+	CropState->CropGrowthStage = ECropGrowthStage::None;
 }
 
 void UCellManagerComponent::CropDried(FIntPoint Coords)
@@ -784,15 +868,13 @@ void UCellManagerComponent::RemoveCropDried(FIntPoint Coords)
 {
 }
 
-void UCellManagerComponent::UpdateOutlineColor(FIntPoint Coords)
+FLinearColor UCellManagerComponent::GetOutlineColorForEditMode() const
 {
-	FMassEntityHandle Entity;
-	if (!GetCellEntity(Coords, Entity)) return;
+	FLinearColor OutlineColor = FLinearColor::White;
 	
 	UISMManager* ISMManager = GetWorld()->GetSubsystem<UISMManager>();
-	if (!ISMManager) return;
-
-	FLinearColor OutlineColor = FLinearColor::Green;
+	if (!ISMManager) return OutlineColor;
+	
 	switch (BasePlayerController->GetEditMode()) {
 	case None:
 		OutlineColor = FLinearColor::White;
@@ -848,29 +930,49 @@ void UCellManagerComponent::UpdateOutlineColor(FIntPoint Coords)
 	default:
 		OutlineColor = FLinearColor::White;
 	}
-
-	const int32 InstanceIndex = Coords.X * PlanetConfig->NumLon + Coords.Y;
-	ISMManager->UpdateInstanceCustomData(FarmlandConfig->OutlineMesh, InstanceIndex, CellOutlineCustomData::R, OutlineColor.R);
-	ISMManager->UpdateInstanceCustomData(FarmlandConfig->OutlineMesh, InstanceIndex, CellOutlineCustomData::G, OutlineColor.G);
-	ISMManager->UpdateInstanceCustomData(FarmlandConfig->OutlineMesh, InstanceIndex, CellOutlineCustomData::B, OutlineColor.B);
-
+	return OutlineColor;
 }
 
 void UCellManagerComponent::OnEditModeChanged(EEditMode NewEditMode)
 {
-	UpdateOutlineColor(CurrentOutlineCoords);
+	FMassEntityHandle Entity;
+	if (!GetCellEntity(CurrentOutlineCoords, Entity)) return;
+
+	const FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+
+	EntityManager.Defer().PushCommand<FMassDeferredSetCommand>(
+		[Entity, this](const FMassEntityManager& EM)
+		{
+			if (!EM.IsEntityActive(Entity)) return;
+
+			if (FHighlightFragment* HighlightFragment = EM.GetFragmentDataPtr<FHighlightFragment>(Entity))
+			{
+				HighlightFragment->HighlightColor = GetOutlineColorForEditMode();
+			}
+		}
+	);
 }
 
-void UCellManagerComponent::PrecreateCropISMComponents()
+void UCellManagerComponent::PrecreateISMComponents()
 {
 	if (!CropDataTable) return;
 	UISMManager* ISMMgr = GetWorld()->GetSubsystem<UISMManager>();
 	if (!ISMMgr) return;
 
+	// 创建网格体组件
+	FISMComponentParams CellISMParams;
+	CellISMParams.AttachParent = this;
+	CellISMParams.bDisallowNanite = true;
+	CellISMParams.bCastShadow = false;
+	ISMMgr->GetOrCreateISMComponent(FarmlandConfig->OutlineMesh, 16, CellISMParams);
+
+	// 创建作物网格体组件
 	FISMComponentParams CropParams;
 	CropParams.AttachParent = this;
 	CropParams.CollisionEnabled = ECollisionEnabled::NoCollision;
 	CropParams.bCastShadow = true;
+	CropParams.MinDrawDistance = 10000.f;
+	CropParams.MaxDrawDistance = 20000.f;
 
 	TMap<UStaticMesh*, int32> UniqueMeshes;
 	// 收集所有作物变体中所有阶段的网格体

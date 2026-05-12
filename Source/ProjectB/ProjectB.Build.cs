@@ -9,7 +9,7 @@ public class ProjectB : ModuleRules
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "Niagara"});
-		PublicDependencyModuleNames.AddRange(new string[] { "AIModule", "MassEntity", "SmartObjectsModule"  });
+		PublicDependencyModuleNames.AddRange(new string[] { "AIModule", "MassEntity", "MassRepresentation", "SmartObjectsModule"  });
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });
 

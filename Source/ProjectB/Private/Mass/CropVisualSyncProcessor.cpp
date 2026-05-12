@@ -6,12 +6,12 @@
 #include "Subsystem/GlobalConfigSubsystem.h"
 #include "Farm/FarmlandConfigDataAsset.h"
 #include "Crops/CropData.h"
-#include "Engine/DataTable.h"
 #include "Subsystem/ISMManager.h"
 
 UCropVisualSyncProcessor::UCropVisualSyncProcessor()
 {
     bAutoRegisterWithProcessingPhases = true;
+    ExecutionOrder.ExecuteBefore.Add(TEXT("UCropGrowthProcessor"));
 }
 
 void UCropVisualSyncProcessor::ConfigureQueries()
@@ -46,7 +46,7 @@ void UCropVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
     const FVector CropOffset = FarmConfig->CropOffset;
 
      // 收集待移除的实例
-    TArray<TPair<UStaticMesh*, FPrimitiveInstanceId>> PendingRemoves;
+    TArray<TPair<UStaticMesh*, FGlobalInstanceId>> PendingRemoves;
     
     // 键：(Mesh, NumFloats) 值：(Transform, Entity)
     TArray<TPair<TPair<UStaticMesh*, int32>, TPair<FTransform, FMassEntityHandle>>> PendingAdds;
@@ -80,9 +80,7 @@ void UCropVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
             case ECropGrowthStage::Harvested: DesiredMesh = CropStaticConfig.HarvestedMesh; break;
             default: break;
             }
-
-            if (!DesiredMesh) continue;
-
+            
             FTransform CropTransform = Cell.Transform;
             CropTransform.AddToTranslation(CropOffset);
 
@@ -93,10 +91,13 @@ void UCropVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
             }
             
             // 填充待添加列表，包含分组键
-            PendingAdds.Emplace(
-                TPair<UStaticMesh*, int32>{DesiredMesh, CropStaticConfig.CropNumCustomDataFloats},
-                TPair<FTransform, FMassEntityHandle>{CropTransform, Context.GetEntity(i)}
-            );
+            if (DesiredMesh)
+            {
+                PendingAdds.Emplace(
+                    TPair<UStaticMesh*, int32>{DesiredMesh, CropStaticConfig.CropNumCustomDataFloats},
+                    TPair<FTransform, FMassEntityHandle>{CropTransform, Context.GetEntity(i)}
+                );
+            }
 
             // 更新 CurrentMesh 快照
             CropRender.CurrentMesh = DesiredMesh;
@@ -117,13 +118,13 @@ void UCropVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
         for (int32 i = 0; i < PendingRemoves.Num(); )
         {
             UStaticMesh* Mesh = PendingRemoves[i].Key;
-            TArray<FPrimitiveInstanceId> Ids;
+            TArray<FGlobalInstanceId> Ids;
             while (i < PendingRemoves.Num() && PendingRemoves[i].Key == Mesh)
             {
                 Ids.Add(PendingRemoves[i].Value);
                 ++i;
             }
-            ISMManager->BatchRemoveInstances(Mesh, Ids);
+            // ISMManager->BatchRemoveInstances(Mesh, Ids);
         }
     }
 
@@ -152,22 +153,22 @@ void UCropVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
                 ++i;
             }
 
-            TArray<FPrimitiveInstanceId> NewIds = ISMManager->BatchAddInstances(
-                Mesh,
-                Transforms,
-                NumFloats,
-                CropParams
-                );
-            check(NewIds.Num() == Entities.Num());
-
-            // 写回实例 ID
-            for (int32 j = 0; j < NewIds.Num(); ++j)
-            {
-                if (EntityManager.IsEntityActive(Entities[j]))
-                {
-                    EntityManager.GetFragmentDataChecked<FCropRenderFragment>(Entities[j]).InstanceId = NewIds[j];
-                }
-            }
+            // TArray<FGlobalInstanceId> NewIds = ISMManager->BatchAddInstances(
+            //     Mesh,
+            //     Transforms,
+            //     NumFloats,
+            //     CropParams
+            //     );
+            // check(NewIds.Num() == Entities.Num());
+            //
+            // // 写回实例 ID
+            // for (int32 j = 0; j < NewIds.Num(); ++j)
+            // {
+            //     if (EntityManager.IsEntityActive(Entities[j]))
+            //     {
+            //         EntityManager.GetFragmentDataChecked<FCropRenderFragment>(Entities[j]).InstanceId = NewIds[j];
+            //     }
+            // }
         }
     }
 }

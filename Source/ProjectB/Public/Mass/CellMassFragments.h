@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "MassEntityTypes.h"
 #include "Crops/CropData.h"
+#include "Subsystem/ISMManager.h"
 #include "CellMassFragments.generated.h"
 
 // ========== 单元格基础 Fragment ==========
@@ -29,11 +30,51 @@ struct FCellStaticFragment : public FMassFragment
 	ECellType CellType = ECellType::Empty;
 };
 
+/**
+ * 高亮状态 Fragment
+ * 由 UCelManagerComponent 修改，由 UPlotVisualSyncProcessor 消费
+ */
+USTRUCT(BlueprintType)
+struct FHighlightFragment : public FMassFragment
+{
+	GENERATED_BODY()
+
+	/** 当前 ISM 实例稳定 ID */
+	FGlobalInstanceId InstanceId;
+	
+	/** 是否需要高亮 */
+	UPROPERTY()
+	bool bHighlighted = false;
+
+	/** 上次高亮状态 */
+	UPROPERTY()
+	bool LastHighlightedState = false;
+
+	/** 高亮颜色 */
+	UPROPERTY()
+	FLinearColor HighlightColor = FLinearColor::White;
+
+	/** 上次高亮颜色 */
+	UPROPERTY()
+	FLinearColor LastHighlightColor = FLinearColor::White;
+};
+
 // ========== 农场地块 Fragment & Tag ==========
 
 /**
+ * 农场地块渲染状态
+ */
+USTRUCT(BlueprintType)
+struct FPlotRenderFragment : public FMassFragment
+{
+	GENERATED_BODY()
+
+	/** 当前 ISM 实例稳定 ID */
+	FGlobalInstanceId InstanceId;
+};
+
+/**
  * 农场地块动态状态（湿度、肥力、状态位）
- * 仅当 FCropPlotTag 存在时有效
  */
 USTRUCT(BlueprintType)
 struct FPlotStateFragment : public FMassFragment
@@ -172,7 +213,7 @@ struct FCropRenderFragment : public FMassFragment
 	GENERATED_BODY()
 
 	/** 当前 ISM 实例稳定 ID */
-	FPrimitiveInstanceId InstanceId;
+	FGlobalInstanceId InstanceId;
 
 	/** 当前显示的网格体 */
 	UPROPERTY()
