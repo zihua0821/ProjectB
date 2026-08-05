@@ -46,9 +46,11 @@ namespace PlotCustomData
  */
 namespace CropCustomData
 {
-    constexpr int32 Disease = 0;
-    constexpr int32 IsLeaf = 1;
-    constexpr int32 Count = 2;
+    constexpr int32 Opacity = 0;
+    constexpr int32 Disease = 1;
+    constexpr int32 IsLeaf = 2;
+    
+    constexpr int32 Count = 3;
 }
 
 /**

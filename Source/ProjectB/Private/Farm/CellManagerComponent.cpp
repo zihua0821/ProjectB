@@ -1,9 +1,8 @@
 ﻿#include "Farm/CellManagerComponent.h"
 #include "MassCommandBuffer.h"
-#include "MassEntityConfigAsset.h"
 #include "MassEntityManager.h"
 #include "MassEntitySubsystem.h"
-#include "MassRepresentationSubsystem.h"
+#include "NiagaraComponent.h"
 #include "Mass/CellMassFragments.h"
 #include "Farm/FarmlandConfigDataAsset.h"
 #include "Planet/PlanetConfigDataAsset.h"
@@ -11,10 +10,8 @@
 #include "Engine/DataTable.h"
 #include "Planet/PlanetInterface.h"
 #include "Player/BasePlayerController.h"
-#include "ProjectB/ProjectB.h"
 #include "Subsystem/GlobalConfigSubsystem.h"
 #include "Subsystem/ISMManager.h"
-#include "MassRepresentation/Public/MassRepresentationFragments.h"
 
 UCellManagerComponent::UCellManagerComponent()
 {
@@ -135,11 +132,12 @@ void UCellManagerComponent::Initialize(UPlanetConfigDataAsset* InPlanetConfig, U
 		ConfigSub->SetISMAttachParent(this);
 	}
 	
+	PrecreateISMComponents();
+
 	CreateMassCell();
 
 	UE_LOG(LogTemp, Log, TEXT("CellManagerComponent initialized: %d cells"), CellEntities.Num());
 
-	PrecreateISMComponents();
 }
 
 void UCellManagerComponent::CreateMassCell()
@@ -149,22 +147,13 @@ void UCellManagerComponent::CreateMassCell()
 	const int32 NumLatCells = PlanetConfig->NumLat - 1;
 	const int32 NumLonCells = PlanetConfig->NumLon;
 	const int32 TotalCells = NumLatCells * NumLonCells;
-
-	UMassRepresentationSubsystem* RepresentationSubsystem = GetWorld()->GetSubsystem<UMassRepresentationSubsystem>();
-	
-	FStaticMeshInstanceVisualizationDesc CellVisualDesc;
-	// 配置网格体
-	CellVisualDesc.Meshes.AddZeroed(1);
-	CellVisualDesc.Meshes[0].Mesh = FarmlandConfig->LandCellMesh;
-
-	FStaticMeshInstanceVisualizationDescHandle VisualHandle = RepresentationSubsystem->FindOrAddStaticMeshDesc(CellVisualDesc);
 	
 	// 批量创建实体
 	TArray<const UScriptStruct*> FragmentTypes;
 	FragmentTypes.Add(FCellStaticFragment::StaticStruct());
 	FragmentTypes.Add(FHighlightFragment::StaticStruct());
 	FragmentTypes.Add(FPlotRenderFragment::StaticStruct());
-	FragmentTypes.Add(FMassRepresentationFragment::StaticStruct());
+	FragmentTypes.Add(FCropRenderFragment::StaticStruct());
 	
 	FMassArchetypeHandle ArchetypeHandle = EntityManager.CreateArchetype(FragmentTypes);
 	TArray<FMassEntityHandle> Entities;
@@ -189,11 +178,11 @@ void UCellManagerComponent::CreateMassCell()
     const float LonStep = 360.0f / PlanetConfig->NumLon;
 	
 	// 预分配容器
-	TArray<FTransform> PlotTransforms;
+	TArray<FTransform> CellTransforms;
 	TArray<float> AllPlotCustomData;
 	
 	CellEntities.SetNum(TotalCells);
-	PlotTransforms.Reserve(TotalCells);
+	CellTransforms.Reserve(TotalCells);
 	AllPlotCustomData.Reserve(TotalCells * FarmlandConfig->NumCustomDataFloats);
 	
     // 遍历经纬度网格生成地块
@@ -238,17 +227,13 @@ void UCellManagerComponent::CreateMassCell()
         	CellTransform.SetRotation(PlotRotation.Quaternion());
         	CellTransform.SetScale3D(FVector(BaseScaleFactorX * LatitudeScale, ScaleFactorY, ScaleFactorZ));
 
-        	PlotTransforms.Add(CellTransform);
+        	CellTransforms.Add(CellTransform);
         	
         	// 写入静态 Fragment
         	FCellStaticFragment& StaticFrag = EntityManager.GetFragmentDataChecked<FCellStaticFragment>(Entity);
         	StaticFrag.Coords = FIntPoint(LatIdx, LonIdx);
         	StaticFrag.Transform = CellTransform;
         	StaticFrag.CellType = ECellType::Empty;
-
-        	FMassRepresentationFragment& RepFragment = EntityManager.GetFragmentDataChecked<FMassRepresentationFragment>(Entity);
-        	RepFragment.StaticMeshDescHandle = VisualHandle;
-        	RepFragment.PrevLODSignificance = 0.0f;
 
         	const int32 FlatIndex = LatIdx * NumLonCells + LonIdx;
         	CellEntities[FlatIndex] = Entity;
@@ -267,14 +252,14 @@ void UCellManagerComponent::CreateMassCell()
 	UISMManager* ISMManager = GetWorld()->GetSubsystem<UISMManager>();
 	if (!ISMManager) return;
 
-	if (PlotTransforms.Num() > 0)
+	if (CellTransforms.Num() > 0)
 	{
+		// 地块
 		FISMComponentParams PlotISMParams;
 		PlotISMParams.AttachParent = this;
-		// 地块
 		TArray<FGlobalInstanceId> PlotIds = ISMManager->BatchAddInstances(
 			FarmlandConfig->LandCellMesh,
-			PlotTransforms,
+			CellTransforms,
 			FarmlandConfig->NumCustomDataFloats,
 			PlotISMParams,
 			AllPlotCustomData
@@ -506,11 +491,19 @@ void UCellManagerComponent::Test()
 	FTimerDelegate PlantDelegate;
 	PlantDelegate.BindLambda([this, AllCoords]()
 	{
+		TArray<FName> CropNames;
+		for (auto& RowPair : CropDataTable->GetRowMap())
+		{
+			const FCropTableRow* Row = reinterpret_cast<FCropTableRow*>(RowPair.Value);
+			if (!Row) continue;
+			CropNames.Add(Row->CropID);
+		}
 		for (const FIntPoint& Coords : AllCoords)
 		{
 			WetLand(Coords);
 			FertilizeLand(Coords);
-			PlantCrop(Coords, BasePlayerController->GetSelectedCropName());
+			const FString RandomCrop = CropNames[FMath::RandRange(0, CropNames.Num() - 1)].ToString();
+			PlantCrop(Coords, RandomCrop);
 		}
 	});
 
@@ -737,7 +730,7 @@ void UCellManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
 
     // 初始化所有作物数据
     EntityManager.Defer().PushCommand<FMassDeferredSetCommand>(
-        [Entity, CropID, Row, PlotState](const FMassEntityManager& EM)
+        [Entity, CropID, Row, PlotState, this](const FMassEntityManager& EM)
         {
             if (!EM.IsEntityActive(Entity)) return;
 
@@ -953,28 +946,21 @@ void UCellManagerComponent::OnEditModeChanged(EEditMode NewEditMode)
 	);
 }
 
+
 void UCellManagerComponent::PrecreateISMComponents()
 {
 	if (!CropDataTable) return;
-	UISMManager* ISMMgr = GetWorld()->GetSubsystem<UISMManager>();
-	if (!ISMMgr) return;
+	UISMManager* ISMManager = GetWorld()->GetSubsystem<UISMManager>();
+	if (!ISMManager) return;
 
 	// 创建网格体组件
 	FISMComponentParams CellISMParams;
 	CellISMParams.AttachParent = this;
 	CellISMParams.bDisallowNanite = true;
 	CellISMParams.bCastShadow = false;
-	ISMMgr->GetOrCreateISMComponent(FarmlandConfig->OutlineMesh, 16, CellISMParams);
-
-	// 创建作物网格体组件
-	FISMComponentParams CropParams;
-	CropParams.AttachParent = this;
-	CropParams.CollisionEnabled = ECollisionEnabled::NoCollision;
-	CropParams.bCastShadow = true;
-	CropParams.MinDrawDistance = 10000.f;
-	CropParams.MaxDrawDistance = 20000.f;
-
-	TMap<UStaticMesh*, int32> UniqueMeshes;
+	ISMManager->GetOrCreateISMComponent(FarmlandConfig->OutlineMesh, 16, CellISMParams);
+	
+	TArray<TPair<TObjectPtr<UStaticMesh>, int32>> UniqueMeshes;
 	// 收集所有作物变体中所有阶段的网格体
 	for (auto& RowPair : CropDataTable->GetRowMap())
 	{
@@ -983,15 +969,27 @@ void UCellManagerComponent::PrecreateISMComponents()
 		int32 CropNumCustomDataFloats = Row->CropNumCustomDataFloats;
 		for (const FCropMeshVariant& Variant : Row->MeshVariants)
 		{
-			if (Variant.SeedMesh) UniqueMeshes.Add(Variant.SeedMesh, CropNumCustomDataFloats);
-			if (Variant.SeedlingMesh) UniqueMeshes.Add(Variant.SeedlingMesh, CropNumCustomDataFloats);
-			if (Variant.MatureMesh) UniqueMeshes.Add(Variant.MatureMesh, CropNumCustomDataFloats);
-			if (Variant.HarvestedMesh) UniqueMeshes.Add(Variant.HarvestedMesh, CropNumCustomDataFloats);
+			if (Variant.SeedMesh) UniqueMeshes.Emplace(Variant.SeedMesh, CropNumCustomDataFloats);
+			if (Variant.SeedlingMesh) UniqueMeshes.Emplace(Variant.SeedlingMesh, CropNumCustomDataFloats);
+			if (Variant.MatureMesh) UniqueMeshes.Emplace(Variant.MatureMesh, CropNumCustomDataFloats);
+			if (Variant.HarvestedMesh) UniqueMeshes.Emplace(Variant.HarvestedMesh, CropNumCustomDataFloats);
 		}
 	}
-	// 为每个唯一网格创建 ISM 组件
+	UGlobalConfigSubsystem* ConfigSub = GetWorld()->GetSubsystem<UGlobalConfigSubsystem>();
+	if (!ConfigSub) return;
+	ConfigSub->SetUniqueMeshes(UniqueMeshes);
+	
+	FISMComponentParams CropISMParams;
+	CropISMParams.AttachParent = this;
+	CropISMParams.bUseIncrementalISM = true;
+
+	const int32 NumLatCells = PlanetConfig->NumLat - 1;
+	const int32 NumLonCells = PlanetConfig->NumLon;
+	const int32 TotalCells = NumLatCells * NumLonCells;
+	
 	for (const auto& Pair : UniqueMeshes)
 	{
-		ISMMgr->GetOrCreateISMComponent(Pair.Key, Pair.Value, CropParams);
+		ISMManager->GetOrCreateISMComponent(Pair.Key, Pair.Value, CropISMParams);
+		ISMManager->PreAllocateSlots(Pair.Key, TotalCells / UniqueMeshes.Num());
 	}
 }

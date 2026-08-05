@@ -55,7 +55,7 @@ void UPlotVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
                 if (State.StateData.HasState(EPlotState::Plowed) != State.PreStateData.HasState(EPlotState::Plowed))
                 {
                     const float Opacity = State.StateData.HasState(EPlotState::Plowed) ? 1.0f : 0.0f;
-                    ISMManager->UpdateInstanceCustomData(FarmlandConfig->LandCellMesh, PlotRender.InstanceId, PlotCustomData::Opacity, Opacity);
+                    // ISMManager->UpdateInstanceCustomData(FarmlandConfig->LandCellMesh, PlotRender.InstanceId, PlotCustomData::Opacity, Opacity);
                     if (!Opacity)
                     {
                         const FMassEntityHandle Entity = InContext.GetEntity(i);
@@ -67,14 +67,14 @@ void UPlotVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
                 if (State.StateData.HasState(EPlotState::Watered) != State.PreStateData.HasState(EPlotState::Watered))
                 {
                     const float Wetness = State.StateData.HasState(EPlotState::Watered) ? 1.0f : 0.0f;
-                    ISMManager->UpdateInstanceCustomData(FarmlandConfig->LandCellMesh, PlotRender.InstanceId, PlotCustomData::Wetness, Wetness);
+                    // ISMManager->UpdateInstanceCustomData(FarmlandConfig->LandCellMesh, PlotRender.InstanceId, PlotCustomData::Wetness, Wetness);
                 }
 
                 // 肥力可视化
                 if (State.StateData.HasState(EPlotState::Fertilized) != State.PreStateData.HasState(EPlotState::Fertilized))
                 {
                     const float Fertility = State.StateData.HasState(EPlotState::Fertilized) ? 1.0f : 0.0f;
-                    ISMManager->UpdateInstanceCustomData(FarmlandConfig->LandCellMesh, PlotRender.InstanceId, PlotCustomData::Fertility, Fertility);
+                    // ISMManager->UpdateInstanceCustomData(FarmlandConfig->LandCellMesh, PlotRender.InstanceId, PlotCustomData::Fertility, Fertility);
                 }
 
                 if (State.StateData.HasState(EPlotState::WeedInfested) != State.PreStateData.HasState(EPlotState::WeedInfested))

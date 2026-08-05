@@ -1,5 +1,11 @@
-﻿#include "Subsystem/ISMManager.h"
+#include "Subsystem/ISMManager.h"
+#include "Component/IncrementalInstancedStaticMeshComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "ProjectB/ProjectB.h"
+
+// ============================================================================
+// 生命周期
+// ============================================================================
 
 void UISMManager::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -9,25 +15,27 @@ void UISMManager::Initialize(FSubsystemCollectionBase& Collection)
 void UISMManager::Deinitialize()
 {
     MeshToBucketGroups.Empty();
-    DirtyBuckets.Empty();
+    DirtyIncrementalComponents.Empty();
+    FreeSlotIndices.Empty();
     Super::Deinitialize();
 }
 
-UInstancedStaticMeshComponent* UISMManager::CreateISMComponent(
-    UStaticMesh* Mesh,
-    const int32 NumCustomDataFloats,
-    const FISMComponentParams& Params)
-{
-    if (!Mesh || !Params.AttachParent)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("UISMManager::CreateISMComponent - Invalid Mesh or AttachParent"));
-        return nullptr;
-    }
+// ============================================================================
+// 组件创建
+// ============================================================================
 
+UInstancedStaticMeshComponent* UISMManager::CreateISMComponent(UStaticMesh* Mesh, int32 NumCustomDataFloats, const FISMComponentParams& Params)
+{
+    if (!Mesh || !Params.AttachParent) return nullptr;
     AActor* Owner = Params.AttachParent->GetOwner();
     if (!Owner) return nullptr;
 
-    UInstancedStaticMeshComponent* NewISM = NewObject<UInstancedStaticMeshComponent>(Owner, NAME_None, RF_Transient);
+    UInstancedStaticMeshComponent* NewISM = nullptr;
+    if (Params.bUseIncrementalISM)
+        NewISM = NewObject<UIncrementalInstancedStaticMeshComponent>(Owner, NAME_None, RF_Transient);
+    else
+        NewISM = NewObject<UInstancedStaticMeshComponent>(Owner, NAME_None, RF_Transient);
+
     NewISM->SetStaticMesh(Mesh);
     NewISM->SetNumCustomDataFloats(NumCustomDataFloats);
     NewISM->SetCollisionEnabled(Params.CollisionEnabled);
@@ -36,95 +44,68 @@ UInstancedStaticMeshComponent* UISMManager::CreateISMComponent(
     NewISM->SetCanEverAffectNavigation(Params.bCanEverAffectNavigation);
     NewISM->bDisallowNanite = Params.bDisallowNanite;
     NewISM->SetCastShadow(Params.bCastShadow);
-    // NewISM->SetReceivesDecals(false);
-    // NewISM->SetVisibleInRayTracing(false);
-
     if (Params.MinDrawDistance > 0.0f || Params.MaxDrawDistance > 0.0f)
-    {
         NewISM->SetCullDistances(Params.MinDrawDistance, Params.MaxDrawDistance);
-    }
-
     NewISM->SetupAttachment(Params.AttachParent);
     NewISM->RegisterComponent();
+
+    NewISM->MarkRenderStateDirty();
     return NewISM;
 }
 
-UInstancedStaticMeshComponent* UISMManager::GetOrCreateISMComponent(
-    UStaticMesh* Mesh,
-    const int32 NumCustomDataFloats,
-    const FISMComponentParams& Params)
+// ============================================================================
+// 基本接口
+// ============================================================================
+
+UInstancedStaticMeshComponent* UISMManager::GetOrCreateISMComponent(UStaticMesh* Mesh, int32 NumCustomDataFloats, const FISMComponentParams& Params)
 {
     if (!Mesh) return nullptr;
-
     const FISMMeshKey Key(Mesh);
-    
-    // 1. 先尝试在已有的桶组中查找（桶0），如果已有则直接返回（快速路径，线程安全）
     if (const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key))
     {
         if (Group->Buckets.Num() > 0 && Group->Buckets[0])
-        {
             return Group->Buckets[0];
-        }
     }
 
-    // 2. 组件尚未创建，必须创建新的。
-    // 如果在游戏线程，直接创建并注册（安全）
     if (IsInGameThread())
     {
         FISMBucketGroup& Group = MeshToBucketGroups.FindOrAdd(Key);
         Group.NumCustomDataFloats = NumCustomDataFloats;
         Group.bDisableBuckets = Params.bDisableBuckets;
+        Group.CachedParams = Params;
+        Group.BucketingThreshold = BucketingThreshold; // 使用当前全局阈值
         if (Group.Buckets.Num() == 0) Group.Buckets.SetNum(1);
         UInstancedStaticMeshComponent* NewISM = CreateISMComponent(Mesh, NumCustomDataFloats, Params);
         Group.Buckets[0] = NewISM;
         return NewISM;
     }
-    
-    // 3. 在工作线程：将创建任务提交到游戏线程，并等待完成
-    // 注意：Params 必须拷贝，因为其生命周期可能短于任务执行
+
     FISMComponentParams ParamsCopy = Params;
     const FGraphEventRef Task = FFunctionGraphTask::CreateAndDispatchWhenReady(
-        [this, Mesh, NumCustomDataFloats, ParamsCopy]()
-        {
-            // 在游戏线程执行，此时 IsInGameThread() == true，会进入上面 if 分支
-            GetOrCreateISMComponent(Mesh, NumCustomDataFloats, ParamsCopy);
-        },
+        [this, Mesh, NumCustomDataFloats, ParamsCopy]() { GetOrCreateISMComponent(Mesh, NumCustomDataFloats, ParamsCopy); },
         TStatId(), nullptr, ENamedThreads::GameThread);
-
-    // 等待游戏线程完成创建
     FTaskGraphInterface::Get().WaitUntilTaskCompletes(Task);
-
-    // 此时组件一定已经创建，直接返回即可
     const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
-    if (Group && Group->Buckets.Num() > 0 && Group->Buckets[0])
-    {
-        return Group->Buckets[0];
-    }
-    return nullptr; 
+    if (Group && Group->Buckets.Num() > 0 && Group->Buckets[0]) return Group->Buckets[0];
+    return nullptr;
 }
 
 UInstancedStaticMeshComponent* UISMManager::GetISMComponent(UStaticMesh* Mesh) const
 {
     if (!Mesh) return nullptr;
     const FISMMeshKey Key(Mesh);
-    if (const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key))
-    {
-        if (Group->Buckets.Num() > 0 && Group->Buckets[0])
-        {
-            return Group->Buckets[0];
-        }
-    }
+    const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
+    if (Group && Group->Buckets.Num() > 0 && Group->Buckets[0]) return Group->Buckets[0];
     return nullptr;
 }
 
-void UISMManager::UpdateInstanceCustomData(
-    UStaticMesh* Mesh,
-    const FGlobalInstanceId InstanceId,
-    const int32 CustomDataIndex,
-    const float Value)
+// ============================================================================
+// 单个实例更新
+// ============================================================================
+
+void UISMManager::UpdateInstanceCustomData(UStaticMesh* Mesh, FGlobalInstanceId InstanceId, int32 CustomDataIndex, float Value)
 {
     if (!Mesh || !InstanceId.IsValid()) return;
-
     const FISMMeshKey Key(Mesh);
     const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
     if (!Group || !Group->Buckets.IsValidIndex(InstanceId.BucketIndex)) return;
@@ -132,17 +113,27 @@ void UISMManager::UpdateInstanceCustomData(
     UInstancedStaticMeshComponent* Bucket = Group->Buckets[InstanceId.BucketIndex];
     if (!Bucket) return;
 
-    Bucket->SetCustomDataValueById(InstanceId.LocalId, CustomDataIndex, Value);
-    DirtyBuckets.Add(Bucket);
+    // 优先走增量接口（避免全量 MarkRenderStateDirty）
+    if (UIncrementalInstancedStaticMeshComponent* IncComp = Cast<UIncrementalInstancedStaticMeshComponent>(Bucket))
+    {
+        int32 InstanceIndex = IncComp->GetInstanceIndexForId(InstanceId.LocalId);
+        if (InstanceIndex != INDEX_NONE)
+            IncComp->UpdateInstanceCustomDataIncremental(InstanceIndex, MakeArrayView(&Value, 1));
+    }
+    else
+    {
+        Bucket->SetCustomDataValueById(InstanceId.LocalId, CustomDataIndex, Value);
+    }
 }
+
+// ============================================================================
+// 批量操作
+// ============================================================================
 
 DECLARE_CYCLE_STAT(TEXT("BatchAddInstances"), STAT_BatchAddInstances, STATGROUP_Game);
 TArray<FGlobalInstanceId> UISMManager::BatchAddInstances(
-    UStaticMesh* Mesh,
-    const TArray<FTransform>& Transforms,
-    const int32 NumCustomDataFloats,
-    const FISMComponentParams& ISMParams,
-    const TArray<float>& CustomData)
+    UStaticMesh* Mesh, const TArray<FTransform>& Transforms, const int32 NumCustomDataFloats,
+    const FISMComponentParams& ISMParams, const TArray<float>& CustomData)
 {
     SCOPE_CYCLE_COUNTER(STAT_BatchAddInstances);
     TArray<FGlobalInstanceId> AllGlobalIds;
@@ -153,58 +144,29 @@ TArray<FGlobalInstanceId> UISMManager::BatchAddInstances(
     FISMBucketGroup& Group = MeshToBucketGroups.FindOrAdd(Key);
     Group.NumCustomDataFloats = NumCustomDataFloats;
 
-    // 如果禁用分桶，始终使用单桶一次性添加全部
-    if (Group.bDisableBuckets)
+    // 根据阈值决定是否启用分桶
+    const bool bForceSingleBucket = Group.bDisableBuckets || Group.BucketingThreshold <= 0;
+    const bool bShouldStartBucketing = (!bForceSingleBucket) && (Group.TotalInstanceCount + AddCount > Group.BucketingThreshold);
+
+    // 场景1：未分桶且不需要分桶 → 使用单桶
+    if ((Group.Buckets.Num() == 0) && !bShouldStartBucketing)
     {
         UInstancedStaticMeshComponent* ISMComp = GetOrCreateISMComponent(Mesh, NumCustomDataFloats, ISMParams);
         if (!ISMComp) return AllGlobalIds;
-
-        TArray<FPrimitiveInstanceId> Ids = ISMComp->AddInstancesById(Transforms, true, false); 
-        for (const FPrimitiveInstanceId& Id : Ids)
-        {
-            AllGlobalIds.Emplace(0, Id);   // 桶编号永远为 0
-        }
-        if (CustomData.Num() > 0)
-        {
-            const int32 Expected = Ids.Num() * NumCustomDataFloats;
-            if (CustomData.Num() == Expected)
-                ISMComp->SetCustomDataById(Ids, CustomData);
-        }
-        Group.TotalInstanceCount += AddCount;
-        DirtyBuckets.Add(ISMComp);   // 添加脏桶，稍后统一刷新
-        return AllGlobalIds;
-    }
-    
-    const bool bHasBuckets = Group.Buckets.Num() > 0;
-    const bool bShouldUseBuckets = (Group.TotalInstanceCount + AddCount) > INSTANCES_PER_BUCKET;
-
-    // 场景1：尚未分桶且总数不超过一个桶 → 使用桶0
-    if (!bHasBuckets && !bShouldUseBuckets)
-    {
-        UInstancedStaticMeshComponent* ISMComp = GetOrCreateISMComponent(Mesh, NumCustomDataFloats, ISMParams); // 已安全
-        if (!ISMComp) return AllGlobalIds;
-
         TArray<FPrimitiveInstanceId> Ids = ISMComp->AddInstancesById(Transforms, true);
         for (const FPrimitiveInstanceId& Id : Ids)
-        {
             AllGlobalIds.Emplace(0, Id);
-        }
         if (CustomData.Num() > 0)
         {
             const int32 Expected = Ids.Num() * NumCustomDataFloats;
-            if (CustomData.Num() == Expected)
-                ISMComp->SetCustomDataById(Ids, CustomData);
+            if (CustomData.Num() == Expected) ISMComp->SetCustomDataById(Ids, CustomData);
         }
         Group.TotalInstanceCount += AddCount;
         return AllGlobalIds;
     }
 
-    // 场景2：启用分桶逻辑
-    // 确保至少有桶0
-    if (!GetOrCreateBucket(Mesh, 0, NumCustomDataFloats, ISMParams))
-    {
-        return AllGlobalIds;
-    }
+    // 场景2：需要分桶或已经分桶
+    if (!GetOrCreateBucket(Mesh, 0, NumCustomDataFloats, ISMParams)) return AllGlobalIds;
 
     const int32 StartGlobalIndex = Group.TotalInstanceCount;
     int32 CurrentGlobalIdx = StartGlobalIndex;
@@ -217,17 +179,13 @@ TArray<FGlobalInstanceId> UISMManager::BatchAddInstances(
         const int32 Remain = INSTANCES_PER_BUCKET - LocalOffset;
         const int32 SliceCount = FMath::Min(Remain, AddCount - Processed);
 
-        // 安全获取或创建桶
         UInstancedStaticMeshComponent* Bucket = GetOrCreateBucket(Mesh, BucketIdx, NumCustomDataFloats, ISMParams);
-        if (!Bucket) break; 
+        if (!Bucket) break;
 
         TArray<FTransform> SliceTransforms(&Transforms[Processed], SliceCount);
         TArray<FPrimitiveInstanceId> SliceIds = Bucket->AddInstancesById(SliceTransforms, true);
-
         for (const FPrimitiveInstanceId& Id : SliceIds)
-        {
             AllGlobalIds.Emplace(BucketIdx, Id);
-        }
 
         if (CustomData.Num() > 0)
         {
@@ -236,58 +194,38 @@ TArray<FGlobalInstanceId> UISMManager::BatchAddInstances(
             TArray<float> SliceData(&CustomData[DataStart], SliceCount * Floats);
             Bucket->SetCustomDataById(SliceIds, SliceData);
         }
-
         Processed += SliceCount;
         CurrentGlobalIdx += SliceCount;
     }
-
     Group.TotalInstanceCount += AddCount;
     return AllGlobalIds;
 }
 
-DECLARE_CYCLE_STAT(TEXT("BatchRemoveInstances"), STAT_BatchRemoveInstances, STATGROUP_Game);
-void UISMManager::BatchRemoveInstances(
-    UStaticMesh* Mesh,
-    const TArray<FGlobalInstanceId>& InstanceIds)
+void UISMManager::BatchRemoveInstances(UStaticMesh* Mesh, const TArray<FGlobalInstanceId>& InstanceIds)
 {
-    SCOPE_CYCLE_COUNTER(STAT_BatchRemoveInstances);
     if (!Mesh || InstanceIds.Num() == 0) return;
-
     const FISMMeshKey Key(Mesh);
     const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
     if (!Group) return;
-
-    // 按桶分组
     TMap<int32, TArray<FPrimitiveInstanceId>> BucketMap;
     for (const FGlobalInstanceId& Gid : InstanceIds)
     {
         if (Gid.IsValid() && Group->Buckets.IsValidIndex(Gid.BucketIndex))
-        {
             BucketMap.FindOrAdd(Gid.BucketIndex).Add(Gid.LocalId);
-        }
     }
-
     for (auto& Pair : BucketMap)
     {
         if (UInstancedStaticMeshComponent* Bucket = Group->Buckets[Pair.Key])
-        {
             Bucket->RemoveInstancesById(Pair.Value);
-        }
     }
 }
 
-void UISMManager::BatchSetInstanceCustomData(
-    UStaticMesh* Mesh,
-    const TArray<FGlobalInstanceId>& InstanceIds,
-    const TArray<float>& CustomData) const
+void UISMManager::BatchSetInstanceCustomData(UStaticMesh* Mesh, const TArray<FGlobalInstanceId>& InstanceIds, const TArray<float>& CustomData) const
 {
     if (!Mesh || InstanceIds.Num() == 0 || CustomData.Num() == 0) return;
-
     const FISMMeshKey Key(Mesh);
     const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
     if (!Group) return;
-
-    // 获取每个实例的自定义数据数量
     int32 FloatsPerInstance = 0;
     for (const auto& Gid : InstanceIds)
     {
@@ -298,11 +236,8 @@ void UISMManager::BatchSetInstanceCustomData(
         }
     }
     if (FloatsPerInstance == 0) return;
-
     const int32 Expected = InstanceIds.Num() * FloatsPerInstance;
     if (CustomData.Num() != Expected) return;
-
-    // 按桶分组
     TMap<int32, TArray<FPrimitiveInstanceId>> IdGroups;
     TMap<int32, TArray<float>> DataGroups;
     for (int32 i = 0; i < InstanceIds.Num(); ++i)
@@ -313,75 +248,39 @@ void UISMManager::BatchSetInstanceCustomData(
         TArray<float>& Data = DataGroups.FindOrAdd(Gid.BucketIndex);
         const int32 Base = i * FloatsPerInstance;
         for (int32 f = 0; f < FloatsPerInstance; ++f)
-        {
             Data.Add(CustomData[Base + f]);
-        }
     }
-
     for (auto& IdPair : IdGroups)
     {
         if (UInstancedStaticMeshComponent* Bucket = Group->Buckets[IdPair.Key])
-        {
             Bucket->SetCustomDataById(IdPair.Value, DataGroups[IdPair.Key]);
-        }
     }
 }
 
-void UISMManager::FlushDirtyBuckets()
-{
-    for (UInstancedStaticMeshComponent* Bucket : DirtyBuckets)
-    {
-        if (Bucket)
-        {
-            Bucket->MarkRenderStateDirty();
-        }
-    }
-    DirtyBuckets.Empty();
-}
+// ============================================================================
+// 桶管理
+// ============================================================================
 
-UInstancedStaticMeshComponent* UISMManager::GetOrCreateBucket(
-    UStaticMesh* Mesh,
-    int32 BucketIndex,
-    int32 NumCustomDataFloats,
-    const FISMComponentParams& Params)
+UInstancedStaticMeshComponent* UISMManager::GetOrCreateBucket(UStaticMesh* Mesh, int32 BucketIndex, int32 NumCustomDataFloats, const FISMComponentParams& Params)
 {
     if (!Mesh) return nullptr;
-
     const FISMMeshKey Key(Mesh);
     FISMBucketGroup& Group = MeshToBucketGroups.FindOrAdd(Key);
     Group.NumCustomDataFloats = NumCustomDataFloats;
-
-    // 确保桶数组容量足够
     if (BucketIndex >= Group.Buckets.Num())
-    {
-        // 在工作线程中可修改数组大小（TArray 的 SetNum 线程安全，但需注意）
         Group.Buckets.SetNum(BucketIndex + 1);
-    }
+    if (Group.Buckets[BucketIndex]) return Group.Buckets[BucketIndex];
 
-    // 如果桶已经存在，直接返回
-    if (Group.Buckets[BucketIndex])
-    {
-        return Group.Buckets[BucketIndex];
-    }
-
-    // 需要在游戏线程创建组件
     if (IsInGameThread())
     {
         UInstancedStaticMeshComponent* NewBucket = CreateISMComponent(Mesh, NumCustomDataFloats, Params);
         Group.Buckets[BucketIndex] = NewBucket;
         return NewBucket;
     }
-    // 在工作线程：委托到游戏线程创建组件并等待完成
     const FGraphEventRef Task = FFunctionGraphTask::CreateAndDispatchWhenReady(
-        [this, Mesh, Key, BucketIndex, NumCustomDataFloats, Params]()
-        {
-            // 在游戏线程中调用自身，此时 IsInGameThread() 为 true
-            GetOrCreateBucket(Mesh, BucketIndex, NumCustomDataFloats, Params);
-        },
+        [this, Mesh, Key, BucketIndex, NumCustomDataFloats, Params]() { GetOrCreateBucket(Mesh, BucketIndex, NumCustomDataFloats, Params); },
         TStatId(), nullptr, ENamedThreads::GameThread);
     FTaskGraphInterface::Get().WaitUntilTaskCompletes(Task);
-
-    // 此时桶一定已经创建完成
     return Group.Buckets[BucketIndex];
 }
 
@@ -393,13 +292,124 @@ void UISMManager::DebugPrintBucketStats()
     {
         const FISMBucketGroup& Group = Pair.Value;
         int32 ActiveBuckets = 0;
-        for (const auto& Bucket : Group.Buckets)
-        {
-            if (Bucket) ++ActiveBuckets;
-        }
+        for (const auto& Bucket : Group.Buckets) if (Bucket) ++ActiveBuckets;
         TotalBuckets += ActiveBuckets;
-        UE_LOG(LogTemp, Warning, TEXT("Mesh: %s, Total Instances: %d, Buckets: %d (Active)"),
-            *Pair.Key.MeshPath.ToString(), Group.TotalInstanceCount, ActiveBuckets);
+        UE_LOG(LogTemp, Warning, TEXT("Mesh: %s, Total Instances: %d, Buckets: %d (Active)"), *Pair.Key.MeshPath.ToString(), Group.TotalInstanceCount, ActiveBuckets);
     }
     UE_LOG(LogTemp, Warning, TEXT("Total Active Buckets: %d"), TotalBuckets);
+}
+
+// ---- 对象池实现 ----
+// 注意：仅支持 UIncrementalInstancedStaticMeshComponent，不支持普通 ISM
+FGlobalInstanceId UISMManager::AcquireSlot(UStaticMesh* Mesh, const FTransform& WorldTransform, TArrayView<const float> CustomData)
+{
+    if (!Mesh) return FGlobalInstanceId();
+    const FISMMeshKey Key(Mesh);
+    TUniquePtr<TQueue<FGlobalInstanceId, EQueueMode::Mpsc>>& FreeQueue = FreeSlotIndices.FindOrAdd(Key);
+    if (!FreeQueue)
+    {
+        FreeQueue = MakeUnique<TQueue<FGlobalInstanceId, EQueueMode::Mpsc>>();
+    }
+
+    FGlobalInstanceId AllocatedId;
+    if (!FreeQueue->Dequeue(AllocatedId))
+    {
+        // 池空，扩容
+        ExpandCapacity(Mesh, BatchExpandSize);
+        // 扩容后队列一定存在且非空
+        FreeQueue->Dequeue(AllocatedId);
+    }
+    
+    FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
+    if (!Group || !Group->Buckets.IsValidIndex(AllocatedId.BucketIndex)) return FGlobalInstanceId();
+    UIncrementalInstancedStaticMeshComponent* IncComp = Cast<UIncrementalInstancedStaticMeshComponent>(Group->Buckets[AllocatedId.BucketIndex]);
+    if (!IncComp) return FGlobalInstanceId();
+
+    const int32 InstanceIndex = IncComp->GetInstanceIndexForId(AllocatedId.LocalId);
+  
+    if (InstanceIndex == INDEX_NONE) return FGlobalInstanceId();
+
+    IncComp->UpdateInstanceTransformIncremental(InstanceIndex, WorldTransform);
+    if (CustomData.Num() > 0)
+    {
+        IncComp->UpdateInstanceCustomDataIncremental(InstanceIndex, CustomData);
+    }
+    DirtyIncrementalComponents.Add(IncComp);
+    return AllocatedId;
+}
+
+void UISMManager::ReleaseSlot(UStaticMesh* Mesh, const FGlobalInstanceId& InstanceId)
+{
+    if (!Mesh || !InstanceId.IsValid()) return;
+    const FISMMeshKey Key(Mesh);
+    FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
+    if (!Group || !Group->Buckets.IsValidIndex(InstanceId.BucketIndex)) return;
+    UIncrementalInstancedStaticMeshComponent* IncComp = Cast<UIncrementalInstancedStaticMeshComponent>(Group->Buckets[InstanceId.BucketIndex]);
+    if (!IncComp) return;
+    int32 InstanceIndex = IncComp->GetInstanceIndexForId(InstanceId.LocalId);
+    if (InstanceIndex == INDEX_NONE) return;
+    IncComp->SetInstanceVisibility(InstanceIndex, false);
+    DirtyIncrementalComponents.Add(IncComp);
+    TUniquePtr<TQueue<FGlobalInstanceId, EQueueMode::Mpsc>>& FreeQueue = FreeSlotIndices.FindOrAdd(Key);
+    if (!FreeQueue)
+    {
+        FreeQueue = MakeUnique<TQueue<FGlobalInstanceId, EQueueMode::Mpsc>>();
+    }
+    FreeQueue->Enqueue(InstanceId);
+}
+
+void UISMManager::ExpandCapacity(UStaticMesh* Mesh, int32 AdditionalCount)
+{
+    if (!Mesh || AdditionalCount <= 0) return;
+    const FISMMeshKey Key(Mesh);
+    FISMBucketGroup& Group = MeshToBucketGroups.FindOrAdd(Key);
+    
+    TArray<FTransform> DummyTransforms;
+    DummyTransforms.SetNum(AdditionalCount);
+
+    const bool bIsNanite = Group.Buckets[0]->GetStaticMesh()->IsNaniteEnabled();
+    const FTransform InitTransform = bIsNanite ? FTransform(ParkedLocation) : FTransform::Identity;
+    for (int32 i = 0; i < AdditionalCount; ++i)
+    {
+        DummyTransforms[i] = InitTransform;
+        DummyTransforms[i].SetScale3D(FVector::One());
+    }
+    // 扩容总是使用缓存的参数
+    TArray<FGlobalInstanceId> NewIds = BatchAddInstances(Mesh, DummyTransforms, Group.NumCustomDataFloats, Group.CachedParams);
+
+    // 将新创建的实例全部入空闲队列（所有实例初始为缩放零的隐藏状态）
+    TUniquePtr<TQueue<FGlobalInstanceId, EQueueMode::Mpsc>>& FreeQueue = FreeSlotIndices.FindOrAdd(Key);
+    if (!FreeQueue)
+    {
+        FreeQueue = MakeUnique<TQueue<FGlobalInstanceId, EQueueMode::Mpsc>>();
+    }
+    for (FGlobalInstanceId& Id : NewIds)
+    {
+        FreeQueue->Enqueue(Id);
+    }
+    // for (auto& Bucket : Group.Buckets)
+    // {
+    //     if (Bucket)
+    //     {
+    //         Bucket->MarkRenderStateDirty();
+    //     }
+    // }
+}
+
+void UISMManager::PreAllocateSlots(UStaticMesh* Mesh, int32 Count)
+{
+    if (Count <= 0) return;
+    ExpandCapacity(Mesh, Count);
+}
+
+void UISMManager::FlushAllIncrementalComponents()
+{
+    for (auto& Bucket : DirtyIncrementalComponents)
+    {
+        if (UIncrementalInstancedStaticMeshComponent* IncComp = Cast<UIncrementalInstancedStaticMeshComponent>(Bucket))
+        {
+            IncComp->FlushIncrementalUpdates();
+        }
+    }
+    DirtyIncrementalComponents.Reset();
 }

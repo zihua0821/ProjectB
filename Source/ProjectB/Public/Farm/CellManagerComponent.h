@@ -147,5 +147,5 @@ private:
 	void OnAutoHarvest(FIntPoint Coords);
 	void OnRemoveCrop(FIntPoint Coords);
 	void OnRePlantCrop(FIntPoint Coords);
-
+	
 };

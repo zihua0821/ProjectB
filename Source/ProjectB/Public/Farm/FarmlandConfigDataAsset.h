@@ -112,6 +112,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crop",
 			  meta = (DisplayName = "作物z偏移"))
 	FVector CropOffset;
+
+	// 作物模型
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crop", 
+			  meta = (DisplayName = "作物模型"))
+	TArray<TObjectPtr<UStaticMesh>> CropMeshes;
+
+	// 作物粒子系统
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crop", 
+			  meta = (DisplayName = "作物粒子系统"))
+	TObjectPtr<UNiagaraSystem> CropNiagaraSystem;
 	
 	// ============== 杂草配置 ==============
 	// 杂草模型

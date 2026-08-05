@@ -22,6 +22,8 @@ public:
 	/** 设置ISM挂载父组件 */
 	void SetISMAttachParent(USceneComponent* InParent) { ISMAttachParent = InParent; }
 
+	void SetUniqueMeshes(const TArray<TPair<TObjectPtr<UStaticMesh>, int32>>& InUniqueMeshes) { UniqueMeshes = InUniqueMeshes;}
+
 	/** 获取农场配置 */
 	UFarmlandConfigDataAsset* GetFarmlandConfig() const { return FarmlandConfig; }
 
@@ -33,6 +35,8 @@ public:
 
 	/** 获取ISM挂载父组件 */
 	USceneComponent* GetISMAttachParent() const { return ISMAttachParent; }
+
+	TArray<TPair<TObjectPtr<UStaticMesh>, int32>> GetUniqueMeshes() const { return UniqueMeshes; }
 
 	TQueue<FIntPoint, EQueueMode::Mpsc> MatureCropQueue;
 private:
@@ -47,5 +51,7 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<USceneComponent> ISMAttachParent;
+
+	TArray<TPair<TObjectPtr<UStaticMesh>, int32>> UniqueMeshes;
 
 };

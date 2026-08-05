@@ -2,16 +2,19 @@
 #include "Mass/CropVisualSyncProcessor.h"
 #include "MassEntityManager.h"
 #include "MassExecutionContext.h"
+#include "NiagaraDataInterfaceArrayFunctionLibrary.h"
 #include "Mass/CellMassFragments.h"
 #include "Subsystem/GlobalConfigSubsystem.h"
 #include "Farm/FarmlandConfigDataAsset.h"
 #include "Crops/CropData.h"
+#include "Planet/PlanetConfigDataAsset.h"
 #include "Subsystem/ISMManager.h"
 
 UCropVisualSyncProcessor::UCropVisualSyncProcessor()
 {
     bAutoRegisterWithProcessingPhases = true;
     ExecutionOrder.ExecuteBefore.Add(TEXT("UCropGrowthProcessor"));
+    bRequiresGameThreadExecution = true;
 }
 
 void UCropVisualSyncProcessor::ConfigureQueries()
@@ -19,7 +22,7 @@ void UCropVisualSyncProcessor::ConfigureQueries()
     EntityQuery.AddRequirement<FCellStaticFragment>(EMassFragmentAccess::ReadOnly);
     EntityQuery.AddRequirement<FCropStaticConfigFragment>(EMassFragmentAccess::ReadOnly);
     EntityQuery.AddRequirement<FCropStateFragment>(EMassFragmentAccess::ReadWrite); 
-    EntityQuery.AddRequirement<FCropRenderFragment>(EMassFragmentAccess::ReadWrite); 
+    EntityQuery.AddRequirement<FCropRenderFragment>(EMassFragmentAccess::ReadWrite);
     EntityQuery.RegisterWithProcessor(*this);
 }
 
@@ -44,12 +47,6 @@ void UCropVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
     }
 
     const FVector CropOffset = FarmConfig->CropOffset;
-
-     // 收集待移除的实例
-    TArray<TPair<UStaticMesh*, FGlobalInstanceId>> PendingRemoves;
-    
-    // 键：(Mesh, NumFloats) 值：(Transform, Entity)
-    TArray<TPair<TPair<UStaticMesh*, int32>, TPair<FTransform, FMassEntityHandle>>> PendingAdds;
 
     EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& InContext)
     {
@@ -84,18 +81,22 @@ void UCropVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
             FTransform CropTransform = Cell.Transform;
             CropTransform.AddToTranslation(CropOffset);
 
-            // 记录需要移除的旧实例
+            // 释放旧的实例
             if (CropRender.InstanceId.IsValid() && CropRender.CurrentMesh)
             {
-                PendingRemoves.Emplace(CropRender.CurrentMesh, CropRender.InstanceId);
+                ISMManager->ReleaseSlot(CropRender.CurrentMesh, CropRender.InstanceId);
+                CropRender.InstanceId = FGlobalInstanceId(); // 标记为空
             }
-            
-            // 填充待添加列表，包含分组键
+
+            // 获取新的实例
             if (DesiredMesh)
             {
-                PendingAdds.Emplace(
-                    TPair<UStaticMesh*, int32>{DesiredMesh, CropStaticConfig.CropNumCustomDataFloats},
-                    TPair<FTransform, FMassEntityHandle>{CropTransform, Context.GetEntity(i)}
+                CropRender.InstanceId = ISMManager->AcquireSlot(
+                    DesiredMesh,
+                    CropTransform,
+                    {
+                        1.0f, 0.0f, 0.0f,
+                    }
                 );
             }
 
@@ -107,68 +108,5 @@ void UCropVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
         }
     });
 
-    // ---- 批量移除 ----
-    if (PendingRemoves.Num() > 0)
-    {
-        PendingRemoves.Sort([](const auto& A, const auto& B)
-        {
-            return A.Key < B.Key;
-        });
-        
-        for (int32 i = 0; i < PendingRemoves.Num(); )
-        {
-            UStaticMesh* Mesh = PendingRemoves[i].Key;
-            TArray<FGlobalInstanceId> Ids;
-            while (i < PendingRemoves.Num() && PendingRemoves[i].Key == Mesh)
-            {
-                Ids.Add(PendingRemoves[i].Value);
-                ++i;
-            }
-            // ISMManager->BatchRemoveInstances(Mesh, Ids);
-        }
-    }
-
-    // ---- 批量添加 ----
-    if (PendingAdds.Num() > 0)
-    {
-        PendingAdds.Sort([](const auto& A, const auto& B)
-        {
-            return A.Key.Key < B.Key.Key;
-        });
-
-        for (int32 i = 0; i < PendingAdds.Num(); )
-        {
-            const TPair<UStaticMesh*, int32>& Key = PendingAdds[i].Key;  
-            UStaticMesh* Mesh = Key.Key;
-            const int32 NumFloats = Key.Value;
-
-            TArray<FTransform> Transforms;
-            TArray<FMassEntityHandle> Entities;
-            while (i < PendingAdds.Num() &&
-                   PendingAdds[i].Key.Key == Mesh &&
-                   PendingAdds[i].Key.Value == NumFloats)
-            {
-                Transforms.Add(PendingAdds[i].Value.Key);
-                Entities.Add(PendingAdds[i].Value.Value);
-                ++i;
-            }
-
-            // TArray<FGlobalInstanceId> NewIds = ISMManager->BatchAddInstances(
-            //     Mesh,
-            //     Transforms,
-            //     NumFloats,
-            //     CropParams
-            //     );
-            // check(NewIds.Num() == Entities.Num());
-            //
-            // // 写回实例 ID
-            // for (int32 j = 0; j < NewIds.Num(); ++j)
-            // {
-            //     if (EntityManager.IsEntityActive(Entities[j]))
-            //     {
-            //         EntityManager.GetFragmentDataChecked<FCropRenderFragment>(Entities[j]).InstanceId = NewIds[j];
-            //     }
-            // }
-        }
-    }
+    ISMManager->FlushAllIncrementalComponents();
 }
