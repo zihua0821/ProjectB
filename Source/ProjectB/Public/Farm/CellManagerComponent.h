@@ -1,4 +1,4 @@
-﻿// CellManagerComponent.h
+// CellManagerComponent.h
 #pragma once
 
 #include "CoreMinimal.h"
@@ -13,7 +13,6 @@ class ABasePlayerController;
 class UPlanetConfigDataAsset;
 class UFarmlandConfigDataAsset;
 class UDataTable;
-class UISMPoolManager;
 
 /**
  * 单元格管理中心组件

@@ -6,7 +6,7 @@
 #include "Planet/PlanetData.h"
 #include "Planet/PlanetInterface.h"
 #include "Player/BasePlayerController.h"
-#include "Subsystem/ISMPoolManager.h"
+#include "Subsystem/ISMManager.h"
 #include "Tools/ISMTools.h"
 
 UCropManagerComponent::UCropManagerComponent()
@@ -99,9 +99,7 @@ void UCropManagerComponent::RemoveCrop(FIntPoint Coords)
     }
     if (CurrentMesh)
     {
-        UISMPoolManager* PoolManager = GetWorld()->GetSubsystem<UISMPoolManager>();
-        if (!PoolManager) return;
-        PoolManager->ReleaseInstance(CurrentMesh, CropInfo.CropTransform);
+        // TODO: 迁移到 ISMManager 原生增量接口（BatchRemoveInstances），需先保存 FGlobalInstanceId
         
         // if (CropHISMComponentMap.Contains(FStaticMeshKey(CurrentMesh)))
         // {
@@ -415,14 +413,11 @@ void UCropManagerComponent::OnCropGrowthStageChanged(FIntPoint Coords, ECropGrow
         break;
     }
     
-    UISMPoolManager* PoolManager = GetWorld()->GetSubsystem<UISMPoolManager>();
-    if (!PoolManager) return;
-   
+    // TODO: 迁移到 ISMManager 原生增量接口（旧实例 BatchRemoveInstances）
+    
     // 移除旧实例
     if (OldMesh)
     {
-        PoolManager->ReleaseInstance(OldMesh, CropInfo.CropTransform);
-        
         // if (CropHISMComponentMap.Contains(FStaticMeshKey(OldMesh)))
         // {
         //     if (UInstancedStaticMeshComponent* OldInstanceHISMComponent = CropHISMComponentMap.FindChecked(FStaticMeshKey(OldMesh)))
@@ -437,17 +432,9 @@ void UCropManagerComponent::OnCropGrowthStageChanged(FIntPoint Coords, ECropGrow
         // }
     }
 
-    // 添加新实例
+    // 添加新实例（TODO: 迁移到 ISMManager->BatchAddInstances，保存返回的 FGlobalInstanceId）
     if (NewMesh)
     {
-        const bool bWithers = CropInfo.Crop->GetCropData().CropStateData.HasState(ECropState::Withers);
-        TArray<float> CustomData
-        {
-            bWithers ? 1.f : 0.f,
-            bWithers ? 1.f : 0.f
-        };
-        PoolManager->AcquireInstance(NewMesh, this, CropInfo.CropTransform, CropInfo.CropNumCustomDataFloats, CustomData);
-        
         // if (UInstancedStaticMeshComponent* NewISM = GetOrCreateCropHISMComponent(CropInfo))
         // {
         //     const int32 Index = NewISM->AddInstance(CropInfo.CropTransform);
@@ -537,60 +524,23 @@ void UCropManagerComponent::SetCropDisease(FIntPoint Coords, bool bDisease, bool
         UE_LOG(LogTemp, Error, TEXT("Plot is not planted"))
     }
 
-    UStaticMesh* Mesh = nullptr;
-    switch (CropInfo.Crop->GetCropData().CropGrowthStage) {
-    case ECropGrowthStage::None:
-        Mesh = nullptr;
-        break;
-    case ECropGrowthStage::Seed:
-        Mesh = CropInfo.CropMeshVariant.SeedMesh;
-        break;
-    case ECropGrowthStage::Seedling:
-        Mesh = CropInfo.CropMeshVariant.SeedlingMesh;
-        break;
-    case ECropGrowthStage::Mature:
-        Mesh = CropInfo.CropMeshVariant.MatureMesh;
-        break;
-    case ECropGrowthStage::Harvested:
-        Mesh = CropInfo.CropMeshVariant.HarvestedMesh;
-        break;
-    }
-    UISMPoolManager* PoolManager = GetWorld()->GetSubsystem<UISMPoolManager>();
-    if (!PoolManager) return;
-    
-    // UInstancedStaticMeshComponent* CropRenderer = nullptr;
-    // if (CropHISMComponentMap.Contains(FStaticMeshKey(Mesh)))
-    // {
-    //     CropRenderer = *CropHISMComponentMap.Find(FStaticMeshKey(Mesh));
-    // }
-    // if (!CropRenderer)
-    // {
-    //     UE_LOG(LogTemp, Error, TEXT("Crop renderer not found"));
-    //     return;
-    // }
-    // int32 CropIndex;
-    // UISMTools::GetInstanceIndexByTransform(CropRenderer, CropInfo.CropTransform, CropIndex);
+    // TODO: 迁移到 ISMManager->UpdateInstanceCustomData（需传入已保存的 FGlobalInstanceId 与对应阶段 Mesh）
     if (bDisease)
     {
-        PoolManager->UpdateInstanceCustomData(Mesh, CropInfo.CropTransform, CropCustomData::Disease, 1.f);
         // CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::Disease, 1.f);
         if (bLeafs)
         {
-            PoolManager->UpdateInstanceCustomData(Mesh, CropInfo.CropTransform, CropCustomData::IsLeaf, 1.f);
             // CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::IsLeaf, 1.f);
             CropInfo.Crop->GetCropDataRef().CropStateData.AddState(ECropState::NeedsWater);
         }
         else
         {
-            PoolManager->UpdateInstanceCustomData(Mesh, CropInfo.CropTransform, CropCustomData::IsLeaf, 0.f);
             // CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::IsLeaf, 0.f);
             CropInfo.Crop->GetCropDataRef().CropStateData.AddState(ECropState::NeedsWater);
         }
     }
     else
     {
-        PoolManager->UpdateInstanceCustomData(Mesh, CropInfo.CropTransform, CropCustomData::Disease, 0.f);
-        PoolManager->UpdateInstanceCustomData(Mesh, CropInfo.CropTransform, CropCustomData::IsLeaf, 0.f);
         // CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::Disease, 0.f);
         // CropRenderer->SetCustomDataValue(CropIndex, CropCustomData::IsLeaf, 0.f);
         CropInfo.Crop->GetCropDataRef().CropStateData.RemoveState(ECropState::NeedsWater);

@@ -1,11 +1,10 @@
-﻿// FarmPrototype.cpp
+// FarmPrototype.cpp
 #include "Mass/FarmPrototype.h"
 #include "MassEntityManager.h"           // FMassEntityManager
 #include "MassEntitySubsystem.h"         // UMassEntitySubsystem
 #include "SmartObjectTypes.h"          // 解决 FSmartObjectSlot / FSmartObjectSlotHandle 核心依赖
 #include "SmartObjectSubsystem.h"      // USmartObjectSubsystem 完整定义
 #include "SmartObjectComponent.h"      // USmartObjectComponent 完整定义
-#include "Subsystem/ISMPoolManager.h"    // 你的 ISM 对象池
 #include "Engine/World.h"
 #include "MassExecutionContext.h"
 #include "SmartObjectDefinition.h"
@@ -30,16 +29,6 @@ void UFarmRenderSyncProcessor::ConfigureQueries()
 
 void UFarmRenderSyncProcessor::Execute(FMassEntityManager& InEntityManager, FMassExecutionContext& Context)
 {
-    // 从世界获取 ISMPoolManager（也可在 BeginPlay 时缓存）
-    if (!ISMPoolManager)
-    {
-        if (const UWorld* World = InEntityManager.GetWorld())
-        {
-            ISMPoolManager = World->GetSubsystem<UISMPoolManager>();
-        }
-        if (!ISMPoolManager) return;
-    }
-
     EntityQuery.ForEachEntityChunk(InEntityManager, Context, [this](FMassExecutionContext& ChunkContext)
     {
         const int32 NumEntities = ChunkContext.GetNumEntities();
@@ -59,13 +48,13 @@ void UFarmRenderSyncProcessor::Execute(FMassEntityManager& InEntityManager, FMas
                 const int32 OldIndex = RenderStates[i].PerStageInstanceIndex[CurrentVisible];
                 if (OldIndex != INDEX_NONE)
                 {
-                    // ---------- TODO: 对接你的 ISMPoolManager ----------
+                    // ---------- TODO: 对接你的 ISMManager ----------
                     // 方案 A：如果你有直接操作 InstanceIndex 的接口
-                    // ISMPoolManager->SetInstanceVisibleByIndex(OldIndex, false);
+                    // ISMManager->SetInstanceVisibleByIndex(OldIndex, false);
 
                     // 方案 B：通过 Transform 隐藏（缩小到 0）
                     FTransform HiddenTransform = FTransform(RenderStates[i].WorldRotation, RenderStates[i].WorldLocation, FVector::ZeroVector);
-                    // ISMPoolManager->UpdateInstanceTransformByIndex(OldIndex, HiddenTransform);
+                    // ISMManager->UpdateInstanceTransformByIndex(OldIndex, HiddenTransform);
                     UE_LOG(LogTemp, Warning, TEXT("[RenderSync] Hide instance index %d (stage %d)"), OldIndex, CurrentVisible);
                 }
             }
@@ -77,7 +66,7 @@ void UFarmRenderSyncProcessor::Execute(FMassEntityManager& InEntityManager, FMas
                 if (NewIndex != INDEX_NONE)
                 {
                     FTransform ShowTransform = FTransform(RenderStates[i].WorldRotation, RenderStates[i].WorldLocation, FVector::OneVector);
-                    // ISMPoolManager->UpdateInstanceTransformByIndex(NewIndex, ShowTransform);
+                    // ISMManager->UpdateInstanceTransformByIndex(NewIndex, ShowTransform);
                     UE_LOG(LogTemp, Warning, TEXT("[RenderSync] Show instance index %d (stage %d)"), NewIndex, NewStage);
                 }
             }
@@ -101,7 +90,6 @@ void AFarmPrototypeManager::BeginPlay()
     Super::BeginPlay();
 
     SmartObjectSubsystem = GetWorld()->GetSubsystem<USmartObjectSubsystem>();
-    ISMPoolManager = GetWorld()->GetSubsystem<UISMPoolManager>();
 
     if (UMassEntitySubsystem* MassSubsystem = GetWorld()->GetSubsystem<UMassEntitySubsystem>())
     {
@@ -137,13 +125,13 @@ void AFarmPrototypeManager::SetupMassEntities()
         FCropGrowthFragment& Growth = EntityManager->GetFragmentDataChecked<FCropGrowthFragment>(Entity);
         Growth.GrowthStage = 2;
 
-        // 设置渲染状态（假设你已通过 ISMPoolManager 为四个阶段创建了实例，并记录了 Index）
+        // 设置渲染状态（假设你已通过 ISMManager 为四个阶段创建了实例，并记录了 Index）
         FCropRenderStateFragment& Render = EntityManager->GetFragmentDataChecked<FCropRenderStateFragment>(Entity);
         Render.WorldLocation = WorldLoc;
         Render.WorldRotation = FRotator::ZeroRotator;
         Render.CurrentVisibleStage = 2; // 成熟阶段可见
         Render.PerStageInstanceIndex.Init(-1, 4); // 初始化为 4 个 -1
-        // 示例：假设每个阶段的实例 Index 依次为 0,1,2,3（实际需根据 ISMPoolManager 返回值填充）
+        // 示例：假设每个阶段的实例 Index 依次为 0,1,2,3（实际需根据 ISMManager 返回值填充）
         for (int32 Stage = 0; Stage < 4; ++Stage)
         {
             Render.PerStageInstanceIndex[Stage] = Stage; // 占位，实际需替换

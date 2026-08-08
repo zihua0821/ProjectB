@@ -5,6 +5,11 @@
 **梳理日期**: 2026-08-04  
 **改动规模**: 源码 ~15 文件（约 2000+ 行变动）+ 内容资产大量增删
 
+> ## 📌 后续更新（2026-08-07）
+> 本快照中的**增量 ISM 渲染管线已被清理**：`UIncrementalInstancedStaticMeshComponent`（含根目录副本）与 `ISMPoolManager` 源码已删除，`ISMManager` 中的对象池接口（`AcquireSlot` / `ReleaseSlot` / `PreAllocateSlots` / `FlushAllIncrementalComponents` 等）已移除。
+> 架构定案：**空间分桶 + 引擎原生增量 API**（`bUseIncrementalISM` / `AddInstancesById` / `RemoveInstancesById` / `SetCustomDataValueById`）。
+> 本文件正文为 2026-08-04 时的历史快照，仅作参考，不再反映当前代码状态。
+
 ---
 
 ## 一、改动概览

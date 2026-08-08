@@ -1,4 +1,4 @@
-﻿// UCropVisualSyncProcessor.cpp
+// UCropVisualSyncProcessor.cpp
 #include "Mass/CropVisualSyncProcessor.h"
 #include "MassEntityManager.h"
 #include "MassExecutionContext.h"
@@ -40,6 +40,7 @@ void UCropVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 
     FISMComponentParams CropParams;
     CropParams.AttachParent = ConfigSub->GetISMAttachParent();
+    CropParams.bUseIncrementalISM = true; // 引擎原生增量渲染
     if (!CropParams.AttachParent)
     {
         UE_LOG(LogTemp, Warning, TEXT("UCropVisualSyncProcessor: ISMAttachParent not set in GlobalConfigSubsystem"));
@@ -81,23 +82,23 @@ void UCropVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
             FTransform CropTransform = Cell.Transform;
             CropTransform.AddToTranslation(CropOffset);
 
-            // 释放旧的实例
+            // 移除旧阶段实例（原生增量 Remove）
             if (CropRender.InstanceId.IsValid() && CropRender.CurrentMesh)
             {
-                ISMManager->ReleaseSlot(CropRender.CurrentMesh, CropRender.InstanceId);
+                ISMManager->BatchRemoveInstances(CropRender.CurrentMesh, {CropRender.InstanceId});
                 CropRender.InstanceId = FGlobalInstanceId(); // 标记为空
             }
 
-            // 获取新的实例
+            // 添加新阶段实例（原生增量 Add）
             if (DesiredMesh)
             {
-                CropRender.InstanceId = ISMManager->AcquireSlot(
+                const TArray<FGlobalInstanceId> Ids = ISMManager->BatchAddInstances(
                     DesiredMesh,
-                    CropTransform,
-                    {
-                        1.0f, 0.0f, 0.0f,
-                    }
-                );
+                    {CropTransform},
+                    3,
+                    CropParams,
+                    {1.0f, 0.0f, 0.0f});
+                if (Ids.Num() > 0) CropRender.InstanceId = Ids[0];
             }
 
             // 更新 CurrentMesh 快照
@@ -107,6 +108,4 @@ void UCropVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
             CropState.LastRenderedStage = CurrentStage;
         }
     });
-
-    ISMManager->FlushAllIncrementalComponents();
 }

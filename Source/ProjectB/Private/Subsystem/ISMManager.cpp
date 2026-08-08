@@ -1,5 +1,4 @@
 #include "Subsystem/ISMManager.h"
-#include "Component/IncrementalInstancedStaticMeshComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "ProjectB/ProjectB.h"
 
@@ -15,8 +14,6 @@ void UISMManager::Initialize(FSubsystemCollectionBase& Collection)
 void UISMManager::Deinitialize()
 {
     MeshToBucketGroups.Empty();
-    DirtyIncrementalComponents.Empty();
-    FreeSlotIndices.Empty();
     Super::Deinitialize();
 }
 
@@ -30,11 +27,9 @@ UInstancedStaticMeshComponent* UISMManager::CreateISMComponent(UStaticMesh* Mesh
     AActor* Owner = Params.AttachParent->GetOwner();
     if (!Owner) return nullptr;
 
-    UInstancedStaticMeshComponent* NewISM = nullptr;
-    if (Params.bUseIncrementalISM)
-        NewISM = NewObject<UIncrementalInstancedStaticMeshComponent>(Owner, NAME_None, RF_Transient);
-    else
-        NewISM = NewObject<UInstancedStaticMeshComponent>(Owner, NAME_None, RF_Transient);
+    UInstancedStaticMeshComponent* NewISM = NewObject<UInstancedStaticMeshComponent>(Owner, NAME_None, RF_Transient);
+    // 启用引擎原生增量渲染（AddInstancesById/RemoveInstancesById 增量路径）
+    NewISM->bUseIncrementalISM = Params.bUseIncrementalISM;
 
     NewISM->SetStaticMesh(Mesh);
     NewISM->SetNumCustomDataFloats(NumCustomDataFloats);
@@ -113,17 +108,8 @@ void UISMManager::UpdateInstanceCustomData(UStaticMesh* Mesh, FGlobalInstanceId 
     UInstancedStaticMeshComponent* Bucket = Group->Buckets[InstanceId.BucketIndex];
     if (!Bucket) return;
 
-    // 优先走增量接口（避免全量 MarkRenderStateDirty）
-    if (UIncrementalInstancedStaticMeshComponent* IncComp = Cast<UIncrementalInstancedStaticMeshComponent>(Bucket))
-    {
-        int32 InstanceIndex = IncComp->GetInstanceIndexForId(InstanceId.LocalId);
-        if (InstanceIndex != INDEX_NONE)
-            IncComp->UpdateInstanceCustomDataIncremental(InstanceIndex, MakeArrayView(&Value, 1));
-    }
-    else
-    {
-        Bucket->SetCustomDataValueById(InstanceId.LocalId, CustomDataIndex, Value);
-    }
+    // 引擎原生增量接口（SetCustomDataValueById 本身即增量路径，无需额外分支）
+    Bucket->SetCustomDataValueById(InstanceId.LocalId, CustomDataIndex, Value);
 }
 
 // ============================================================================
@@ -297,119 +283,4 @@ void UISMManager::DebugPrintBucketStats()
         UE_LOG(LogTemp, Warning, TEXT("Mesh: %s, Total Instances: %d, Buckets: %d (Active)"), *Pair.Key.MeshPath.ToString(), Group.TotalInstanceCount, ActiveBuckets);
     }
     UE_LOG(LogTemp, Warning, TEXT("Total Active Buckets: %d"), TotalBuckets);
-}
-
-// ---- 对象池实现 ----
-// 注意：仅支持 UIncrementalInstancedStaticMeshComponent，不支持普通 ISM
-FGlobalInstanceId UISMManager::AcquireSlot(UStaticMesh* Mesh, const FTransform& WorldTransform, TArrayView<const float> CustomData)
-{
-    if (!Mesh) return FGlobalInstanceId();
-    const FISMMeshKey Key(Mesh);
-    TUniquePtr<TQueue<FGlobalInstanceId, EQueueMode::Mpsc>>& FreeQueue = FreeSlotIndices.FindOrAdd(Key);
-    if (!FreeQueue)
-    {
-        FreeQueue = MakeUnique<TQueue<FGlobalInstanceId, EQueueMode::Mpsc>>();
-    }
-
-    FGlobalInstanceId AllocatedId;
-    if (!FreeQueue->Dequeue(AllocatedId))
-    {
-        // 池空，扩容
-        ExpandCapacity(Mesh, BatchExpandSize);
-        // 扩容后队列一定存在且非空
-        FreeQueue->Dequeue(AllocatedId);
-    }
-    
-    FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
-    if (!Group || !Group->Buckets.IsValidIndex(AllocatedId.BucketIndex)) return FGlobalInstanceId();
-    UIncrementalInstancedStaticMeshComponent* IncComp = Cast<UIncrementalInstancedStaticMeshComponent>(Group->Buckets[AllocatedId.BucketIndex]);
-    if (!IncComp) return FGlobalInstanceId();
-
-    const int32 InstanceIndex = IncComp->GetInstanceIndexForId(AllocatedId.LocalId);
-  
-    if (InstanceIndex == INDEX_NONE) return FGlobalInstanceId();
-
-    IncComp->UpdateInstanceTransformIncremental(InstanceIndex, WorldTransform);
-    if (CustomData.Num() > 0)
-    {
-        IncComp->UpdateInstanceCustomDataIncremental(InstanceIndex, CustomData);
-    }
-    DirtyIncrementalComponents.Add(IncComp);
-    return AllocatedId;
-}
-
-void UISMManager::ReleaseSlot(UStaticMesh* Mesh, const FGlobalInstanceId& InstanceId)
-{
-    if (!Mesh || !InstanceId.IsValid()) return;
-    const FISMMeshKey Key(Mesh);
-    FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
-    if (!Group || !Group->Buckets.IsValidIndex(InstanceId.BucketIndex)) return;
-    UIncrementalInstancedStaticMeshComponent* IncComp = Cast<UIncrementalInstancedStaticMeshComponent>(Group->Buckets[InstanceId.BucketIndex]);
-    if (!IncComp) return;
-    int32 InstanceIndex = IncComp->GetInstanceIndexForId(InstanceId.LocalId);
-    if (InstanceIndex == INDEX_NONE) return;
-    IncComp->SetInstanceVisibility(InstanceIndex, false);
-    DirtyIncrementalComponents.Add(IncComp);
-    TUniquePtr<TQueue<FGlobalInstanceId, EQueueMode::Mpsc>>& FreeQueue = FreeSlotIndices.FindOrAdd(Key);
-    if (!FreeQueue)
-    {
-        FreeQueue = MakeUnique<TQueue<FGlobalInstanceId, EQueueMode::Mpsc>>();
-    }
-    FreeQueue->Enqueue(InstanceId);
-}
-
-void UISMManager::ExpandCapacity(UStaticMesh* Mesh, int32 AdditionalCount)
-{
-    if (!Mesh || AdditionalCount <= 0) return;
-    const FISMMeshKey Key(Mesh);
-    FISMBucketGroup& Group = MeshToBucketGroups.FindOrAdd(Key);
-    
-    TArray<FTransform> DummyTransforms;
-    DummyTransforms.SetNum(AdditionalCount);
-
-    const bool bIsNanite = Group.Buckets[0]->GetStaticMesh()->IsNaniteEnabled();
-    const FTransform InitTransform = bIsNanite ? FTransform(ParkedLocation) : FTransform::Identity;
-    for (int32 i = 0; i < AdditionalCount; ++i)
-    {
-        DummyTransforms[i] = InitTransform;
-        DummyTransforms[i].SetScale3D(FVector::One());
-    }
-    // 扩容总是使用缓存的参数
-    TArray<FGlobalInstanceId> NewIds = BatchAddInstances(Mesh, DummyTransforms, Group.NumCustomDataFloats, Group.CachedParams);
-
-    // 将新创建的实例全部入空闲队列（所有实例初始为缩放零的隐藏状态）
-    TUniquePtr<TQueue<FGlobalInstanceId, EQueueMode::Mpsc>>& FreeQueue = FreeSlotIndices.FindOrAdd(Key);
-    if (!FreeQueue)
-    {
-        FreeQueue = MakeUnique<TQueue<FGlobalInstanceId, EQueueMode::Mpsc>>();
-    }
-    for (FGlobalInstanceId& Id : NewIds)
-    {
-        FreeQueue->Enqueue(Id);
-    }
-    // for (auto& Bucket : Group.Buckets)
-    // {
-    //     if (Bucket)
-    //     {
-    //         Bucket->MarkRenderStateDirty();
-    //     }
-    // }
-}
-
-void UISMManager::PreAllocateSlots(UStaticMesh* Mesh, int32 Count)
-{
-    if (Count <= 0) return;
-    ExpandCapacity(Mesh, Count);
-}
-
-void UISMManager::FlushAllIncrementalComponents()
-{
-    for (auto& Bucket : DirtyIncrementalComponents)
-    {
-        if (UIncrementalInstancedStaticMeshComponent* IncComp = Cast<UIncrementalInstancedStaticMeshComponent>(Bucket))
-        {
-            IncComp->FlushIncrementalUpdates();
-        }
-    }
-    DirtyIncrementalComponents.Reset();
 }

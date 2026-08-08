@@ -1,4 +1,4 @@
-﻿// FarmPrototype.h
+// FarmPrototype.h
 #pragma once
 
 #include "CoreMinimal.h"
@@ -10,7 +10,6 @@
 
 class USmartObjectSubsystem;
 struct FMassEntityManager;
-class UISMPoolManager;
 
 // ============================================================================
 // 纯数据 Fragment：生长阶段
@@ -91,7 +90,6 @@ protected:
 
 private:
     FMassEntityQuery EntityQuery;
-    TObjectPtr<UISMPoolManager> ISMPoolManager;
 };
 
 // ============================================================================
@@ -141,7 +139,6 @@ private:
     TObjectPtr<USmartObjectSubsystem> SmartObjectSubsystem;
 
     TSharedPtr<FMassEntityManager> EntityManager;
-    TObjectPtr<UISMPoolManager> ISMPoolManager;
 
     FMassArchetypeHandle CropArchetype;
 

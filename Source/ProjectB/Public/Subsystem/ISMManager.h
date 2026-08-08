@@ -75,7 +75,7 @@ struct FISMComponentParams
     UPROPERTY()
     bool bDisableBuckets = false;
 
-    // 是否创建增量 ISM 组件（UIncrementalInstancedStaticMeshComponent）
+    // 是否启用引擎原生增量渲染（bUseIncrementalISM：AddInstancesById/RemoveInstancesById 增量路径）
     UPROPERTY()
     bool bUseIncrementalISM = false;
 };
@@ -127,28 +127,14 @@ public:
     UFUNCTION(BlueprintCallable)
     void DebugPrintBucketStats();
 
-    // ---- 对象池接口（仅支持 bUseIncrementalISM = true 的组件） ----
-    FGlobalInstanceId AcquireSlot(UStaticMesh* Mesh, const FTransform& WorldTransform, TArrayView<const float> CustomData = TArrayView<const float>());
-    void ReleaseSlot(UStaticMesh* Mesh, const FGlobalInstanceId& InstanceId);
-    void SetBatchExpandSize(int32 NewSize) { BatchExpandSize = FMath::Max(1, NewSize); }
     void SetBucketingThreshold(int32 Threshold) { BucketingThreshold = FMath::Max(0, Threshold); }
-    void PreAllocateSlots(UStaticMesh* Mesh, int32 Count);
-    void FlushAllIncrementalComponents();
 
 private:
     static UInstancedStaticMeshComponent* CreateISMComponent(UStaticMesh* Mesh, int32 NumCustomDataFloats, const FISMComponentParams& Params);
     UInstancedStaticMeshComponent* GetOrCreateBucket(UStaticMesh* Mesh, int32 BucketIndex, int32 NumCustomDataFloats, const FISMComponentParams& Params);
-    void ExpandCapacity(UStaticMesh* Mesh, int32 AdditionalCount);
 
     UPROPERTY()
     TMap<FISMMeshKey, FISMBucketGroup> MeshToBucketGroups;
 
-    // 本帧被触碰过的增量 ISM 组件（用于精准 Flush）
-    TSet<TObjectPtr<UInstancedStaticMeshComponent>> DirtyIncrementalComponents;
-
-    // 空闲槽位池：MeshKey → 空闲的 FGlobalInstanceId 队列
-    TMap<FISMMeshKey, TUniquePtr<TQueue<FGlobalInstanceId, EQueueMode::Mpsc>>> FreeSlotIndices;
-
-    int32 BatchExpandSize = 512;
     int32 BucketingThreshold = 4096;
 };

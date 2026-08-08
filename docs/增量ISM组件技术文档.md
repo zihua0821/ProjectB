@@ -1,6 +1,10 @@
 # 增量 ISM 组件技术文档
 
-**组件**: `UIncrementalInstancedStaticMeshComponent`  
+> ## ⚠️ 已弃用（2026-08-07）
+> 本组件 `UIncrementalInstancedStaticMeshComponent` 及其源码（`Source/ProjectB/Public/Component/IncrementalInstancedStaticMeshComponent.h` / `Private/Component/IncrementalInstancedStaticMeshComponent.cpp`）**已从项目中删除**。
+> 架构定案改为 **空间分桶 + 引擎原生增量 API**（`AddInstancesById / RemoveInstancesById / SetCustomDataValueById`），由 `UISMManager` 承载。本文档仅作历史存档，不再适用。
+
+**组件**: `UIncrementalInstancedStaticMeshComponent`（已删除）  
 **版本**: v1.0  
 **更新日期**: 2026-08-04  
 **分支**: MassCrop  

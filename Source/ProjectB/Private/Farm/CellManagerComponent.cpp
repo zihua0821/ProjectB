@@ -1,4 +1,4 @@
-﻿#include "Farm/CellManagerComponent.h"
+#include "Farm/CellManagerComponent.h"
 #include "MassCommandBuffer.h"
 #include "MassEntityManager.h"
 #include "MassEntitySubsystem.h"
@@ -983,13 +983,8 @@ void UCellManagerComponent::PrecreateISMComponents()
 	CropISMParams.AttachParent = this;
 	CropISMParams.bUseIncrementalISM = true;
 
-	const int32 NumLatCells = PlanetConfig->NumLat - 1;
-	const int32 NumLonCells = PlanetConfig->NumLon;
-	const int32 TotalCells = NumLatCells * NumLonCells;
-	
 	for (const auto& Pair : UniqueMeshes)
 	{
 		ISMManager->GetOrCreateISMComponent(Pair.Key, Pair.Value, CropISMParams);
-		ISMManager->PreAllocateSlots(Pair.Key, TotalCells / UniqueMeshes.Num());
 	}
 }
