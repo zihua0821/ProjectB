@@ -174,7 +174,7 @@ virtual void Tick(float DeltaTime) override
 //    - SetBatchExpandSize（组件参数化）
 
 // 5. 新增：跨线程代理（决策18）
-//    - 非游戏线程的组件操作 → 派发到游戏线程（复用 GetOrCreateISMComponent 模式）
+//    - 非游戏线程的组件操作 → 派发到游戏线程（复用 GetOrCreateBucket 模式）
 //    - 或组件空闲池本身 MPSC
 ```
 

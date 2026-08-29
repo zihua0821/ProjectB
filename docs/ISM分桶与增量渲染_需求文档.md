@@ -25,9 +25,9 @@
 
 | 编号 | 决策 | 内容 |
 |------|------|------|
-| D-1 | **空间分桶（位置判据）** | 桶 = 连续空间区块（平面 N×N / 球面经纬块，可插拔映射层）；组件 = 唯一网格体 × 区块；**分桶判据 = 实例实际位置**（空间划分，非"桶满才分裂"的容量分桶）；分桶使包围盒紧凑，视锥/距离剔除生效；**块大小由每桶最大实例数量推导**（每块覆盖 ≤ 2048 个格子，密铺时每桶 ≤ 2048），桶数随星球网格自适应总单元格数量 |
-| D-2 | **引擎原生增量 API** | `bUseIncrementalISM=true` + `AddInstancesById` / `RemoveInstancesById` / `SetCustomDataValueById`，O(1) 增量提交，无需自研脏队列/Flush |
-| D-3 | **外部管理器承载分桶** | 扩展 `UISMManager`（WorldSubsystem）：持有桶映射层 + 组件表（MeshIdx × BucketIdx → 组件）；不写自定义 ISM 组件、不复制引擎代码、不继承引擎类 |
+| D-1 | **空间分桶（位置判据）** | 桶 = 连续空间区块（球面经纬块；网格几何（格子数）由调用方以 `FISMSphereBucketConfig` **纯数据注入**，分桶输入 = **格子坐标**（业务寻址语言），分桶映射在管理器内部实现，不对外暴露映射层/无 key 参数）；组件 = 唯一网格体 × 区块；**分桶判据 = 实例实际格子位置**（空间划分，非"桶满才分裂"的容量分桶）；分桶使包围盒紧凑，视锥/距离剔除生效；**块大小由每桶最大实例数量推导**（每块覆盖 ≤ 2048 个格子，密铺时每桶 ≤ 2048），桶数随星球网格自适应总单元格数量 |
+| D-2 | **引擎原生增量 API** | 引擎 5.4+ ID-based API 即原生增量路径（`AddInstancesById` / `RemoveInstancesById` / `SetCustomDataValueById`，**无开关属性**，见 C-1），O(1) 增量提交，无需自研脏队列/Flush |
+| D-3 | **外部管理器承载分桶** | 扩展 `UISMManager`（WorldSubsystem）：**内置球面分桶**（持有球面分桶配置 + 组件表（MeshIdx × BucketIdx → 组件））；不写自定义 ISM 组件、不复制引擎代码、不继承引擎类 |
 | D-4 | **取消实例级透明池化** | 原生 API 自带 free list 槽位复用；仅保留组件级池化（空桶常驻不销毁），避免运行期组件创建抖动 |
 | D-5 | **懒创建** | `GetOrCreate` 语义：组件/桶按需创建，不预初始化全量空组件 |
 | D-6 | **稳定句柄** | `FGlobalInstanceId` = (BucketIndex, `FPrimitiveInstanceId`)，对外屏蔽物理索引，Remove 后失效可检测 |
@@ -128,19 +128,19 @@
 
 | 编号 | 需求 | 说明 |
 |------|------|------|
-| FR-1 | 统一批量接口 | `BatchAddInstances` / `BatchRemoveInstances` / `BatchSetInstanceCustomData` / `UpdateInstanceCustomData` 对 S1/S2/S3 一致，调用方不感知桶 |
-| FR-2 | 空间分桶（位置判据） | 桶 = 空间区块（平面 N×N / 球面经纬块可插拔映射层）；组件 = Mesh × Bucket；**分桶按实例实际位置**（非容量满桶分裂），密铺/离散统一；分桶透明 |
+| FR-1 | 统一批量接口 | `BatchAddInstances` / `BatchRemoveInstances` / `BatchUpdateInstanceCustomData` / `UpdateInstanceCustomData` 对 S1/S2/S3 一致，调用方不感知桶 |
+| FR-2 | 空间分桶（位置判据） | 桶 = 空间区块（球面经纬块；网格几何（格子数）由调用方纯数据注入 `FISMSphereBucketConfig`，分桶输入 = **格子坐标**，映射在管理器内部实现，无对外映射层/无 key 参数）；组件 = Mesh × Bucket；**分桶按实例实际格子位置**（非容量满桶分裂），密铺/离散统一；分桶透明 |
 | FR-3 | 稳定句柄 | `FGlobalInstanceId`（BucketIndex + `FPrimitiveInstanceId`）在实例存活期内稳定；Remove 后 `IsValid()=false` 可检测 |
-| FR-4 | 引擎原生增量 | `bUseIncrementalISM=true`；增删/改 CustomData 全部走 ById 增量路径，不触发组件级全量 `MarkRenderStateDirty` |
+| FR-4 | 引擎原生增量 | 增删/改 CustomData 全部走 ById 增量路径（5.4+ 原生语义，无开关属性），不触发组件级全量 `MarkRenderStateDirty` |
 | FR-5 | 懒创建 + 组件级池化 | `GetOrCreate` 按需创建组件/桶；空桶常驻复用（组件级池化），避免运行期组件创建/销毁抖动 |
-| FR-6 | 球面经纬块分桶（位置判据） | 桶 = 连续经纬网格区域块，映射 `BucketIdx = (LatIdx/LatBlockSize) * LonBlockNum + (LonIdx/LonBlockSize)` 为 O(1)；**分桶判据 = 实例实际位置**（非容量满桶分裂）；**经纬块 = 星球网格连续格子块，块大小按每桶最大实例数量推导**（每块覆盖 ≤ 2048 个格子，密铺时每桶 ≤ 2048）；桶数随星球网格适配；桶列边界对齐 0° 经线 |
+| FR-6 | 球面经纬块分桶（位置判据） | 桶 = 连续经纬网格区域块，映射 `BucketIdx = (LatIdx/LatBlockSize) * LonBlockNum + (LonIdx/LonBlockSize)` 为 O(1)，**在管理器内部实现**（分桶输入 = 格子坐标 `GridCoords`，纯整数映射无浮点反算；网格几何 `LatCells`/`LonCells` 经 `FISMSphereBucketConfig` 纯数据注入）；**分桶判据 = 实例实际格子位置**（非容量满桶分裂）；**经纬块 = 星球网格连续格子块，块大小按每桶最大实例数量推导**（每块覆盖 ≤ 2048 个格子，密铺时每桶 ≤ 2048）；桶数随星球网格适配；桶列边界对齐 0° 经线 |
 | FR-7 | 单参数配置 | **唯一参数 = 每桶最大实例数量（2048 = `INSTANCES_PER_BUCKET`）**：①**参与空间划分**——块大小按每桶 2048 实例推导（每块覆盖 ≤ 2048 个格子，密铺时每桶 ≤ 2048）；②容量保险（防极端聚集）；实际每桶数量 = 分布结果；`BucketingThreshold` 保留为兼容开关 |
 | FR-8 | 突发批量承受 | 单帧 583~数万实例全量种植/收获/重种不卡顿（极端档 583 切换/帧 → 测试台全图重置突发数万） |
 | FR-9 | 高频阶段切换 | 压力场景核心路径：平均 106 / 极端 583 切换/帧的跨组件迁移（Remove + Add），句柄替换原子化 |
 | FR-10 | CustomData 语义保持 | CustomData[0]=Opacity（材质依赖，隐藏策略基石）；Disease=1 / IsLeaf=2 索引不破坏 |
 | FR-11 | 句柄有效性检测 | 遵循引擎原生 `FPrimitiveInstanceId` 语义（Remove 即失效），调用方不持有已删句柄 |
 | FR-12 | 旧调用方迁移 | `CropManagerComponent` 三处遗留 TODO 迁移至 ISMManager 接口（见 §9） |
-| FR-13 | 空间语义统一 | ISM 挂 ISMRoot 原点、实例使用世界坐标；`BatchAddInstances` 世界空间输入约定 |
+| FR-13 | 空间语义统一 | ISM 挂 ISMRoot 原点；`BatchAddInstances` 增加 `bWorldSpace` 参数（与引擎 `AddInstancesById(Transforms, bWorldSpace, ...)` 同语义，默认 false = 局部坐标）显式声明输入坐标空间；S1/S2/S3 现行调用方显式传 `true`（世界坐标），杜绝世界/局部混用；球面分桶配置由调用方一次性注入（`ConfigureSphereBuckets`，未配置 = 全部单桶）；**分桶输入 = `GridCoords`**（与 `Transforms` 一一对应，空 = 全部单桶），**与 `bWorldSpace` 解耦**（分桶为纯整数映射，`bWorldSpace` 仅透传引擎） |
 
 ---
 
@@ -176,13 +176,13 @@
 
 | 编号 | 约束 | 证据/说明 |
 |------|------|-----------|
-| C-1 | 引擎原生增量 API 清单 | `AddInstanceById` / `AddInstancesById` / `SetCustomDataById` / `SetCustomDataValueById` / `RemoveInstancesById` / `GetInstanceIndexForId` + `bUseIncrementalISM` 属性（`InstancedStaticMeshComponent.h`） |
-| C-2 | **`UpdateInstanceTransformById` 参数错位 bug（5.5.4）** | `bTeleport` 误传至 `bMarkRenderStateDirty` 位 → 触发全量重建；增量变换更新必须 `GetInstanceIndexForId` + 5 参 `UpdateInstanceTransform(bMarkRenderStateDirty=false)` |
+| C-1 | 引擎原生增量 API 清单 | `AddInstanceById` / `AddInstancesById` / `SetCustomDataById` / `SetCustomDataValueById` / `RemoveInstancesById` / `GetInstanceIndexForId`（`InstancedStaticMeshComponent.h`）；**ID-based API 即增量路径，不存在 `bUseIncrementalISM` 引擎属性**（5.5.4 全引擎源码 0 匹配；引擎注释“enables persistence tracking for incremental updates”）；项目 `FISMComponentParams::bUseIncrementalISM` 为自定义兼容字段，不应对引擎组件透传赋值（代码审计） |
+| C-2 | **`UpdateInstanceTransformById` 参数错位 bug（5.5.4，已修复）** | 引擎 bug（JIRA UE-231099）：`bTeleport` 误传至 `bMarkRenderStateDirty` 位 → 触发全量重建；**5.5.4 已打补丁 002（官方修复 ce24c23badd6，本地提交 9c096042607b），`UpdateInstanceTransformById` 可直接使用**；未打补丁环境（新引擎/CI 机）需 `GetInstanceIndexForId` + 5 参 `UpdateInstanceTransform(bMarkRenderStateDirty=false)` 规避 |
 | C-3 | **Debug 构建 Validate 税** | `FInstanceAttributeTracker::Validate` 在 `DO_GUARD_SLOW` 下 O(N)/调用（~80μs）；性能验证必须使用 **Development / DebugGame** 构建 |
 | C-4 | CustomData[0]=Opacity 材质依赖 | 隐藏策略基石，不得破坏 |
-| C-5 | 每桶最大实例数量（唯一参数） | `INSTANCES_PER_BUCKET=2048` = **划分粒度依据 + 单桶最大实例数量**：块大小按每桶 2048 实例推导（每块覆盖 ≤ 2048 个格子，密铺时每桶 ≤ 2048）；`BucketingThreshold` 公开默认 0（0 = 使用 `INSTANCES_PER_BUCKET` 逻辑），内部默认 4096（`ISMManager.h`） |
+| C-5 | 每桶最大实例数量（唯一参数） | `INSTANCES_PER_BUCKET=2048` = **划分粒度依据 + 单桶最大实例数量**：块大小按每桶 2048 实例推导（每块覆盖 ≤ 2048 个格子，密铺时每桶 ≤ 2048）；`BucketingThreshold` 兼容开关（`UISMManager` 成员默认 4096，`SetBucketingThreshold` 可调；组阈值默认 0 且创建组件时继承全局值；**阈值 ≤ 0 = 强制单桶**——无“0 = 使用 `INSTANCES_PER_BUCKET` 逻辑”语义，代码审计） |
 | C-6 | `GetInstanceCount()` / `IsValidId()` 非 virtual | 无法 override 包装；如需统一语义在管理器层封装 |
-| C-7 | 球面经度回绕 | 桶列边界对齐 0° 经线，防止桶包围盒跨圈撑爆视锥剔除 |
+| C-7 | 球面经度回绕 | 桶列边界对齐 0° 经线（管理器内部划分规则），防止桶包围盒跨圈撑爆视锥剔除 |
 
 ---
 
@@ -207,7 +207,7 @@
 | M-2 | `CropManagerComponent::OnCropGrowthStageChanged` | 阶段切换 Remove+Add → `BatchRemoveInstances` / `BatchAddInstances`（TODO 已标记） | 待办 |
 | M-3 | `CropManagerComponent::SetCropDisease` | CustomData 更新 → `UpdateInstanceCustomData`（TODO 已标记） | 待办 |
 | M-4 | `FPlotCropInfo` 增加句柄字段 | 迁移前置：当前仅存 Transform，需保存 `FGlobalInstanceId` 才能走 ById 接口 | 待办 |
-| M-5 | `CropVisualSyncProcessor` | `ReleaseSlot`/`AcquireSlot` → `BatchRemoveInstances`/`BatchAddInstances` + `bUseIncrementalISM=true` | ✅ 已完成（2026-08-07） |
+| M-5 | `CropVisualSyncProcessor` | `ReleaseSlot`/`AcquireSlot` → `BatchRemoveInstances`/`BatchAddInstances`（`bUseIncrementalISM` 为项目参数字段，增量由 ById API 原生保证） | ✅ 已完成（2026-08-07） |
 
 ---
 
@@ -240,7 +240,8 @@
 
 ## 12. 版本记录
 
-- **v2.5（2026-08-07）**：**每桶最大实例数量参与空间划分**——块大小 = 覆盖 ≤ 2048 个格子的连续格子块（确保一个空间矩形密铺时最多 2048 实例），桶数 = 网格划分结果（示例 ~35 桶，弧长 ~2~2.5km，与实验 B/C 的 BPA=5/8 同量级）；组件上界回落至 ~2836（C 实验 5120 组件背书区间内）→ primitive 遍历风险解除（OQ-6）；空桶停用保留事件驱动；同步更新 D-1、FR-6/7、PR-5/6、C-5、B-5、OQ-1、OQ-6 与 §3.2。**审计修订**：fps 收益修正为 +78%（帧时间 -44%）、极端档变动组件数修正为 ~960（去重期望公式）、`BucketingThreshold` 双默认值（公开 0 / 内部 4096）、同步突发周期 = 阶段时长（2~20s）、远期 50 万口径 = 网格分辨率每轴翻倍（总面积 ×4）、FR-8/PR-8 数字统一为 583（极端档每帧切换）、S2/S3 明确为同一单元格网格的两个渲染层。
+- **v2.6（2026-08-19）**：引擎补丁 002 落地（官方修复 ce24c23badd6 / JIRA UE-231099，本地提交 9c096042607b），C-2 由“必须规避”降级为“已修复记录”（保留未打补丁环境的规避后备）；方案架构与性能预期无影响（方案增量路径均为 Remove+Add / CustomData，无 `UpdateInstanceTransformById` 调用点）。
+- **v2.5（2026-08-07）**：**每桶最大实例数量参与空间划分**——块大小 = 覆盖 ≤ 2048 个格子的连续格子块（确保一个空间矩形密铺时最多 2048 实例），桶数 = 网格划分结果（示例 ~35 桶，弧长 ~2~2.5km，与实验 B/C 的 BPA=5/8 同量级）；组件上界回落至 ~2836（C 实验 5120 组件背书区间内）→ primitive 遍历风险解除（OQ-6）；空桶停用保留事件驱动；同步更新 D-1、FR-6/7、PR-5/6、C-5、B-5、OQ-1、OQ-6 与 §3.2。**审计修订**：fps 收益修正为 +78%（帧时间 -44%）、极端档变动组件数修正为 ~960（去重期望公式）、`BucketingThreshold` 双默认值（公开 0 / 内部 4096）、同步突发周期 = 阶段时长（2~20s）、远期 50 万口径 = 网格分辨率每轴翻倍（总面积 ×4）、FR-8/PR-8 数字统一为 583（极端档每帧切换）、S2/S3 明确为同一单元格网格的两个渲染层、**FR-13 增补坐标空间参数 `bWorldSpace`**（与引擎 `AddInstancesById` 同语义，默认 false = 局部坐标；S1/S2/S3 显式传 `true`）。**审计修订追加（球面化管理器定案）**：分桶架构由"可插拔映射层（外部注入 `SetBucketMapper`）"调整为**管理器内置球面分桶**——删除映射层外部注入概念，新增 `FISMSphereBucketConfig` + `ConfigureSphereBuckets`（网格几何 = `LatCells`/`LonCells`/`InstancesPerBucket` 以纯数据注入；分桶不再依赖实例位置 → 球心/半径/经纬范围从配置中消失）；**分桶输入 = 格子坐标 `GridCoords`**（业务寻址语言 `FIntPoint Coords`，调用方零转换，严格同格同桶、无浮点边缘误差）；`BatchAddInstances` 增加 `GridCoords`（与 `Transforms` 一一对应，空 = 全部单桶），无 key 参数，**与 `bWorldSpace` 解耦**（分桶纯整数映射，`bWorldSpace` 仅透传引擎）；分桶规则内聚于管理器内部几何层（S2/S3 共享同一划分），桶包围盒由引擎自动合并实例变换（`CalculateBounds`），管理器零球面几何计算；平面分桶按需从内部抽离策略类（YAGNI，本轮不预支）。同步更新 D-1/D-3、FR-2/FR-6/FR-13、C-7。**审计修订（2026-08-19，ue-codegraph 引擎/项目源码复核）**：`bUseIncrementalISM` 非引擎属性（5.5.4 全引擎源码 0 匹配，ID-based API 即增量路径）——D-2/FR-4/C-1/M-5 归因修正；C-5 `BucketingThreshold` 语义修正（成员默认 4096、组阈值继承全局值、≤ 0 = 强制单桶，无“0 = 2048 逻辑”）；C-2（`UpdateInstanceTransformById` 第 4 参 `bTeleport` 透传为 5 参版 `bMarkRenderStateDirty` 位 → 全量重建，InstancedStaticMesh.cpp:3399/L3843）与 C-3（`Validate` 于 `DO_GUARD_SLOW` 下 O(N) 遍历，InstanceAttributeTracker.cpp:51）经源码复核**确认无误**。
 - **v2.4（2026-08-07）**：**取消"每桶合理实例数量"参数**（实际数量 = 分布结果，无需配置目标）——唯一参数 = 每桶最大实例数量（2048，容量保险，不参与空间划分）；桶划分改为**星球网格空间结构**（经纬块，桶数随总单元格数量适配）；同步更新 FR-6/7、PR-5/6、B-5、OQ-1、C-5、V-4 与 §3.2。
 - **v2.3（2026-08-07）**：分桶模型定稿——**分桶判据 = 实例实际位置**（空间分桶，非容量满桶分裂）；双参数：**每桶合理实例数量**（粒度目标，默认 64~100，推导桶数）+ **每桶最大实例数量**（`INSTANCES_PER_BUCKET=2048`，容量保险，实际数量远小于它）；**密铺与离散统一使用空间分桶**；桶数推导更新为 ~700 桶（弧长 ~0.7~1km）；组件上界 ~56700 → 空桶停用改**事件驱动**（OQ-6）；同步更新 FR-2/6/7、PR-5/6、B-5、OQ-1、C-5、V-4 与 §3.2。
 - **v2.1（2026-08-07）**：桶粒度配置方式修订——由固定"25~50 桶"改为**每桶合理实例数配置驱动**（桶数 = 总单元格 ÷ 每桶合理实例数，自动适配单元格规模变化，远期 50 万档无需重新标定）；**明确区分两个参数语义**：每桶合理实例数 = 全局离散分布下的平均目标（空间粒度），`INSTANCES_PER_BUCKET` = 密铺场景容量上限（保险），二者独立仅默认值相同；同步更新 FR-6/7、PR-5/6、B-5、OQ-1、C-5 与 §3.2 桶分布推导。

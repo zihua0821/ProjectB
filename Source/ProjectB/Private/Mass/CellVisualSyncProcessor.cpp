@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Mass/CellVisualSyncProcessor.h"
@@ -13,6 +13,7 @@
 UCellVisualSyncProcessor::UCellVisualSyncProcessor()
 {
 	bAutoRegisterWithProcessingPhases = true;
+	bRequiresGameThreadExecution = true;
 }
 
 void UCellVisualSyncProcessor::ConfigureQueries()
@@ -140,8 +141,10 @@ void UCellVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
     	TArray<FGlobalInstanceId> NewIds = ISMManager->BatchAddInstances(
 				FarmlandConfig->OutlineMesh,
 				Transforms,
+				{},                // S1 轮廓：单桶（空 = 全部单桶）
 				16,
 				FISMComponentParams(),
+				true,              // bWorldSpace：轮廓变换继承自地块世界坐标
 				CellsCustomData
 				);
     	check(NewIds.Num() == Entities.Num());
@@ -166,7 +169,7 @@ void UCellVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 			Ids.Add(Pair.Key);
 			CellsCustomData.Append(Pair.Value);
 		}
-		ISMManager->BatchSetInstanceCustomData(FarmlandConfig->OutlineMesh, Ids, CellsCustomData);
+		ISMManager->BatchUpdateInstanceCustomData(FarmlandConfig->OutlineMesh, Ids, CellsCustomData);
 	}
 }
 

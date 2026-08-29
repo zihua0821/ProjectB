@@ -1,13 +1,13 @@
 // FarmlandActor.cpp
-// 作物压力场景性能测试实现
+// 作物压力场景性能测试实现（ISMManager 分桶验证样例）
 #include "Farm/FarmlandActor.h"
-#include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/DataTable.h"
 #include "TimerManager.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 
+// 构造：开启 Tick（压力循环）；Root 为纯场景挂点（ISM 组件由管理器创建并挂到 Root 下）
 AFarmlandActor::AFarmlandActor()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -16,6 +16,7 @@ AFarmlandActor::AFarmlandActor()
 	SetRootComponent(RootComponent);
 }
 
+// 阶段(0..3) → 阶段网格体（变体的 Seed/Seedling/Mature/Harvested）；越界/缺失返回 nullptr
 UStaticMesh* AFarmlandActor::GetVariantStageMesh(const FCropMeshVariant& Variant, int32 Stage)
 {
 	switch (Stage)
@@ -28,6 +29,8 @@ UStaticMesh* AFarmlandActor::GetVariantStageMesh(const FCropMeshVariant& Variant
 	return nullptr;
 }
 
+// 随机抽一个与当前不同的阶段（仅从网格体非空的候选中抽，保证切换后 Mesh 有效）；
+// 全部候选无效时返回 ExcludeStage（调用方随后因 NewStage == Stage 而跳过切换）
 int32 AFarmlandActor::PickRandomStage(const FCropRowCache& Row, int32 VariantIndex, int32 ExcludeStage) const
 {
 	const FCropMeshVariant& Variant = Row.Variants[VariantIndex];
@@ -48,6 +51,11 @@ int32 AFarmlandActor::PickRandomStage(const FCropRowCache& Row, int32 VariantInd
 	return Candidates[FMath::RandRange(0, NumCandidates - 1)];
 }
 
+// 构建流程总览（与真实系统对齐，步骤 ①~⑥）：
+// ① 解析数据表（作物行 → 行缓存） → ② 收集唯一网格体 + 每网格体 CustomData 数量 →
+// ③ 随机分配实例（作物×变体×阶段）并排布 Cols×Cols 平面网格（GridCoord = 分桶输入） →
+// ④ 按当前阶段网格体分组，每 Mesh 一次 BatchAddInstances（回填稳定句柄） →
+// ⑤ 输出构建摘要 + DebugPrintBucketStats（V-4 桶数核对） → ⑥ 可选相机自动定位
 void AFarmlandActor::BeginPlay()
 {
 	Super::BeginPlay();
@@ -55,6 +63,13 @@ void AFarmlandActor::BeginPlay()
 	if (!CropDataTable)
 	{
 		UE_LOG(LogTemp, Error, TEXT("[CropStress] CropDataTable 未设置（请在关卡/蓝图指定作物数据表）。"));
+		return;
+	}
+
+	ISMManager = GetWorld()->GetSubsystem<UISMManager>();
+	if (!ISMManager)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[CropStress] UISMManager 子系统不可用。"));
 		return;
 	}
 
@@ -97,16 +112,9 @@ void AFarmlandActor::BeginPlay()
 	TArray<UStaticMesh*> UniqueMeshArray = UniqueMeshes.Array();
 	UniqueMeshArray.Sort([](const UStaticMesh& A, const UStaticMesh& B) { return A.GetPathName() < B.GetPathName(); });
 
-	// 分桶：地图切 BucketsPerAxis² 个空间区块；组件 = 网格体 × 区块（空组件不绘制，切换目标永远存在）
-	const int32 BucketsPerAxisClamped = FMath::Max(1, BucketsPerAxis);
-	NumBuckets = BucketsPerAxisClamped * BucketsPerAxisClamped;
-	Components.Reserve(UniqueMeshArray.Num() * NumBuckets);
-	for (int32 m = 0; m < UniqueMeshArray.Num(); ++m)
+	// 网格体 → 每实例 CustomData 数量（同网格体跨行时取先注册行的值；存成员供 Tick 合批 Add 用）
+	for (UStaticMesh* Mesh : UniqueMeshArray)
 	{
-		UStaticMesh* Mesh = UniqueMeshArray[m];
-		MeshToGlobalIdx.Add(Mesh, m);
-
-		// 该网格体所属行的 CustomData 数量（同网格体跨行时取先注册行的值）
 		int32 NumFloats = 2;
 		for (const FCropRowCache& Row : RowCaches)
 		{
@@ -132,36 +140,30 @@ void AFarmlandActor::BeginPlay()
 				break;
 			}
 		}
-
-		for (int32 b = 0; b < NumBuckets; ++b)
-		{
-			FStressComponent& SC = Components.AddDefaulted_GetRef();
-			SC.Mesh = Mesh;
-			SC.NumCustomDataFloats = NumFloats;
-			SC.Comp = NewObject<UInstancedStaticMeshComponent>(this);
-			SC.Comp->SetStaticMesh(Mesh);
-			SC.Comp->SetNumCustomDataFloats(NumFloats);
-			SC.Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-			SC.Comp->SetCanEverAffectNavigation(false);
-			SC.Comp->SetCastShadow(true);
-			SC.Comp->SetupAttachment(RootComponent);
-			SC.Comp->RegisterComponent();
-			SC.Comp->MarkRenderStateDirty(); // 仅首次创建需要全量
-		}
+		MeshToNumFloats.Add(Mesh, NumFloats);
 	}
 
-	// ③ 分配实例：随机作物 × 变体 × 初始阶段，网格排布（与真实"确定随机相位"一致，避免同步尖峰）
+	// ③ 分配实例：随机作物 × 变体 × 初始阶段，平面网格排布（与真实"确定随机相位"一致，避免同步尖峰）
 	Cols = FMath::CeilToInt(FMath::Sqrt((float)TotalInstances));
 	const FVector OriginOffset(-Cols * Spacing * 0.5f, -Cols * Spacing * 0.5f, 0.0f);
 	MapSize = Cols * Spacing;
 
-	// 区块划分（每边 BucketsPerAxis 块，方形；不整除时末块按边界截断）
-	const int32 RowBlock = FMath::CeilToInt((float)Cols / (float)BucketsPerAxisClamped);
-	const int32 ColBlock = RowBlock;
+	// 球面分桶配置注入：平面网格映射为球面网格（Lat=Lon=Cols，每格 1 实例）；
+	// 关 = 不注入 = 全部单桶（分桶收益基线对照）。注意：注入为全局配置，测试地图应只放本 Actor。
+	if (bConfigureSphereBuckets)
+	{
+		FISMSphereBucketConfig BucketCfg;
+		BucketCfg.LatCells = Cols;
+		BucketCfg.LonCells = Cols;
+		BucketCfg.InstancesPerBucket = FMath::Max(1, InstancesPerBucket);
+		ISMManager->ConfigureSphereBuckets(BucketCfg);
+	}
 
-	TArray<TArray<FTransform>> CompTransforms;
-	CompTransforms.SetNum(Components.Num());
+	CachedParams.AttachParent = RootComponent;
+	CachedParams.bCastShadow = true;
 
+	// 按当前阶段网格体分组（构建时一次遍历，每网格体一次 BatchAddInstances）
+	TMap<UStaticMesh*, TArray<int32>> MeshToIndices;
 	Instances.SetNum(TotalInstances);
 	for (int32 i = 0; i < TotalInstances; ++i)
 	{
@@ -184,88 +186,67 @@ void AFarmlandActor::BeginPlay()
 			continue; // 该变体无有效网格（数据异常），跳过
 		}
 
-		const UStaticMesh* Mesh = GetVariantStageMesh(Row.Variants[VariantIdx], Stage);
 		const int32 row = i / Cols;
 		const int32 col = i % Cols;
-		const int32 bx = FMath::Min(col / ColBlock, BucketsPerAxisClamped - 1);
-		const int32 by = FMath::Min(row / RowBlock, BucketsPerAxisClamped - 1);
-		const int32 BucketIdx = by * BucketsPerAxisClamped + bx;
-		const int32 CompIdx = MeshToGlobalIdx[Mesh] * NumBuckets + BucketIdx;
-
-		const FVector Loc = OriginOffset + FVector((i % Cols) * Spacing, (i / Cols) * Spacing, 0.0f);
-		CompTransforms[CompIdx].Add(FTransform(FQuat::Identity, Loc, FVector::OneVector));
+		const FVector Loc = OriginOffset + FVector(col * Spacing, row * Spacing, 0.0f);
 
 		FStressInstance& Inst = Instances[i];
-		Inst.CompIndex = CompIdx;
+		Inst.Mesh = GetVariantStageMesh(Row.Variants[VariantIdx], Stage);
 		Inst.RowIndex = RowIdx;
 		Inst.VariantIndex = VariantIdx;
 		Inst.Stage = Stage;
+		Inst.GridCoord = FIntPoint(row, col);   // 平面格坐标 (Lat, Lon) → 球面分桶输入
 		Inst.BaseLocation = Loc;
+		MeshToIndices.FindOrAdd(Inst.Mesh).Add(i);
 	}
 
-	// ④ 批量添加实例（每组件一次 AddInstancesById，返回稳定句柄），并回填到元数据
-	for (int32 c = 0; c < Components.Num(); ++c)
+	// ④ 批量添加实例（每网格体一次 BatchAddInstances，返回稳定全局句柄），并回填到元数据
+	for (const auto& Pair : MeshToIndices)
 	{
-		FStressComponent& SC = Components[c];
-		if (CompTransforms[c].Num() > 0)
-		{
-			SC.InstanceIds = SC.Comp->AddInstancesById(CompTransforms[c], /*bWorldSpace=*/true);
-			// 平行数组：BaseLocations 与 InstanceIds 一一对应（构建时填充，切换时同步维护）
-			SC.BaseLocations.Reserve(CompTransforms[c].Num());
-			for (const FTransform& T : CompTransforms[c])
-			{
-				SC.BaseLocations.Add(T.GetLocation());
-			}
-		}
-	}
+		UStaticMesh* Mesh = Pair.Key;
+		const TArray<int32>& Indices = Pair.Value;
+		const int32 NumFloats = MeshToNumFloats[Mesh];
 
-	TArray<int32> CompCounter;
-	CompCounter.SetNumZeroed(Components.Num());
-	for (FStressInstance& Inst : Instances)
-	{
-		if (Inst.CompIndex == INDEX_NONE)
-		{
-			Inst.Id = FPrimitiveInstanceId(); // 显式置为无效句柄（防默认未初始化值误判有效）
-			continue;
-		}
-		const int32 k = CompCounter[Inst.CompIndex]++;
-		if (k < Components[Inst.CompIndex].InstanceIds.Num())
-		{
-			Inst.Id = Components[Inst.CompIndex].InstanceIds[k];
-		}
-	}
-
-	// ⑤ 初始化 CustomData（每组件批量置 1.0）
-	for (FStressComponent& SC : Components)
-	{
-		if (SC.InstanceIds.Num() == 0)
-		{
-			continue;
-		}
+		TArray<FTransform> Transforms;
+		TArray<FIntPoint> GridCoords;
 		TArray<float> CData;
-		CData.Init(1.0f, SC.InstanceIds.Num() * SC.NumCustomDataFloats);
-		SC.Comp->SetCustomDataById(SC.InstanceIds, CData);
+		Transforms.Reserve(Indices.Num());
+		GridCoords.Reserve(Indices.Num());
+		CData.Reserve(Indices.Num() * NumFloats);
+		for (const int32 Idx : Indices)
+		{
+			const FStressInstance& Inst = Instances[Idx];
+			Transforms.Add(FTransform(FQuat::Identity, Inst.BaseLocation, FVector::OneVector));
+			GridCoords.Add(Inst.GridCoord);
+			CData.Append({1.f, 0.f, 0.f});
+			// for (int32 f = 0; f < NumFloats; ++f)
+			// {
+			// 	CData.Add(1.0f);
+			// }
+		}
+
+		const TArray<FGlobalInstanceId> Ids = ISMManager->BatchAddInstances(
+			Mesh, Transforms, GridCoords, NumFloats, CachedParams,
+			/*bWorldSpace=*/true, CData);
+		// 返回与输入一一对应的句柄数组（保序），按实例下标回填
+		for (int32 k = 0; k < Ids.Num() && k < Indices.Num(); ++k)
+		{
+			Instances[Indices[k]].Id = Ids[k];
+		}
 	}
 
-	// ⑥ 构建摘要
+	// ⑤ 构建摘要 + 分桶状态核对（V-4：SphereConfig / Block / BucketNum 一次输出）
 	int32 TotalVariants = 0;
 	for (const FCropRowCache& Row : RowCaches)
 	{
 		TotalVariants += Row.Variants.Num();
 	}
-	int32 NonEmptyComps = 0;
-	for (const FStressComponent& SC : Components)
-	{
-		if (SC.InstanceIds.Num() > 0)
-		{
-			++NonEmptyComps;
-		}
-	}
-	UE_LOG(LogTemp, Warning, TEXT("[CropStress] ==== Begin: rows=%d variants=%d uniqueMeshes=%d buckets=%dx%d | comps=%d (nonEmpty=%d) | instances=%d (avg=%.0f/nonEmptyComp) | switches/frame=%d tfm/frame=%d cdata/frame=%d | spacing=%.0f | seed=%d ===="),
-		RowCaches.Num(), TotalVariants, UniqueMeshArray.Num(), BucketsPerAxisClamped, BucketsPerAxisClamped,
-		Components.Num(), NonEmptyComps,
-		TotalInstances, (float)TotalInstances / (float)FMath::Max(1, NonEmptyComps),
+	UE_LOG(LogTemp, Warning, TEXT("[CropStress] ==== Begin: rows=%d variants=%d uniqueMeshes=%d | sphere=%s | instances=%d (meshGroups=%d) | switches/frame=%d tfm/frame=%d cdata/frame=%d | spacing=%.0f | seed=%d ===="),
+		RowCaches.Num(), TotalVariants, UniqueMeshArray.Num(),
+		bConfigureSphereBuckets ? TEXT("Configured") : TEXT("Disabled"),
+		TotalInstances, MeshToIndices.Num(),
 		SwitchesPerFrame, TransformUpdatesPerFrame, CustomDataUpdatesPerFrame, Spacing, RandomSeed);
+	ISMManager->DebugPrintBucketStats();
 
 	Elapsed = 0.0;
 	LastStatTime = 0.0f;
@@ -278,13 +259,23 @@ void AFarmlandActor::BeginPlay()
 	TotalSwitches = 0;
 	Phase = 0.0f;
 
-	// ⑦ 相机定位（分桶对照实验：中心俯视 → 视锥/距离剔除生效）
+	// ⑥ 相机定位（分桶对照实验：中心俯视 → 视锥/距离剔除生效）
 	if (bCenterCamera)
 	{
 		GetWorldTimerManager().SetTimer(CameraTimerHandle, this, &AFarmlandActor::PositionCamera, 3.0f, false);
 	}
+
+	// ⑦ 桶包围盒调试（bDebugAABB 封装：画面列表 + 自动绘制第一个 Mesh；
+	// ↑/↓ 切换绘制的 Mesh，左键点击列表行亦可，Esc 关闭；
+	// 规避跨 Mesh 66 层完全重叠；停用桶灰色显示 PR-6 状态）
+	if (ISMManager && UniqueMeshArray.Num() > 0)
+	{
+		ISMManager->SetDebugAABB(true);
+	}
 }
 
+// 相机定位（bCenterCamera 勾选后 3 秒触发）：地图中心正上方（高度 = MapSize×0.55）俯角 50° 看向 X+；
+// 模拟"同时可见约 1/3"的局部视野——分桶对照实验的固定相机基准（同视角 A/B 对照）
 void AFarmlandActor::PositionCamera()
 {
 	APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
@@ -305,11 +296,16 @@ void AFarmlandActor::PositionCamera()
 	UE_LOG(LogTemp, Warning, TEXT("[CropStress] Camera positioned: map=%.0fm, camera=(0,0,%.0f) looking X+"), MapSize, Height);
 }
 
+// 每帧压力循环（与真实 Crop 系统同构的三类增量操作 + 统计）：
+// ① 阶段切换：随机实例 Remove 旧阶段 + Add 新阶段（位置不变 → GridCoord 不变 → 同一空间桶）；
+// ② 增量变换：BatchUpdateInstancesTransforms 按 Mesh 合批（内部按桶分组循环 ById 增量路径）；
+// ③ CustomData：UpdateInstanceCustomData 单值呼吸更新（引擎原生增量）；
+// ④ 统计：每 5 秒窗口输出均值/峰值/帧率（tick 分解为 switches/tfm/cdata 三段，定位 CPU 成本构成）
 void AFarmlandActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
-	if (Components.Num() == 0 || Instances.Num() == 0)
+	if (!ISMManager || Instances.Num() == 0)
 	{
 		return;
 	}
@@ -319,12 +315,30 @@ void AFarmlandActor::Tick(float DeltaSeconds)
 
 	const double TickStart = FPlatformTime::Seconds();
 
-	// ① 阶段切换：Remove 旧阶段网格实例 + Add 新阶段网格实例（与真实系统原生增量 Remove+Add 同构）
+	// ① 阶段切换：合批（收集 Remove/Add 按 Mesh 归组 → 循环后统一批量，句柄保序回填）
+	// （与真实系统 ISMManager 原生增量 Remove+Add 同构；新实例 GridCoord 不变 → 落回同一空间桶）
 	{
 		const double T0 = FPlatformTime::Seconds();
+
+		// 累积缓冲：移除按“旧 Mesh”，添加按“新 Mesh”（记录实例下标供保序回填）
+		TMap<UStaticMesh*, TArray<FGlobalInstanceId>> PendingRemoveByMesh;
+		struct FSwitchAdd { int32 InstIdx; UStaticMesh* NewMesh; int32 NewStage; int32 NumFloats; };
+		TMap<UStaticMesh*, TArray<FSwitchAdd>> PendingAddByMesh;
+
+		// 本帧已切换的实例下标：同一实例在一帧内不会重复切换。
+		// （否则同帧重复 Add 同一 Inst.Id 到 PendingRemoveByMesh，RemoveInstancesById 第二次
+		//  遇到已释放 id 会使 IdToIndex 返回 INDEX_NONE -> RemoveAtSwap(-1) 断言）
+		TSet<int32> SwitchedThisFrame;
+
 		for (int32 i = 0; i < SwitchesPerFrame; ++i)
 		{
 			const int32 InstIdx = FMath::RandRange(0, Instances.Num() - 1);
+			// 同帧已切换的实例去重，避免重复 Remove/Add 同一实例
+			if (SwitchedThisFrame.Contains(InstIdx))
+			{
+				continue;
+			}
+			SwitchedThisFrame.Add(InstIdx);
 			FStressInstance& Inst = Instances[InstIdx];
 			if (!Inst.Id.IsValid())
 			{
@@ -338,34 +352,64 @@ void AFarmlandActor::Tick(float DeltaSeconds)
 				continue;
 			}
 
-			// 移除旧阶段实例（先取索引再移除，Remove 后句柄即失效）
-			FStressComponent& OldComp = Components[Inst.CompIndex];
-			const FPrimitiveInstanceId OldId = Inst.Id;
-			const int32 IdxInComp = OldComp.Comp->GetInstanceIndexForId(OldId);
-			OldComp.Comp->RemoveInstancesById(MakeArrayView(&OldId, 1), /*bUpdateNavigation=*/false);
-			OldComp.InstanceIds.RemoveAtSwap(IdxInComp);
-			OldComp.BaseLocations.RemoveAtSwap(IdxInComp);
+			// 移除旧阶段（按旧 Mesh 归组）
+			PendingRemoveByMesh.FindOrAdd(Inst.Mesh).Add(Inst.Id);
 
-			// 添加到新阶段实例（句柄稳定：RemoveAtSwap 只重映射不改其他实例的 Id；
-			// 实例位置不变 → 区块不变，目标组件 = 新网格体 × 原区块）
-			const UStaticMesh* NewMesh = GetVariantStageMesh(Row.Variants[Inst.VariantIndex], NewStage);
-			const int32 BucketIdx = Inst.CompIndex % NumBuckets;
-			const int32 NewCompIdx = MeshToGlobalIdx[NewMesh] * NumBuckets + BucketIdx;
-			FStressComponent& NewComp = Components[NewCompIdx];
-			Inst.Id = NewComp.Comp->AddInstanceById(FTransform(FQuat::Identity, Inst.BaseLocation, FVector::OneVector), /*bWorldSpace=*/true);
-			Inst.CompIndex = NewCompIdx;
-			Inst.Stage = NewStage;
-			NewComp.InstanceIds.Add(Inst.Id);
-			NewComp.BaseLocations.Add(Inst.BaseLocation);
+			// 添加到新阶段（按新 Mesh 归组）；GridCoord 不变 → 同一空间桶；CustomData 重置为 1.0
+			UStaticMesh* NewMesh = GetVariantStageMesh(Row.Variants[Inst.VariantIndex], NewStage);
+			const int32 NumFloats = MeshToNumFloats.Contains(NewMesh) ? MeshToNumFloats[NewMesh] : Row.NumCustomDataFloats;
+			PendingAddByMesh.FindOrAdd(NewMesh).Add(FSwitchAdd{ InstIdx, NewMesh, NewStage, NumFloats });
+		}
 
-			++TotalSwitches;
+		// 批量移除（每 Mesh 一次）
+		for (const auto& Pair : PendingRemoveByMesh)
+			ISMManager->BatchRemoveInstances(Pair.Key, Pair.Value);
+
+		// 批量添加（每 Mesh 一次 → 句柄保序回填到对应实例下标）
+		for (const auto& Pair : PendingAddByMesh)
+		{
+			UStaticMesh* Mesh = Pair.Key;
+			const TArray<FSwitchAdd>& AddEntries = Pair.Value;
+			const int32 NumFloats = AddEntries[0].NumFloats;
+
+			TArray<FTransform> Transforms;
+			TArray<FIntPoint> GridCoords;
+			TArray<float> CData;
+			Transforms.Reserve(AddEntries.Num());
+			GridCoords.Reserve(AddEntries.Num());
+			CData.Reserve(AddEntries.Num() * NumFloats);
+			for (const FSwitchAdd& Entry : AddEntries)
+			{
+				const FStressInstance& Inst = Instances[Entry.InstIdx];
+				Transforms.Add(FTransform(FQuat::Identity, Inst.BaseLocation, FVector::OneVector));
+				GridCoords.Add(Inst.GridCoord);
+				for (int32 f = 0; f < NumFloats; ++f) CData.Add(1.0f);
+			}
+
+			const TArray<FGlobalInstanceId> NewIds = ISMManager->BatchAddInstances(
+				Mesh, Transforms, GridCoords, NumFloats, CachedParams, /*bWorldSpace=*/true, CData);
+			// 返回与输入一一对应（保序），按实例下标回填 Id/Mesh/Stage
+			for (int32 k = 0; k < NewIds.Num() && k < AddEntries.Num(); ++k)
+			{
+				FStressInstance& Inst = Instances[AddEntries[k].InstIdx];
+				Inst.Id = NewIds[k];
+				Inst.Mesh = AddEntries[k].NewMesh;
+				Inst.Stage = AddEntries[k].NewStage;
+				++TotalSwitches;
+			}
 		}
 		SwitchMsAccum += (FPlatformTime::Seconds() - T0) * 1000.0;
 	}
 
-	// ② 增量变换更新：UpdateInstanceTransform 5 参版本（bMarkRenderStateDirty=false → 增量路径）
+	// ② 增量变换更新：合批（按 Mesh 归组 → BatchUpdateInstancesTransforms，内部按桶分组循环 ById 增量路径）
+	// （原 GetBucketComponent 直取+逐实例 UpdateInstanceTransform 收敛到管理器增量接口；bTeleport=true 物理传送）
 	{
 		const double T0 = FPlatformTime::Seconds();
+
+		// 累积缓冲：Mesh → (全局句柄, 新 Transform) 对，循环后按 Mesh 一次批量更新
+		struct FTfmEntry { FGlobalInstanceId Id; FTransform Tf; };
+		TMap<UStaticMesh*, TArray<FTfmEntry>> PendingTfmByMesh;
+
 		for (int32 i = 0; i < TransformUpdatesPerFrame; ++i)
 		{
 			const int32 InstIdx = FMath::RandRange(0, Instances.Num() - 1);
@@ -380,14 +424,27 @@ void AFarmlandActor::Tick(float DeltaSeconds)
 				+ FVector(FMath::Sin(P) * 150.0f, FMath::Cos(P * 0.7f) * 150.0f, FMath::Sin(P * 1.3f) * 40.0f);
 			const FTransform NewTransform(FQuat::Identity, Loc, FVector::OneVector);
 
-			UInstancedStaticMeshComponent* Comp = Components[Inst.CompIndex].Comp;
-			Comp->UpdateInstanceTransform(Comp->GetInstanceIndexForId(Inst.Id), NewTransform,
-				/*bWorldSpace=*/true, /*bMarkRenderStateDirty=*/false, /*bTeleport=*/true);
+			PendingTfmByMesh.FindOrAdd(Inst.Mesh).Add(FTfmEntry{ Inst.Id, NewTransform });
+		}
+
+		// 按 Mesh 批量更新（内部按句柄 BucketIndex 分组，组内循环引擎 UpdateInstanceTransformById）
+		for (const auto& Pair : PendingTfmByMesh)
+		{
+			TArray<FGlobalInstanceId> Ids;
+			TArray<FTransform> Tfms;
+			Ids.Reserve(Pair.Value.Num());
+			Tfms.Reserve(Pair.Value.Num());
+			for (const FTfmEntry& Entry : Pair.Value)
+			{
+				Ids.Add(Entry.Id);
+				Tfms.Add(Entry.Tf);
+			}
+			ISMManager->BatchUpdateInstancesTransforms(Pair.Key, Ids, Tfms, /*bWorldSpace=*/true, /*bTeleport=*/true);
 		}
 		TfmMsAccum += (FPlatformTime::Seconds() - T0) * 1000.0;
 	}
 
-	// ③ CustomData 更新：SetCustomDataValueById（病害/水分呼吸）
+	// ③ CustomData 更新：UpdateInstanceCustomData（病害/水分呼吸，引擎原生增量路径）
 	{
 		const double T0 = FPlatformTime::Seconds();
 		for (int32 i = 0; i < CustomDataUpdatesPerFrame; ++i)
@@ -400,7 +457,7 @@ void AFarmlandActor::Tick(float DeltaSeconds)
 			}
 
 			const float Breath = 0.5f + 0.5f * FMath::Sin(Phase * 2.0f + (float)(InstIdx % 613) * 0.1f);
-			Components[Inst.CompIndex].Comp->SetCustomDataValueById(Inst.Id, 0, Breath);
+			// ISMManager->UpdateInstanceCustomData(Inst.Mesh, Inst.Id, 0, Breath);
 		}
 		CDataMsAccum += (FPlatformTime::Seconds() - T0) * 1000.0;
 	}

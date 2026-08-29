@@ -132,6 +132,18 @@ void UCellManagerComponent::Initialize(UPlanetConfigDataAsset* InPlanetConfig, U
 		ConfigSub->SetISMAttachParent(this);
 	}
 	
+	// 注入球面分桶配置（S2/S3 共享同一划分；与 CreateMassCell 同源计算）
+	if (UISMManager* ISMManager = GetWorld()->GetSubsystem<UISMManager>())
+	{
+		FISMSphereBucketConfig BucketCfg;
+		BucketCfg.LatCells = PlanetConfig->NumLat - 1;        // 与 CreateMassCell 同源
+		BucketCfg.LonCells = PlanetConfig->NumLon;
+		BucketCfg.InstancesPerBucket = INSTANCES_PER_BUCKET;  // 唯一参数（FR-7/C-5）
+		BucketCfg.TotalLatSpanDeg = PlanetConfig->MaxLat - PlanetConfig->MinLat; // 角跨度约束（方案 B）：纬度总跨度
+		BucketCfg.MaxBucketAngularSpanDeg = 30.0f;                             // 桶最大角跨度上限（30° 档）
+		ISMManager->ConfigureSphereBuckets(BucketCfg);
+	}
+	
 	PrecreateISMComponents();
 
 	CreateMassCell();
@@ -179,10 +191,12 @@ void UCellManagerComponent::CreateMassCell()
 	
 	// 预分配容器
 	TArray<FTransform> CellTransforms;
+	TArray<FIntPoint> CellGridCoords;      // 分桶输入：格子坐标（业务寻址语言）
 	TArray<float> AllPlotCustomData;
 	
 	CellEntities.SetNum(TotalCells);
 	CellTransforms.Reserve(TotalCells);
+	CellGridCoords.Reserve(TotalCells);
 	AllPlotCustomData.Reserve(TotalCells * FarmlandConfig->NumCustomDataFloats);
 	
     // 遍历经纬度网格生成地块
@@ -228,6 +242,7 @@ void UCellManagerComponent::CreateMassCell()
         	CellTransform.SetScale3D(FVector(BaseScaleFactorX * LatitudeScale, ScaleFactorY, ScaleFactorZ));
 
         	CellTransforms.Add(CellTransform);
+        	CellGridCoords.Add(FIntPoint(LatIdx, LonIdx));   // 分桶输入：业务格子坐标（与 StaticFrag.Coords 同源）
         	
         	// 写入静态 Fragment
         	FCellStaticFragment& StaticFrag = EntityManager.GetFragmentDataChecked<FCellStaticFragment>(Entity);
@@ -260,8 +275,10 @@ void UCellManagerComponent::CreateMassCell()
 		TArray<FGlobalInstanceId> PlotIds = ISMManager->BatchAddInstances(
 			FarmlandConfig->LandCellMesh,
 			CellTransforms,
+			CellGridCoords,
 			FarmlandConfig->NumCustomDataFloats,
 			PlotISMParams,
+			true,          // bWorldSpace：CellTransforms 为世界坐标（星球中心在原点）
 			AllPlotCustomData
 			);
 		for (int32 i = 0; i < PlotIds.Num(); i++)
@@ -958,7 +975,7 @@ void UCellManagerComponent::PrecreateISMComponents()
 	CellISMParams.AttachParent = this;
 	CellISMParams.bDisallowNanite = true;
 	CellISMParams.bCastShadow = false;
-	ISMManager->GetOrCreateISMComponent(FarmlandConfig->OutlineMesh, 16, CellISMParams);
+	ISMManager->GetOrCreateBucket(FarmlandConfig->OutlineMesh, 0, 16, CellISMParams);
 	
 	TArray<TPair<TObjectPtr<UStaticMesh>, int32>> UniqueMeshes;
 	// 收集所有作物变体中所有阶段的网格体
@@ -981,10 +998,9 @@ void UCellManagerComponent::PrecreateISMComponents()
 	
 	FISMComponentParams CropISMParams;
 	CropISMParams.AttachParent = this;
-	CropISMParams.bUseIncrementalISM = true;
 
 	for (const auto& Pair : UniqueMeshes)
 	{
-		ISMManager->GetOrCreateISMComponent(Pair.Key, Pair.Value, CropISMParams);
+		ISMManager->GetOrCreateBucket(Pair.Key, 0, Pair.Value, CropISMParams);
 	}
 }

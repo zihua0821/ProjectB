@@ -13,7 +13,6 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEditModeChanged, EEditMode, NewEd
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHoveredPlot, APlanetActor*, HoveredPlanetActor, FIntPoint, HoveredPlotCoords);
 
 
-class AFarmlandActor;
 class UTimeSyncComponent;
 /**
  * 

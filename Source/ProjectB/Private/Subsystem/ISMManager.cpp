@@ -1,6 +1,27 @@
+//=============================================================================
+//  ISMManager.cpp - 球面分桶 + 大规模实例化渲染的核心管理器实现
+//  
+//  职责：组件管理（按 Mesh 懒创建/复用 ISM 桶）、空间分桶映射、
+//        5.4+ ById 增量增删改、事件驱动停用与调试可视化。
+//  架构说明见 docs/ISMManager技术文档.md。
+//=============================================================================
 #include "Subsystem/ISMManager.h"
 #include "Components/InstancedStaticMeshComponent.h"
-#include "ProjectB/ProjectB.h"
+#include "Engine/Engine.h"                  // DrawDebugBox 所在模块 + GEngine 默认字体（Engine.h 不传递包含 DrawDebugHelpers.h）
+#include "DrawDebugHelpers.h"                // DrawDebugBox 声明（Engine 模块公共头）
+#include "Kismet/KismetSystemLibrary.h"     // FlushPersistentDebugLines
+#include "Engine/Canvas.h"                   // UCanvas（画面列表绘制回调）
+#include "CanvasItem.h"                      // FCanvasTextItem（画布文本项）
+#include "Debug/DebugDrawService.h"          // UDebugDrawService（每帧画布绘制钩子）
+#include "GameFramework/PlayerController.h"  // WasInputKeyJustPressed / GetMousePosition
+#include "InputCoreTypes.h"                  // EKeys
+
+// ---- AABB 画面列表布局（绘制与鼠标命中共用同一坐标系：视口左上原点） ----
+namespace
+{
+    constexpr float DebugListStartY = 60.0f;    // 列表起始 Y（避开左上角系统提示区）
+    constexpr float DebugListRowHeight = 18.0f; // 行高
+}
 
 // ============================================================================
 // 生命周期
@@ -9,16 +30,26 @@
 void UISMManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
+    // 注册画布绘制回调（每帧随视口渲染调用；bDebugAABB 关闭时早退，近似零开销）
+    DebugDrawHandle = UDebugDrawService::Register(TEXT("Game"),
+        FDebugDrawDelegate::CreateUObject(this, &UISMManager::OnDebugCanvasDraw));
 }
 
 void UISMManager::Deinitialize()
 {
+    // 注销画布回调（必须先于桶组释放：绘制回调遍历 MeshToBucketGroups）
+    if (DebugDrawHandle.IsValid())
+    {
+        UDebugDrawService::Unregister(DebugDrawHandle);
+        DebugDrawHandle.Reset();
+    }
+    // 释放全部桶组（组件由 RF_Transient + Owner 托管，随 World 销毁；此处清引用即可）
     MeshToBucketGroups.Empty();
     Super::Deinitialize();
 }
 
 // ============================================================================
-// 组件创建
+// 组件管理
 // ============================================================================
 
 UInstancedStaticMeshComponent* UISMManager::CreateISMComponent(UStaticMesh* Mesh, int32 NumCustomDataFloats, const FISMComponentParams& Params)
@@ -27,10 +58,8 @@ UInstancedStaticMeshComponent* UISMManager::CreateISMComponent(UStaticMesh* Mesh
     AActor* Owner = Params.AttachParent->GetOwner();
     if (!Owner) return nullptr;
 
+    // 始终创建普通 ISM 组件：增量路径由 5.4+ ById API 原生保证（无开关属性）
     UInstancedStaticMeshComponent* NewISM = NewObject<UInstancedStaticMeshComponent>(Owner, NAME_None, RF_Transient);
-    // 启用引擎原生增量渲染（AddInstancesById/RemoveInstancesById 增量路径）
-    NewISM->bUseIncrementalISM = Params.bUseIncrementalISM;
-
     NewISM->SetStaticMesh(Mesh);
     NewISM->SetNumCustomDataFloats(NumCustomDataFloats);
     NewISM->SetCollisionEnabled(Params.CollisionEnabled);
@@ -44,102 +73,142 @@ UInstancedStaticMeshComponent* UISMManager::CreateISMComponent(UStaticMesh* Mesh
     NewISM->SetupAttachment(Params.AttachParent);
     NewISM->RegisterComponent();
 
-    NewISM->MarkRenderStateDirty();
     return NewISM;
 }
 
-// ============================================================================
-// 基本接口
-// ============================================================================
 
-UInstancedStaticMeshComponent* UISMManager::GetOrCreateISMComponent(UStaticMesh* Mesh, int32 NumCustomDataFloats, const FISMComponentParams& Params)
+UInstancedStaticMeshComponent* UISMManager::GetBucketComponent(UStaticMesh* Mesh, int32 BucketIndex) const
 {
     if (!Mesh) return nullptr;
-    const FISMMeshKey Key(Mesh);
-    if (const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key))
-    {
-        if (Group->Buckets.Num() > 0 && Group->Buckets[0])
-            return Group->Buckets[0];
-    }
-
-    if (IsInGameThread())
-    {
-        FISMBucketGroup& Group = MeshToBucketGroups.FindOrAdd(Key);
-        Group.NumCustomDataFloats = NumCustomDataFloats;
-        Group.bDisableBuckets = Params.bDisableBuckets;
-        Group.CachedParams = Params;
-        Group.BucketingThreshold = BucketingThreshold; // 使用当前全局阈值
-        if (Group.Buckets.Num() == 0) Group.Buckets.SetNum(1);
-        UInstancedStaticMeshComponent* NewISM = CreateISMComponent(Mesh, NumCustomDataFloats, Params);
-        Group.Buckets[0] = NewISM;
-        return NewISM;
-    }
-
-    FISMComponentParams ParamsCopy = Params;
-    const FGraphEventRef Task = FFunctionGraphTask::CreateAndDispatchWhenReady(
-        [this, Mesh, NumCustomDataFloats, ParamsCopy]() { GetOrCreateISMComponent(Mesh, NumCustomDataFloats, ParamsCopy); },
-        TStatId(), nullptr, ENamedThreads::GameThread);
-    FTaskGraphInterface::Get().WaitUntilTaskCompletes(Task);
-    const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
-    if (Group && Group->Buckets.Num() > 0 && Group->Buckets[0]) return Group->Buckets[0];
-    return nullptr;
-}
-
-UInstancedStaticMeshComponent* UISMManager::GetISMComponent(UStaticMesh* Mesh) const
-{
-    if (!Mesh) return nullptr;
+    // 线程约定：仅限游戏线程（无锁读与游戏线程写操作并发即数据竞争，且返回组件增量用法亦要求游戏线程）。
+    checkf(IsInGameThread(), TEXT("GetBucketComponent 仅限游戏线程调用（见 ISMManager 技术文档 §3.3）"));
     const FISMMeshKey Key(Mesh);
     const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
-    if (Group && Group->Buckets.Num() > 0 && Group->Buckets[0]) return Group->Buckets[0];
+    if (Group && Group->Buckets.IsValidIndex(BucketIndex)) return Group->Buckets[BucketIndex];
     return nullptr;
 }
 
 // ============================================================================
-// 单个实例更新
+// 球面分桶配置与内部映射
 // ============================================================================
 
-void UISMManager::UpdateInstanceCustomData(UStaticMesh* Mesh, FGlobalInstanceId InstanceId, int32 CustomDataIndex, float Value)
+void UISMManager::ConfigureSphereBuckets(const FISMSphereBucketConfig& Config)
 {
-    if (!Mesh || !InstanceId.IsValid()) return;
-    const FISMMeshKey Key(Mesh);
-    const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
-    if (!Group || !Group->Buckets.IsValidIndex(InstanceId.BucketIndex)) return;
+    // 线程约定：仅限游戏线程（写共享分桶配置状态，非游戏线程断言）。
+    checkf(IsInGameThread(), TEXT("ConfigureSphereBuckets 仅限游戏线程调用（见 ISMManager 技术文档 §3.3）"));
+    SphereConfig = Config;
+    bSphereBucketsConfigured = (Config.LatCells > 0 && Config.LonCells > 0);
+    if (!bSphereBucketsConfigured) return;
 
-    UInstancedStaticMeshComponent* Bucket = Group->Buckets[InstanceId.BucketIndex];
-    if (!Bucket) return;
+    // 块大小推导（§3.3：块面积 ≤ InstancesPerBucket 且接近正方形）
+    const int32 LatCells = Config.LatCells;
+    const int32 LonCells = Config.LonCells;
+    const int32 S = FMath::Max(1, Config.InstancesPerBucket);
 
-    // 引擎原生增量接口（SetCustomDataValueById 本身即增量路径，无需额外分支）
-    Bucket->SetCustomDataValueById(InstanceId.LocalId, CustomDataIndex, Value);
+    if (LatCells * LonCells <= S)
+    {
+        // 总格子 ≤ 每桶上限 → 单块（桶数 = 1，随网格规模自适应）
+        LatBlockSize = LatCells;
+        LonBlockSize = LonCells;
+    }
+    else
+    {
+        // 按网格纵横比分配边长
+        const float fLat = FMath::Sqrt(static_cast<float>(S) * LatCells / LonCells);
+        const float fLon = FMath::Sqrt(static_cast<float>(S) * LonCells / LatCells);
+        LatBlockSize = FMath::Max(1, FMath::RoundToInt(fLat));
+        LonBlockSize = FMath::Max(1, FMath::RoundToInt(fLon));
+
+        // 面积校验：确保每块覆盖 ≤ S 格（密铺时每桶 ≤ 2048 实例，容量保险）
+        while (LatBlockSize * LonBlockSize > S)
+        {
+            if (LatBlockSize >= LonBlockSize) --LatBlockSize; else --LonBlockSize;
+            if (LatBlockSize <= 1 && LonBlockSize <= 1) break;
+        }
+    }
+
+    // 角跨度约束（方案 B）：限制桶最大角跨度，压缩球面弧高（∝α²）与 AABB 尺寸；
+    // 经度恒按 360° 计（经度方向是膨胀主源）；min 在面积校验之后只会缩小块，永不超面积上限；
+    // ≤ 0 跳过（平面测试台不传字段，行为不变）。
+    if (Config.TotalLatSpanDeg > 0.f && Config.MaxBucketAngularSpanDeg > 0.f)
+    {
+        const float DegPerLatCell = Config.TotalLatSpanDeg / LatCells;
+        const float DegPerLonCell = 360.0f / LonCells;
+        LatBlockSize = FMath::Min(LatBlockSize, FMath::Max(1, FMath::FloorToInt(Config.MaxBucketAngularSpanDeg / DegPerLatCell)));
+        LonBlockSize = FMath::Min(LonBlockSize, FMath::Max(1, FMath::FloorToInt(Config.MaxBucketAngularSpanDeg / DegPerLonCell)));
+    }
+
+    // 钳制与桶数
+    LatBlockSize = FMath::Min(LatBlockSize, LatCells);
+    LonBlockSize = FMath::Min(LonBlockSize, LonCells);
+    LatBlockNum = FMath::DivideAndRoundUp(LatCells, LatBlockSize);
+    LonBlockNum = FMath::DivideAndRoundUp(LonCells, LonBlockSize);
+}
+
+int32 UISMManager::GetBucketKey(const FIntPoint& GridCoords) const
+{
+    if (!bSphereBucketsConfigured) return 0;
+
+    // 越界 clamp 保证确定性，实例不丢失（包围盒略扩展）
+    const int32 LatIdx = FMath::Clamp(GridCoords.X, 0, SphereConfig.LatCells - 1);
+    const int32 LonIdx = FMath::Clamp(GridCoords.Y, 0, SphereConfig.LonCells - 1);
+
+    // 经纬块公式：桶列边界对齐 0° 经线（LonIdx 从 0 起，天然满足 C-7 回绕规避）
+    return (LatIdx / LatBlockSize) * LonBlockNum + (LonIdx / LonBlockSize);
 }
 
 // ============================================================================
 // 批量操作
 // ============================================================================
 
-DECLARE_CYCLE_STAT(TEXT("BatchAddInstances"), STAT_BatchAddInstances, STATGROUP_Game);
-TArray<FGlobalInstanceId> UISMManager::BatchAddInstances(
-    UStaticMesh* Mesh, const TArray<FTransform>& Transforms, const int32 NumCustomDataFloats,
-    const FISMComponentParams& ISMParams, const TArray<float>& CustomData)
+FGlobalInstanceId UISMManager::AddInstance(
+    UStaticMesh* Mesh, const FTransform& Transform, const FIntPoint& GridCoord,
+    const int32 NumCustomDataFloats, const FISMComponentParams& ISMParams, const bool bWorldSpace,
+    const TArray<float>& CustomData)
 {
-    SCOPE_CYCLE_COUNTER(STAT_BatchAddInstances);
+    const TArray<FGlobalInstanceId> Ids = BatchAddInstances(
+        Mesh,
+        TArray<FTransform>{Transform},
+        TArray<FIntPoint>{GridCoord},
+        NumCustomDataFloats, ISMParams, bWorldSpace, CustomData);
+    return Ids.Num() > 0 ? Ids[0] : FGlobalInstanceId();
+}
+
+TArray<FGlobalInstanceId> UISMManager::BatchAddInstances(
+    UStaticMesh* Mesh, const TArray<FTransform>& Transforms, const TArray<FIntPoint>& GridCoords,
+    const int32 NumCustomDataFloats, const FISMComponentParams& ISMParams, const bool bWorldSpace,
+    const TArray<float>& CustomData)
+{
     TArray<FGlobalInstanceId> AllGlobalIds;
+    // 线程约定：仅限游戏线程（ISM 组件写接口游戏线程专属，非游戏线程断言）。
+    checkf(IsInGameThread(), TEXT("BatchAddInstances 仅限游戏线程调用（见 ISMManager 技术文档 §3.3）"));
     if (!Mesh || Transforms.Num() == 0) return AllGlobalIds;
+    // 前置校验：GridCoords 为空或长度 == Transforms 长度
+    if (!GridCoords.IsEmpty() && GridCoords.Num() != Transforms.Num()) return AllGlobalIds;
 
     const int32 AddCount = Transforms.Num();
     const FISMMeshKey Key(Mesh);
     FISMBucketGroup& Group = MeshToBucketGroups.FindOrAdd(Key);
-    Group.NumCustomDataFloats = NumCustomDataFloats;
-
-    // 根据阈值决定是否启用分桶
-    const bool bForceSingleBucket = Group.bDisableBuckets || Group.BucketingThreshold <= 0;
-    const bool bShouldStartBucketing = (!bForceSingleBucket) && (Group.TotalInstanceCount + AddCount > Group.BucketingThreshold);
-
-    // 场景1：未分桶且不需要分桶 → 使用单桶
-    if ((Group.Buckets.Num() == 0) && !bShouldStartBucketing)
+    // 新组：创建即继承全局分桶配置（分桶判定在此之后立即执行，不能在 GetOrCreateBucket 才继承——鸡生蛋）；预创建组不覆盖
+    if (Group.Buckets.Num() == 0)
     {
-        UInstancedStaticMeshComponent* ISMComp = GetOrCreateISMComponent(Mesh, NumCustomDataFloats, ISMParams);
+        Group.bDisableBuckets = ISMParams.bDisableBuckets;
+        Group.CachedParams = ISMParams;
+        Group.BucketingThreshold = BucketingThreshold;
+        Group.NumCustomDataFloats = NumCustomDataFloats;
+    }
+
+    // 分桶判定：强制单桶 / 未配置球面分桶 / 未传格子坐标 → 单桶路径
+    const bool bUseSphereBucketing = !Group.bDisableBuckets && Group.BucketingThreshold > 0
+        && bSphereBucketsConfigured && !GridCoords.IsEmpty();
+
+    if (!bUseSphereBucketing)
+    {
+        // 单桶路径（Buckets[0]）
+        UInstancedStaticMeshComponent* ISMComp = GetOrCreateBucket(Mesh, 0, NumCustomDataFloats, ISMParams);
         if (!ISMComp) return AllGlobalIds;
-        TArray<FPrimitiveInstanceId> Ids = ISMComp->AddInstancesById(Transforms, true);
+        TArray<FPrimitiveInstanceId> Ids = ISMComp->AddInstancesById(Transforms, bWorldSpace);
+        AllGlobalIds.Reserve(Ids.Num());
         for (const FPrimitiveInstanceId& Id : Ids)
             AllGlobalIds.Emplace(0, Id);
         if (CustomData.Num() > 0)
@@ -148,51 +217,60 @@ TArray<FGlobalInstanceId> UISMManager::BatchAddInstances(
             if (CustomData.Num() == Expected) ISMComp->SetCustomDataById(Ids, CustomData);
         }
         Group.TotalInstanceCount += AddCount;
+        Group.BucketInstanceCounts[0] += AddCount;
         return AllGlobalIds;
     }
 
-    // 场景2：需要分桶或已经分桶
-    if (!GetOrCreateBucket(Mesh, 0, NumCustomDataFloats, ISMParams)) return AllGlobalIds;
+    // 空间分桶路径：按格子坐标分组（桶 → 实例下标集合，一次遍历）
+    TMap<int32, TArray<int32>> BucketToIndices;
+    for (int32 i = 0; i < AddCount; ++i)
+        BucketToIndices.FindOrAdd(GetBucketKey(GridCoords[i])).Add(i);
 
-    const int32 StartGlobalIndex = Group.TotalInstanceCount;
-    int32 CurrentGlobalIdx = StartGlobalIndex;
-    int32 Processed = 0;
-
-    while (Processed < AddCount)
+    // 返回与输入一一对应的句柄数组（保序：按输入下标填充）
+    AllGlobalIds.SetNum(AddCount);
+    for (const auto& Pair : BucketToIndices)
     {
-        int32 BucketIdx = CurrentGlobalIdx / INSTANCES_PER_BUCKET;
-        const int32 LocalOffset = CurrentGlobalIdx % INSTANCES_PER_BUCKET;
-        const int32 Remain = INSTANCES_PER_BUCKET - LocalOffset;
-        const int32 SliceCount = FMath::Min(Remain, AddCount - Processed);
-
+        const int32 BucketIdx = Pair.Key;
+        const TArray<int32>& Indices = Pair.Value;
         UInstancedStaticMeshComponent* Bucket = GetOrCreateBucket(Mesh, BucketIdx, NumCustomDataFloats, ISMParams);
-        if (!Bucket) break;
+        if (!Bucket) continue;
+        TArray<FTransform> SliceTransforms;
+        SliceTransforms.Reserve(Indices.Num());
+        for (const int32 Idx : Indices) SliceTransforms.Add(Transforms[Idx]);
 
-        TArray<FTransform> SliceTransforms(&Transforms[Processed], SliceCount);
-        TArray<FPrimitiveInstanceId> SliceIds = Bucket->AddInstancesById(SliceTransforms, true);
-        for (const FPrimitiveInstanceId& Id : SliceIds)
-            AllGlobalIds.Emplace(BucketIdx, Id);
+        TArray<FPrimitiveInstanceId> SliceIds = Bucket->AddInstancesById(SliceTransforms, bWorldSpace);
+        for (int32 k = 0; k < SliceIds.Num() && k < Indices.Num(); ++k)
+            AllGlobalIds[Indices[k]] = FGlobalInstanceId(BucketIdx, SliceIds[k]);
 
         if (CustomData.Num() > 0)
         {
             const int32 Floats = NumCustomDataFloats;
-            const int32 DataStart = Processed * Floats;
-            TArray<float> SliceData(&CustomData[DataStart], SliceCount * Floats);
+            TArray<float> SliceData;
+            SliceData.Reserve(Indices.Num() * Floats);
+            for (const int32 Idx : Indices)
+                for (int32 f = 0; f < Floats; ++f)
+                    SliceData.Add(CustomData[Idx * Floats + f]);
             Bucket->SetCustomDataById(SliceIds, SliceData);
         }
-        Processed += SliceCount;
-        CurrentGlobalIdx += SliceCount;
+        Group.TotalInstanceCount += Indices.Num();
+        Group.BucketInstanceCounts[BucketIdx] += Indices.Num();
     }
-    Group.TotalInstanceCount += AddCount;
     return AllGlobalIds;
 }
 
 void UISMManager::BatchRemoveInstances(UStaticMesh* Mesh, const TArray<FGlobalInstanceId>& InstanceIds)
 {
+    // 线程约定：仅限游戏线程（ISM 组件写接口游戏线程专属，非游戏线程断言）。
+    checkf(IsInGameThread(), TEXT("BatchRemoveInstances 仅限游戏线程调用（见 ISMManager 技术文档 §3.3）"));
     if (!Mesh || InstanceIds.Num() == 0) return;
     const FISMMeshKey Key(Mesh);
-    const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
+    FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
     if (!Group) return;
+    // 计数对齐：确保每桶计数数组就绪（兼容预创建/历史桶组）
+    if (Group->BucketInstanceCounts.Num() < Group->Buckets.Num())
+        Group->BucketInstanceCounts.SetNum(Group->Buckets.Num());
+
+    // 按桶分组，再按组移除（避免逐桶遍历）
     TMap<int32, TArray<FPrimitiveInstanceId>> BucketMap;
     for (const FGlobalInstanceId& Gid : InstanceIds)
     {
@@ -202,12 +280,28 @@ void UISMManager::BatchRemoveInstances(UStaticMesh* Mesh, const TArray<FGlobalIn
     for (auto& Pair : BucketMap)
     {
         if (UInstancedStaticMeshComponent* Bucket = Group->Buckets[Pair.Key])
+        {
             Bucket->RemoveInstancesById(Pair.Value);
+            Group->TotalInstanceCount = FMath::Max(0, Group->TotalInstanceCount - Pair.Value.Num());
+            // 事件驱动停用（PR-6）：Remove 归零即停用，无每帧轮询
+            Group->BucketInstanceCounts[Pair.Key] = FMath::Max(0, Group->BucketInstanceCounts[Pair.Key] - Pair.Value.Num());
+            if (Group->BucketInstanceCounts[Pair.Key] == 0)
+            {
+                Bucket->SetHiddenInGame(true);   // 轻量停用，组件常驻（组件级池化 D-4）
+            }
+        }
     }
 }
 
-void UISMManager::BatchSetInstanceCustomData(UStaticMesh* Mesh, const TArray<FGlobalInstanceId>& InstanceIds, const TArray<float>& CustomData) const
+void UISMManager::RemoveInstance(UStaticMesh* Mesh, FGlobalInstanceId InstanceId)
 {
+    BatchRemoveInstances(Mesh, TArray<FGlobalInstanceId>{InstanceId});
+}
+
+void UISMManager::BatchUpdateInstanceCustomData(UStaticMesh* Mesh, const TArray<FGlobalInstanceId>& InstanceIds, const TArray<float>& CustomData) const
+{
+    // 线程约定：仅限游戏线程（ISM 组件写接口游戏线程专属，非游戏线程断言）。
+    checkf(IsInGameThread(), TEXT("BatchUpdateInstanceCustomData 仅限游戏线程调用（见 ISMManager 技术文档 §3.3）"));
     if (!Mesh || InstanceIds.Num() == 0 || CustomData.Num() == 0) return;
     const FISMMeshKey Key(Mesh);
     const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
@@ -224,6 +318,8 @@ void UISMManager::BatchSetInstanceCustomData(UStaticMesh* Mesh, const TArray<FGl
     if (FloatsPerInstance == 0) return;
     const int32 Expected = InstanceIds.Num() * FloatsPerInstance;
     if (CustomData.Num() != Expected) return;
+
+    // 按桶分组批量设置
     TMap<int32, TArray<FPrimitiveInstanceId>> IdGroups;
     TMap<int32, TArray<float>> DataGroups;
     for (int32 i = 0; i < InstanceIds.Num(); ++i)
@@ -243,6 +339,56 @@ void UISMManager::BatchSetInstanceCustomData(UStaticMesh* Mesh, const TArray<FGl
     }
 }
 
+void UISMManager::UpdateInstanceCustomData(UStaticMesh* Mesh, FGlobalInstanceId InstanceId, int32 CustomDataIndex, float Value)
+{
+    // 线程约定：仅限游戏线程（ISM 组件写接口游戏线程专属，非游戏线程断言）。
+    checkf(IsInGameThread(), TEXT("UpdateInstanceCustomData 仅限游戏线程调用（见 ISMManager 技术文档 §3.3）"));
+    if (!Mesh || !InstanceId.IsValid()) return;
+    const FISMMeshKey Key(Mesh);
+    const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
+    if (!Group || !Group->Buckets.IsValidIndex(InstanceId.BucketIndex)) return;
+
+    UInstancedStaticMeshComponent* Bucket = Group->Buckets[InstanceId.BucketIndex];
+    if (!Bucket) return;
+
+    // 引擎原生增量接口（SetCustomDataValueById 本身即增量路径）
+    Bucket->SetCustomDataValueById(InstanceId.LocalId, CustomDataIndex, Value);
+}
+
+void UISMManager::UpdateInstanceTransform(UStaticMesh* Mesh, FGlobalInstanceId InstanceId, const FTransform& NewTransform, const bool bWorldSpace, const bool bTeleport)
+{
+    // 线程约定：仅限游戏线程（ISM 组件写接口游戏线程专属，非游戏线程断言）。
+    checkf(IsInGameThread(), TEXT("UpdateInstanceTransform 仅限游戏线程调用（见 ISMManager 技术文档 §3.3）"));
+    if (!Mesh || !InstanceId.IsValid()) return;
+    const FISMMeshKey Key(Mesh);
+    const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
+    if (!Group || !Group->Buckets.IsValidIndex(InstanceId.BucketIndex)) return;
+
+    UInstancedStaticMeshComponent* Bucket = Group->Buckets[InstanceId.BucketIndex];
+    if (!Bucket) return;
+
+    Bucket->UpdateInstanceTransformById(InstanceId.LocalId, NewTransform, bWorldSpace, bTeleport);
+}
+
+void UISMManager::BatchUpdateInstancesTransforms(UStaticMesh* Mesh, const TArray<FGlobalInstanceId>& InstanceIds, const TArray<FTransform>& NewTransforms, const bool bWorldSpace, const bool bTeleport)
+{
+    // 线程约定：仅限游戏线程（ISM 组件写接口游戏线程专属，非游戏线程断言）。
+    checkf(IsInGameThread(), TEXT("BatchUpdateInstancesTransforms 仅限游戏线程调用（见 ISMManager 技术文档 §3.3）"));
+    if (!Mesh || InstanceIds.Num() == 0 || NewTransforms.Num() != InstanceIds.Num()) return;
+    const FISMMeshKey Key(Mesh);
+    const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
+    if (!Group) return;
+
+    // 逐实例：句柄定位桶 → ById 更新（引擎帧末统一聚合脏标记，无需调用层分组）
+    for (int32 i = 0; i < InstanceIds.Num(); ++i)
+    {
+        const FGlobalInstanceId& Gid = InstanceIds[i];
+        if (!Gid.IsValid() || !Group->Buckets.IsValidIndex(Gid.BucketIndex)) continue;
+        if (UInstancedStaticMeshComponent* Bucket = Group->Buckets[Gid.BucketIndex])
+            Bucket->UpdateInstanceTransformById(Gid.LocalId, NewTransforms[i], bWorldSpace, bTeleport);
+    }
+}
+
 // ============================================================================
 // 桶管理
 // ============================================================================
@@ -250,37 +396,283 @@ void UISMManager::BatchSetInstanceCustomData(UStaticMesh* Mesh, const TArray<FGl
 UInstancedStaticMeshComponent* UISMManager::GetOrCreateBucket(UStaticMesh* Mesh, int32 BucketIndex, int32 NumCustomDataFloats, const FISMComponentParams& Params)
 {
     if (!Mesh) return nullptr;
+
+    // 线程约定：仅限游戏线程。非游戏线程直接断言（不再派发——调用端自行保证游戏线程，见文档 §3.3）。
+    checkf(IsInGameThread(), TEXT("GetOrCreateBucket 仅限游戏线程调用（ISM 组件创建/写操作须在游戏线程，见 ISMManager 技术文档 §3.3）"));
+
     const FISMMeshKey Key(Mesh);
     FISMBucketGroup& Group = MeshToBucketGroups.FindOrAdd(Key);
-    Group.NumCustomDataFloats = NumCustomDataFloats;
+    // 新组：继承全局分桶配置（否则 BucketingThreshold=0 → 永远单桶）
+    if (Group.Buckets.Num() == 0)
+    {
+        Group.bDisableBuckets = Params.bDisableBuckets;
+        Group.CachedParams = Params;
+        Group.BucketingThreshold = BucketingThreshold;
+        Group.NumCustomDataFloats = NumCustomDataFloats;
+    }
     if (BucketIndex >= Group.Buckets.Num())
         Group.Buckets.SetNum(BucketIndex + 1);
-    if (Group.Buckets[BucketIndex]) return Group.Buckets[BucketIndex];
-
-    if (IsInGameThread())
+    // 计数数组无条件对齐（兼容预创建/历史桶组，防越界）
+    if (Group.BucketInstanceCounts.Num() < Group.Buckets.Num())
+        Group.BucketInstanceCounts.SetNum(Group.Buckets.Num());
+    if (Group.Buckets[BucketIndex])
     {
-        UInstancedStaticMeshComponent* NewBucket = CreateISMComponent(Mesh, NumCustomDataFloats, Params);
-        Group.Buckets[BucketIndex] = NewBucket;
-        return NewBucket;
+        // 复活停用桶（PR-6：重新 Add 时解除停用；SetHiddenInGame 幂等，先复活后 Add 无窗口）
+        Group.Buckets[BucketIndex]->SetHiddenInGame(false);
+        return Group.Buckets[BucketIndex];
     }
-    const FGraphEventRef Task = FFunctionGraphTask::CreateAndDispatchWhenReady(
-        [this, Mesh, Key, BucketIndex, NumCustomDataFloats, Params]() { GetOrCreateBucket(Mesh, BucketIndex, NumCustomDataFloats, Params); },
-        TStatId(), nullptr, ENamedThreads::GameThread);
-    FTaskGraphInterface::Get().WaitUntilTaskCompletes(Task);
-    return Group.Buckets[BucketIndex];
+    UInstancedStaticMeshComponent* NewBucket = CreateISMComponent(Mesh, NumCustomDataFloats, Params);
+    Group.Buckets[BucketIndex] = NewBucket;
+    return NewBucket;
 }
+
+// ============================================================================
+// 调试
+// ============================================================================
 
 void UISMManager::DebugPrintBucketStats()
 {
     int32 TotalBuckets = 0;
     UE_LOG(LogTemp, Warning, TEXT("----- ISM Bucket Stats -----"));
+    UE_LOG(LogTemp, Warning, TEXT("SphereConfig: %s, Block: %d x %d, BucketNum: %d x %d = %d"),
+        bSphereBucketsConfigured ? TEXT("Configured") : TEXT("Disabled"),
+        LatBlockSize, LonBlockSize, LatBlockNum, LonBlockNum, bSphereBucketsConfigured ? LatBlockNum * LonBlockNum : 1);
     for (auto& Pair : MeshToBucketGroups)
     {
         const FISMBucketGroup& Group = Pair.Value;
         int32 ActiveBuckets = 0;
-        for (const auto& Bucket : Group.Buckets) if (Bucket) ++ActiveBuckets;
+        // 以自维护计数为准（PR-6 事件驱动状态，不依赖引擎查询 API）
+        for (int32 i = 0; i < Group.Buckets.Num(); ++i)
+            if (Group.Buckets[i] && Group.BucketInstanceCounts.IsValidIndex(i) && Group.BucketInstanceCounts[i] > 0)
+                ++ActiveBuckets;
         TotalBuckets += ActiveBuckets;
-        UE_LOG(LogTemp, Warning, TEXT("Mesh: %s, Total Instances: %d, Buckets: %d (Active)"), *Pair.Key.MeshPath.ToString(), Group.TotalInstanceCount, ActiveBuckets);
+        UE_LOG(LogTemp, Warning, TEXT("Mesh: %s, Total Instances: %d, Buckets: %d (Active %d / Disabled %d)"),
+            *Pair.Key.MeshPath.ToString(), Group.TotalInstanceCount, Group.Buckets.Num(), ActiveBuckets,
+            Group.Buckets.Num() - ActiveBuckets);
+        // 每桶包围盒尺寸与停用状态（NFR-5 诊断扩展）
+        for (int32 i = 0; i < Group.Buckets.Num(); ++i)
+        {
+            const UInstancedStaticMeshComponent* Bucket = Group.Buckets[i];
+            if (!Bucket) continue;
+            UE_LOG(LogTemp, Warning, TEXT("  Bucket[%d]: Instances=%d, %s, BoundsExtent=(%.1f, %.1f, %.1f)"),
+                i, Group.BucketInstanceCounts.IsValidIndex(i) ? Group.BucketInstanceCounts[i] : 0,
+                (Group.BucketInstanceCounts.IsValidIndex(i) && Group.BucketInstanceCounts[i] > 0) ? TEXT("Active") : TEXT("Disabled"),
+                Bucket->Bounds.BoxExtent.X, Bucket->Bounds.BoxExtent.Y, Bucket->Bounds.BoxExtent.Z);
+        }
     }
     UE_LOG(LogTemp, Warning, TEXT("Total Active Buckets: %d"), TotalBuckets);
 }
+
+// ============================================================================
+// 调试：桶包围盒可视化（方案 A：线框 + 桶索引配色 + 内缩 1cm 防共面重合）
+// ============================================================================
+
+void UISMManager::DrawBucketBounds(UStaticMesh* Mesh, float LineThickness)
+{
+    if (!Mesh) return;
+    DrawBucketBoundsByPath(FSoftObjectPath(Mesh).ToString(), LineThickness);
+}
+
+void UISMManager::DrawBucketBoundsByPath(const FString& MeshPath, float LineThickness, bool bPersistent)
+{
+    UWorld* World = GetWorld();
+    if (!World || MeshPath.IsEmpty()) return;
+    // 花括号初始化：避免 Most Vexing Parse（圆括号 + 类型名实参会被解析为函数声明）
+    const FISMMeshKey Key{ FSoftObjectPath(MeshPath) };
+    const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
+    if (!Group || Group->Buckets.Num() == 0) return;
+
+    // 一次性持久绘制（bPersistent=true）：先清全部持久调试线再画，重复调用自动替换不叠加；
+    // 每帧非持久绘制（bPersistent=false，bDebugAABB 路径）：不清理，线框按帧自动覆盖无残留
+    if (bPersistent)
+        UKismetSystemLibrary::FlushPersistentDebugLines(World);
+
+    const int32 NumBuckets = Group->Buckets.Num();
+    for (int32 i = 0; i < NumBuckets; ++i)
+    {
+        const UInstancedStaticMeshComponent* Bucket = Group->Buckets[i];
+        if (!Bucket) continue;
+
+        // 活动桶按索引取 HSV 渐变（相邻桶可区分）；停用桶灰色（PR-6 状态一目了然）
+        const bool bActive = Group->BucketInstanceCounts.IsValidIndex(i) && Group->BucketInstanceCounts[i] > 0;
+        FColor Color;
+        if (bActive)
+        {
+            const float Hue = (float)(i + 1) / (float)FMath::Max(1, NumBuckets) * 360.0f;
+            // HSV → RGB：成员函数 HSVToLinearRGB()（FLinearColor 无静态 HSVToLinearColor）
+            Color = FLinearColor(Hue, 1.0f, 1.0f).HSVToLinearRGB().ToFColor(true);
+        }
+        else
+        {
+            Color = FColor(96, 96, 96);
+        }
+
+        const FBoxSphereBounds& B = Bucket->Bounds;
+        // 内缩 1cm：相邻桶共面边界线不重合（方案 A 防重叠核心）
+        const FVector Extent = B.BoxExtent - FVector(1.0f);
+        DrawDebugBox(World, B.Origin, Extent, FQuat::Identity, Color,
+            /*bPersistentLines=*/bPersistent, /*LifeTime=*/bPersistent ? -1.0f : 0.0f,
+            /*DepthPriority=*/0, LineThickness);
+    }
+}
+
+void UISMManager::ClearBucketBoundsDebug()
+{
+    if (UWorld* World = GetWorld())
+        UKismetSystemLibrary::FlushPersistentDebugLines(World);
+}
+
+// ============================================================================
+// 调试：AABB 线框封装（bDebugAABB：画面列表 + 每帧线框绘制 + 键盘/鼠标交互）
+// ============================================================================
+
+void UISMManager::Tick(float DeltaTime)
+{
+    if (!bDebugAABB) return;
+
+    HandleDebugAABBInput();
+
+    // 每帧非持久重绘：线框随实例变换/桶状态实时刷新，关闭时无残留（无需 Flush）
+    if (!DebugAABBMeshPath.IsEmpty())
+        DrawBucketBoundsByPath(DebugAABBMeshPath, /*LineThickness=*/4.0f, /*bPersistent=*/false);
+}
+
+TStatId UISMManager::GetStatId() const
+{
+    RETURN_QUICK_DECLARE_CYCLE_STAT(UISMManager, STATGROUP_Tickables);
+}
+
+void UISMManager::SetDebugAABB(bool bEnable, const FString& MeshPath)
+{
+    if (!bEnable)
+    {
+        bDebugAABB = false;
+        DebugAABBMeshPath.Reset();
+        ClearBucketBoundsDebug();
+        return;
+    }
+
+    bDebugAABB = true;
+    if (!MeshPath.IsEmpty())
+    {
+        SetDebugAABBTarget(MeshPath);
+    }
+    else if (DebugAABBMeshPath.IsEmpty())
+    {
+        // 未指定目标：自动选中并绘制第一个 Mesh（与画面列表高亮一致）
+        TArray<FISMDebugEntry> Entries;
+        BuildDebugMeshEntries(Entries);
+        if (Entries.Num() > 0)
+            SetDebugAABBTarget(Entries[0].PathName);
+    }
+}
+
+void UISMManager::SetDebugAABBTarget(const FString& MeshPath)
+{
+    DebugAABBMeshPath = MeshPath;
+    // 线框绘制由 Tick 每帧驱动，此处仅更新目标，下一帧自动生效
+}
+
+void UISMManager::BuildDebugMeshEntries(TArray<FISMDebugEntry>& OutEntries) const
+{
+    OutEntries.Reset();
+    for (const auto& Pair : MeshToBucketGroups)
+    {
+        FISMDebugEntry Entry;
+        Entry.PathName = Pair.Key.MeshPath.ToString();
+        Entry.DisplayName = Pair.Key.MeshPath.GetAssetName();
+        Entry.Instances = Pair.Value.TotalInstanceCount;
+        Entry.Buckets = Pair.Value.Buckets.Num();
+        OutEntries.Add(MoveTemp(Entry));
+    }
+    // DisplayName 升序（与原 Slate 列表一致；绘制/导航/命中共用同一序列）
+    OutEntries.Sort([](const FISMDebugEntry& A, const FISMDebugEntry& B)
+        { return A.DisplayName < B.DisplayName; });
+}
+
+void UISMManager::HandleDebugAABBInput()
+{
+    UWorld* World = GetWorld();
+    APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
+    if (!PC) return;
+
+    TArray<FISMDebugEntry> Entries;
+    BuildDebugMeshEntries(Entries);
+    if (Entries.Num() == 0) return;
+
+    // Esc：关闭调试（停止绘制 + 清线）
+    if (PC->WasInputKeyJustPressed(EKeys::Escape))
+    {
+        SetDebugAABB(false);
+        return;
+    }
+
+    // ↑/↓：循环切换绘制的 Mesh（贴合原 Slate"点击条目即切换绘制"，移动即生效）
+    int32 CurIdx = Entries.IndexOfByPredicate(
+        [this](const FISMDebugEntry& E) { return E.PathName == DebugAABBMeshPath; });
+    if (PC->WasInputKeyJustPressed(EKeys::Up))
+    {
+        CurIdx = (CurIdx < 0) ? 0 : (CurIdx - 1 + Entries.Num()) % Entries.Num();
+        SetDebugAABBTarget(Entries[CurIdx].PathName);
+    }
+    else if (PC->WasInputKeyJustPressed(EKeys::Down))
+    {
+        CurIdx = (CurIdx + 1) % Entries.Num();
+        SetDebugAABBTarget(Entries[CurIdx].PathName);
+    }
+
+    // 鼠标左键点击列表行 → 直接切换绘制（与原 Slate 点击行为一致；行布局与绘制共用常量）
+    if (PC->WasInputKeyJustPressed(EKeys::LeftMouseButton))
+    {
+        float MX = 0.f, MY = 0.f;
+        if (PC->GetMousePosition(MX, MY) && MY >= DebugListStartY)
+        {
+            const int32 Row = FMath::FloorToInt((MY - DebugListStartY) / DebugListRowHeight);
+            if (Entries.IsValidIndex(Row))
+                SetDebugAABBTarget(Entries[Row].PathName);
+        }
+    }
+}
+
+void UISMManager::OnDebugCanvasDraw(UCanvas* Canvas, APlayerController* PC)
+{
+    if (!bDebugAABB || !Canvas) return;
+    // 多 World（编辑器 PIE）防护：仅绘制本子系统所属 World 的视口
+    if (PC && PC->GetWorld() != GetWorld()) return;
+
+    TArray<FISMDebugEntry> Entries;
+    BuildDebugMeshEntries(Entries);
+    if (Entries.Num() == 0) return;
+
+    UFont* Font = GEngine->GetMediumFont();
+    float Y = DebugListStartY;
+
+    // 标题 + 操作提示
+    FCanvasTextItem TitleItem(FVector2D(10.0f, Y),
+        FText::FromString(TEXT("ISM Bucket Bounds Debug  (↑/↓ 切换 · 左键点击 · Esc 关闭)")),
+        Font, FLinearColor::Yellow);
+    Canvas->DrawItem(TitleItem);
+    Y += DebugListRowHeight + 8.0f;
+
+    // Mesh 列表：当前绘制目标高亮 + 前导箭头（实例数/桶数实时刷新）
+    for (const FISMDebugEntry& Entry : Entries)
+    {
+        const bool bSelected = (Entry.PathName == DebugAABBMeshPath);
+        const FString Line = FString::Printf(TEXT("%s %s  (instances=%d, buckets=%d)"),
+            bSelected ? TEXT("▶") : TEXT("  "), *Entry.DisplayName, Entry.Instances, Entry.Buckets);
+        FCanvasTextItem Item(FVector2D(10.0f, Y), FText::FromString(Line), Font,
+            bSelected ? FLinearColor(0.2f, 1.0f, 0.4f) : FLinearColor::White);
+        Canvas->DrawItem(Item);
+        Y += DebugListRowHeight;
+    }
+
+    // 底部：当前绘制目标完整路径（小字）
+    if (!DebugAABBMeshPath.IsEmpty())
+    {
+        FCanvasTextItem InfoItem(FVector2D(10.0f, Y + 8.0f),
+            FText::FromString(FString::Printf(TEXT("当前绘制: %s"), *DebugAABBMeshPath)),
+            GEngine->GetSmallFont(), FLinearColor(0.65f, 0.65f, 0.65f));
+        Canvas->DrawItem(InfoItem);
+    }
+}
+
