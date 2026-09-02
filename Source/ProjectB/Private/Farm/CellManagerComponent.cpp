@@ -489,6 +489,24 @@ TArray<FIntPoint> UCellManagerComponent::GetAllCoords()
 	return Coords;
 }
 
+bool UCellManagerComponent::GetCellWorldTransform(FIntPoint Coords, FTransform& OutTransform) const
+{
+	if (Coords.X < 0 || Coords.Y < 0) return false;
+
+	const int32 FlatIndex = Coords.X * PlanetConfig->NumLon + Coords.Y;
+	if (!CellEntities.IsValidIndex(FlatIndex) || !CellEntities[FlatIndex].IsValid())
+	{
+		return false;
+	}
+
+	const FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+	const FCellStaticFragment* StaticFragment = EntityManager.GetFragmentDataPtr<FCellStaticFragment>(CellEntities[FlatIndex]);
+	if (!StaticFragment) return false;
+
+	OutTransform = StaticFragment->Transform;
+	return true;
+}
+
 void UCellManagerComponent::Test()
 {
 	if (!PlanetConfig) return;
@@ -558,6 +576,9 @@ void UCellManagerComponent::PlowLand(FIntPoint Coords)
 		   }
 	   }
    );
+
+	// 意图委托：Plot Slot（0）启用（耕地成功，Defer 命令帧末落盘不影响意图传达）
+	OnCellSlotStateChanged.Broadcast(Coords, 0, true);
 }
 
 void UCellManagerComponent::RemoveLand(FIntPoint Coords)
@@ -583,6 +604,9 @@ void UCellManagerComponent::RemoveLand(FIntPoint Coords)
 
 	// 恢复单元格类型为空地
 	EntityManager.GetFragmentDataChecked<FCellStaticFragment>(Entity).CellType = ECellType::Empty;
+
+	// 意图委托：Plot Slot（0）禁用（移除耕地成功）
+	OnCellSlotStateChanged.Broadcast(Coords, 0, false);
 }
 
 void UCellManagerComponent::WetLand(FIntPoint Coords)
@@ -806,6 +830,9 @@ void UCellManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
             }
             //-----------------
         });
+
+	// 意图委托：Crop Slot（1）启用（播种成功，Defer 命令帧末落盘不影响意图传达）
+	OnCellSlotStateChanged.Broadcast(Coords, 1, true);
 }
 
 bool UCellManagerComponent::HarvestCrop(FIntPoint Coords)
@@ -868,6 +895,9 @@ void UCellManagerComponent::RemoveCrop(FIntPoint Coords)
 
 	// 将作物状态改为已收获（渲染处理器会自动处理 Mesh 切换）
 	CropState->CropGrowthStage = ECropGrowthStage::None;
+
+	// 意图委托：Crop Slot（1）禁用（移除作物成功）
+	OnCellSlotStateChanged.Broadcast(Coords, 1, false);
 }
 
 void UCellManagerComponent::CropDried(FIntPoint Coords)

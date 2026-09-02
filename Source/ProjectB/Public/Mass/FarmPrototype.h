@@ -1,4 +1,7 @@
 // FarmPrototype.h
+// ⚠️ 废弃原型：早期“智能对象 + Mass 收获”概念验证。
+// 正式类型已迁移至 Mass/FarmSmartObjectTypes.h（FCoordinatePayload / UFarm*Behavior）。
+// 本文件将在阶段 5 前移除。
 #pragma once
 
 #include "CoreMinimal.h"
@@ -47,31 +50,13 @@ struct FCropRenderStateFragment : public FMassFragment
 
 // ============================================================================
 // 智能对象荷载：用于在 Slot 中携带网格坐标
+// ⚠️ 已迁移至 FarmSmartObjectTypes.h（FCoordinatePayload，继承正式基类）
 // ============================================================================
-USTRUCT()
-struct FCoordinatePayload
-{
-    GENERATED_BODY()
-
-    UPROPERTY()
-    int32 X = 0;
-
-    UPROPERTY()
-    int32 Y = 0;
-
-    FCoordinatePayload() {}
-    FCoordinatePayload(FIntPoint Coord) : X(Coord.X), Y(Coord.Y) {}
-    FIntPoint ToIntPoint() const { return FIntPoint(X, Y); }
-};
 
 // ============================================================================
 // 智能对象行为定义（可为蓝图子类）
+// ⚠️ 已迁移至 FarmSmartObjectTypes.h（UFarmHarvestBehavior）
 // ============================================================================
-UCLASS(Blueprintable, BlueprintType)
-class UFarmHarvestBehavior : public USmartObjectBehaviorDefinition
-{
-    GENERATED_BODY()
-};
 
 // ============================================================================
 // Mass 处理器：检测生长阶段变化 -> 切换 ISM 图层

@@ -6,6 +6,7 @@
 #include "Farm/CellManagerComponent.h"
 #include "Farm/CropManagerComponent.h"
 #include "Farm/FarmlandComponent.h"
+#include "Mass/SmartObjectManagerComponent.h"
 #include "Planet/OrbitManagerComponent.h"
 
 
@@ -37,6 +38,9 @@ APlanetActor::APlanetActor()
 	
 	// OrbitManagerComponent
 	OrbitManagerComponent = CreateDefaultSubobject<UOrbitManagerComponent>(TEXT("OrbitManagerComponent"));
+
+	// SmartObjectManagerComponent（资产在蓝图/细节面板配置 DA_FarmCell）
+	SmartObjectManagerComponent = CreateDefaultSubobject<USmartObjectManagerComponent>(TEXT("SmartObjectManagerComponent"));
 }
 
 void APlanetActor::BeginPlay()
@@ -47,6 +51,12 @@ void APlanetActor::BeginPlay()
 	if (CellManagerComponent)
 	{
 		CellManagerComponent->Initialize(PlanetConfig, FarmlandConfig, CropDataTable);
+	}
+
+	// 智能对象注册依赖 CellManager 完成实体创建（分批注册由组件 Tick 驱动）
+	if (SmartObjectManagerComponent && CellManagerComponent)
+	{
+		SmartObjectManagerComponent->Initialize(CellManagerComponent);
 	}
 }
 
@@ -138,9 +148,10 @@ FOrbitData APlanetActor::GetOrbitData_Implementation(FName OrbitName) const
 
 FTransform APlanetActor::GetCellWorldTransform_Implementation(FIntPoint CellCoord) const
 {
-	if (FarmlandComponent)
+	FTransform OutTransform;
+	if (CellManagerComponent && CellManagerComponent->GetCellWorldTransform(CellCoord, OutTransform))
 	{
-		return FarmlandComponent->GetComponentTransform() * FarmlandComponent->GetPlotInfo(CellCoord).Transform;
+		return OutTransform;
 	}
 	return IPlanetInterface::GetCellWorldTransform_Implementation(CellCoord);
 }

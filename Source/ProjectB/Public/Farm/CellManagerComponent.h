@@ -8,7 +8,14 @@
 #include "Tools/FarmSaveGame.h"
 #include "CellManagerComponent.generated.h"
 
-class UMassEntityConfigAsset;
+/**
+ * 格子 Slot 状态变更通知（意图委托：调用方表达"哪个 Slot 应启停"，接收方执行）
+ * @param Coords    格子坐标
+ * @param SlotIndex 0=Plot 地块 / 1=Crop 作物
+ * @param bEnabled  目标启停状态
+ */
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnCellSlotStateChanged, FIntPoint, int32, bool);
+
 class ABasePlayerController;
 class UPlanetConfigDataAsset;
 class UFarmlandConfigDataAsset;
@@ -49,6 +56,15 @@ public:
 	bool GetCellCoordsFromScreenMouse(FIntPoint& OutCellCoords, float& OutWorldDistance) const;
 
 	bool GetCellEntity(FIntPoint Coords, FMassEntityHandle& OutEntity);
+
+	/** 获取指定格子的世界变换（读 FCellStaticFragment.Transform） */
+	bool GetCellWorldTransform(FIntPoint Coords, FTransform& OutTransform) const;
+
+	/**
+	 * Slot 状态变更通知（意图委托）：耕地/播种等操作后广播，携带目标 Slot 与启停意图
+	 * 订阅方（SmartObjectManager）据此 SetSlotEnabled；调用方不读当前状态，规避 Defer 时序
+	 */
+	FOnCellSlotStateChanged OnCellSlotStateChanged;
 
 	UFUNCTION(BlueprintCallable)
 	TArray<FIntPoint> GetAllCoords();
@@ -146,5 +162,5 @@ private:
 	void OnAutoHarvest(FIntPoint Coords);
 	void OnRemoveCrop(FIntPoint Coords);
 	void OnRePlantCrop(FIntPoint Coords);
-	
+
 };

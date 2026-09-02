@@ -16,6 +16,7 @@ class UOrbitManagerComponent;
 class UCropManagerComponent;
 class UFarmlandConfigDataAsset;
 class UFarmlandComponent;
+class USmartObjectManagerComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlanetInfoChanged, FPlanetInfo, PlanetInfo);
 
@@ -36,6 +37,10 @@ public:
 	// 获取cell组件
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	UCellManagerComponent* GetCellManagerComponent() const { return CellManagerComponent; }
+
+	// 获取智能对象管理组件
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	USmartObjectManagerComponent* GetSmartObjectManagerComponent() const { return SmartObjectManagerComponent; }
 	
 	// 获取地块组件
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
@@ -122,6 +127,10 @@ public:
 	// 轨道管理组件
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UOrbitManagerComponent> OrbitManagerComponent;
+
+	// 智能对象管理组件
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<USmartObjectManagerComponent> SmartObjectManagerComponent;
 
 	// ==================== 配置属性 ====================
 

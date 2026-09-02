@@ -1,5 +1,7 @@
 // FarmPrototype.cpp
+// ⚠️ 废弃原型实现（类型定义已迁移至 Mass/FarmSmartObjectTypes.h）
 #include "Mass/FarmPrototype.h"
+#include "Mass/FarmSmartObjectTypes.h"    // FCoordinatePayload 正式定义
 #include "MassEntityManager.h"           // FMassEntityManager
 #include "MassEntitySubsystem.h"         // UMassEntitySubsystem
 #include "SmartObjectTypes.h"          // 解决 FSmartObjectSlot / FSmartObjectSlotHandle 核心依赖
