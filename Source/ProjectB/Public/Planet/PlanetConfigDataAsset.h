@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "OrbitManagerComponent.h"
 #include "PlanetConfigDataAsset.generated.h"
 
 /**
@@ -54,5 +55,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Planet|Grid",
 	meta = (DisplayName = "经度格点数量", ClampMin = "4", ClampMax = "1000"))
 	int32 NumLon = 36;
+
+	// ==================== 轨道配置 ====================
+
+	// 轨道定义列表（数据化：OrbitManager 启动时按此创建轨道）
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Planet|Orbit",
+	meta = (DisplayName = "轨道定义列表"))
+	TArray<FOrbitDefinition> OrbitDefinitions;
 
 };

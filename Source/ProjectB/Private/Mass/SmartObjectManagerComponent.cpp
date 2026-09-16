@@ -32,6 +32,7 @@ void USmartObjectManagerComponent::Initialize(UCellManagerComponent* InCellManag
 	PendingCoords = CellManager->GetAllCoords();
 	PendingIndex = 0;
 	bRegistrationDone = false;
+	RegistrationSuccessCount = 0;
 
 	// 订阅 CellManager 的 Slot 状态意图委托（耕地/播种/移除 → 启停）
 	CellManager->OnCellSlotStateChanged.AddUObject(this, &ThisClass::HandleCellSlotStateChanged);
@@ -74,12 +75,11 @@ void USmartObjectManagerComponent::TickComponent(float DeltaTime, ELevelTick Tic
 
 	// 分批注册：每帧处理 BatchSize 个
 	const int32 EndIndex = FMath::Min(PendingIndex + BatchSize, PendingCoords.Num());
-	int32 SuccessCount = 0;
 	for (; PendingIndex < EndIndex; ++PendingIndex)
 	{
 		if (RegisterCell(PendingCoords[PendingIndex]))
 		{
-			++SuccessCount;
+			++RegistrationSuccessCount;
 		}
 	}
 
@@ -88,7 +88,8 @@ void USmartObjectManagerComponent::TickComponent(float DeltaTime, ELevelTick Tic
 		bRegistrationDone = true;
 		// 运行时停 Tick 必须用 SetTickFunctionEnable（改 bCanEverTick 只在注册时生效，不注销已注册 Tick）
 		SetComponentTickEnabled(false);
-		UE_LOG(LogTemp, Log, TEXT("[SmartObjectManager] Registration done: %d/%d registered"), SuccessCount, PendingCoords.Num());
+		UE_LOG(LogTemp, Log, TEXT("[SmartObjectManager] Registration done: %d/%d registered (%d failed)"),
+			RegistrationSuccessCount, PendingCoords.Num(), PendingCoords.Num() - RegistrationSuccessCount);
 	}
 }
 

@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Planet/OrbitManagerComponent.h"
@@ -148,6 +148,26 @@ void UOrbitManagerComponent::UpdateOrbitCoveredCoords(FName OrbitName)
 
 void UOrbitManagerComponent::InitOrbit()
 {
+	// 优先读取星球配置中的轨道定义（数据化，PlanetConfig->OrbitDefinitions）
+	if (PlanetConfig.IsValid() && PlanetConfig->OrbitDefinitions.Num() > 0)
+	{
+		for (const FOrbitDefinition& Definition : PlanetConfig->OrbitDefinitions)
+		{
+			if (Definition.OrbitName == NAME_None)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[UOrbitManagerComponent] Skipping orbit definition with NAME_None"));
+				continue;
+			}
+
+			FOrbitData OrbitData;
+			OrbitData.Transform = Definition.Transform;
+			OrbitData.Radius = Definition.Radius;
+			AddOrbit(Definition.OrbitName, OrbitData);
+		}
+		return;
+	}
+
+	// 兜底：未配置时使用默认轨道
 	FOrbitData DefaultOrbitData;
 	DefaultOrbitData.Transform = FTransform::Identity;
 	DefaultOrbitData.Transform.SetRotation(FRotator(0.f, 180.f, 0.f).Quaternion());

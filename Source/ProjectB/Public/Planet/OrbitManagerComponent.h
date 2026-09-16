@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -30,6 +30,27 @@ struct FOrbitData
 	// 轨道覆盖的地块坐标列表
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Orbit")
 	TMap<FIntPoint, float> CoveredCoordsMap;
+};
+
+/**
+ * 轨道配置定义（数据化）：编辑器可配置的静态轨道参数，运行时覆盖集由 OrbitManager 计算
+ */
+USTRUCT(BlueprintType)
+struct FOrbitDefinition
+{
+	GENERATED_BODY()
+
+	// 轨道名称（唯一标识）
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbit", meta = (DisplayName = "轨道名称"))
+	FName OrbitName = NAME_None;
+
+	// 轨道变换（平面方向与中心点）
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbit", meta = (DisplayName = "轨道变换"))
+	FTransform Transform = FTransform::Identity;
+
+	// 轨道半径 (cm)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbit", meta = (DisplayName = "轨道半径(cm)"))
+	float Radius = 30000.f;
 };
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))

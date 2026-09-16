@@ -102,6 +102,9 @@ private:
 	/** 注册是否完成 */
 	bool bRegistrationDone = false;
 
+	/** 累计注册成功数（统计用，跨帧累计） */
+	int32 RegistrationSuccessCount = 0;
+
 	/** 每帧注册数量 */
 	static constexpr int32 BatchSize = 5000;
 };

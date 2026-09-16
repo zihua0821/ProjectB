@@ -1,20 +1,12 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "OrbitManagerComponent.h"
+#include "Mass/SatelliteMassFragments.h"   // ESatelliteMoveState（已迁至卫星 Mass 数据层）
 #include "GameFramework/MovementComponent.h"
 #include "OrbitMovementComponent.generated.h"
-
-// 移动状态枚举
-UENUM(BlueprintType)
-enum class ESatelliteMoveState : uint8
-{
-	Idle             UMETA(DisplayName = "闲置"),
-	MovingToTarget   UMETA(DisplayName = "移动到目标"),
-	Paused           UMETA(DisplayName = "暂停")
-};
 
 DECLARE_MULTICAST_DELEGATE(FOnMoveToTargetCompleted);
 

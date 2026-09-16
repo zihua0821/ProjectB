@@ -7,6 +7,7 @@
 #include "Farm/CropManagerComponent.h"
 #include "Farm/FarmlandComponent.h"
 #include "Mass/SmartObjectManagerComponent.h"
+#include "Mass/SatelliteManagerComponent.h"
 #include "Planet/OrbitManagerComponent.h"
 
 
@@ -41,6 +42,9 @@ APlanetActor::APlanetActor()
 
 	// SmartObjectManagerComponent（资产在蓝图/细节面板配置 DA_FarmCell）
 	SmartObjectManagerComponent = CreateDefaultSubobject<USmartObjectManagerComponent>(TEXT("SmartObjectManagerComponent"));
+
+	// SatelliteManagerComponent（StateTree/数量在蓝图或细节面板配置）
+	SatelliteManagerComponent = CreateDefaultSubobject<USatelliteManagerComponent>(TEXT("SatelliteManagerComponent"));
 }
 
 void APlanetActor::BeginPlay()
@@ -57,6 +61,12 @@ void APlanetActor::BeginPlay()
 	if (SmartObjectManagerComponent && CellManagerComponent)
 	{
 		SmartObjectManagerComponent->Initialize(CellManagerComponent);
+	}
+
+	// 卫星实体创建（独立于 CellManager；读 PlanetConfig 的轨道配置）
+	if (SatelliteManagerComponent)
+	{
+		SatelliteManagerComponent->Initialize(this);
 	}
 }
 
