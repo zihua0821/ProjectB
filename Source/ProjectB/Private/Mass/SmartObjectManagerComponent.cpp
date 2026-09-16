@@ -243,3 +243,24 @@ bool USmartObjectManagerComponent::SetCropSlotEnabled(const FIntPoint Coords, co
 	}
 	return SmartObjectSubsystem->SetSlotEnabled(SlotHandle, bEnabled);
 }
+
+FSmartObjectClaimHandle USmartObjectManagerComponent::TryClaimSlot(const FIntPoint Coords, const int32 SlotIndex, const ESmartObjectClaimPriority Priority) const
+{
+	FSmartObjectSlotHandle SlotHandle;
+	if (!GetSlotHandle(Coords, SlotIndex, SlotHandle) || !SmartObjectSubsystem)
+	{
+		return FSmartObjectClaimHandle::InvalidHandle;
+	}
+
+	// 认领失败（未启用/已被占用）时引擎返回无效句柄
+	return SmartObjectSubsystem->MarkSlotAsClaimed(SlotHandle, Priority, FConstStructView());
+}
+
+bool USmartObjectManagerComponent::ReleaseClaim(const FSmartObjectClaimHandle& ClaimHandle) const
+{
+	if (!SmartObjectSubsystem || !ClaimHandle.IsValid())
+	{
+		return false;
+	}
+	return SmartObjectSubsystem->MarkSlotAsFree(ClaimHandle);
+}

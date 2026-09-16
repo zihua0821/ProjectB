@@ -70,8 +70,8 @@ void UCropGrowthProcessor::Execute(FMassEntityManager& EntityManager, FMassExecu
                 continue;
 
             // 3. 种子阶段特殊处理：同时缺水缺肥 → 不更新、不生长
-            const bool bNeedsWater = CropState.CropStateData.HasState(ECropState::NeedsWater);
-            const bool bNeedsFertilizer = CropState.CropStateData.HasState(ECropState::NeedsFertilizer);
+            const bool bNeedsWater = !PlotState.StateData.HasState(EPlotState::Watered);
+            const bool bNeedsFertilizer = !PlotState.StateData.HasState(EPlotState::Fertilized);
             if (CropState.CropGrowthStage == ECropGrowthStage::Seed && bNeedsWater && bNeedsFertilizer)
                 continue;
 

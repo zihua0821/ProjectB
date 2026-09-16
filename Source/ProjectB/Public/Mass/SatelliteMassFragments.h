@@ -5,16 +5,29 @@
 
 #include "CoreMinimal.h"
 #include "MassEntityTypes.h"
+#include "SmartObjectRuntime.h"      // FSmartObjectClaimHandle（卫星任务认领句柄）
 #include "Subsystem/ISMManager.h"   // FGlobalInstanceId（卫星渲染实例句柄）
 #include "SatelliteMassFragments.generated.h"
 
-// 卫星移动状态枚举
+class UPlanetConfigDataAsset;
+class UCellManagerComponent;
+class USmartObjectManagerComponent;
+
+/** 卫星移动状态枚举 */
 UENUM(BlueprintType)
 enum class ESatelliteMoveState : uint8
 {
 	Idle             UMETA(DisplayName = "闲置"),
 	MovingToTarget   UMETA(DisplayName = "移动到目标"),
 	Paused           UMETA(DisplayName = "暂停")
+};
+
+/** 卫星任务状态枚举（认领→移动→执行→释放 流程） */
+UENUM(BlueprintType)
+enum class ESatelliteTaskState : uint8
+{
+	Cruising          UMETA(DisplayName = "巡航"),
+	MovingToTarget    UMETA(DisplayName = "前往目标")
 };
 
 /**
@@ -96,6 +109,40 @@ struct PROJECTB_API FMassSatelliteSharedFragment : public FMassConstSharedFragme
 	/** 卫星缩放倍率（渲染更新时保持与注册时一致） */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
 	float SatelliteScale = 1.0f;
+
+	/** 星球配置（球面几何反推格子坐标） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	TObjectPtr<UPlanetConfigDataAsset> PlanetConfig = nullptr;
+
+	/** 格子管理器（目标状态查询 + 操作执行入口） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	TObjectPtr<UCellManagerComponent> CellManager = nullptr;
+
+	/** 智能对象管理器（认领/释放） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	TObjectPtr<USmartObjectManagerComponent> SmartObjectManager = nullptr;
+};
+
+/**
+ * 卫星任务状态（认领→移动→执行→释放 闭环）
+ * - TaskState：巡航时检测可操作目标并认领；前往目标时等待到达后执行
+ */
+USTRUCT()
+struct PROJECTB_API FMassSatelliteTaskFragment : public FMassFragment
+{
+	GENERATED_BODY()
+
+	/** 任务状态 */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	ESatelliteTaskState TaskState = ESatelliteTaskState::Cruising;
+
+	/** 目标格子坐标（无效 = 无目标） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	FIntPoint TargetCoord = FIntPoint(-1, -1);
+
+	/** 已认领的智能对象 Slot 句柄（前往目标期间有效） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	FSmartObjectClaimHandle ClaimHandle;
 };
 
 /**

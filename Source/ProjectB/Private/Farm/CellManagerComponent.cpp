@@ -33,10 +33,10 @@ void UCellManagerComponent::BeginPlay()
 	if (UWorld* World = GetWorld())
 	{
 		// 每 0.5 秒检查一次队列，避免高频轮询
-		World->GetTimerManager().SetTimer(MatureQueueProcessTimer,
-			this,
-			&UCellManagerComponent::ProcessMatureQueue,
-			0.5f, true);
+		// World->GetTimerManager().SetTimer(MatureQueueProcessTimer,
+		// 	this,
+		// 	&UCellManagerComponent::ProcessMatureQueue,
+		// 	0.5f, true);
 	}
 }
 
@@ -546,6 +546,78 @@ void UCellManagerComponent::Test()
 	GetWorld()->GetTimerManager().SetTimer(TestPlantTimer, PlantDelegate, 1.f, false);
 }
 
+void UCellManagerComponent::PresetMatureCropPlots(int32 PlotCount, FName CropID)
+{
+	if (PlotCount <= 0 || !PlanetConfig || !CropDataTable) return;
+
+	// 作物 ID：未指定则取数据表首行
+	if (CropID == NAME_None)
+	{
+		for (const auto& RowPair : CropDataTable->GetRowMap())
+		{
+			const FCropTableRow* Row = reinterpret_cast<const FCropTableRow*>(RowPair.Value);
+			if (Row)
+			{
+				CropID = Row->CropID;
+				break;
+			}
+		}
+	}
+	if (CropID == NAME_None) return;
+
+	// 赤道行（纬度 0 所在行）——与默认水平轨道（赤道面）对齐
+	const int32 NumLatCells = PlanetConfig->NumLat - 1;
+	const int32 NumLonCells = PlanetConfig->NumLon;
+	const float LatStep = (PlanetConfig->MaxLat - PlanetConfig->MinLat) / (PlanetConfig->NumLat - 1);
+	const int32 LatIdx = FMath::Clamp(FMath::FloorToInt((0.0f - PlanetConfig->MinLat) / LatStep), 0, NumLatCells - 1);
+
+	// 1. 批量耕地（Defer 帧末落盘）
+	TArray<FIntPoint> TargetCoords;
+	TargetCoords.Reserve(PlotCount);
+	for (int32 Index = 0; Index < PlotCount; ++Index)
+	{
+		const int32 LonIdx = 220 + Index;
+		TargetCoords.Add(FIntPoint(LatIdx, LonIdx));
+		PlowLand(TargetCoords.Last());
+	}
+
+	// 2. 延迟一帧后播种 + 直接成熟（需等耕地 Defer 落盘，与 Test() 同款时序处理）
+	FTimerDelegate PresetDelegate;
+	PresetDelegate.BindLambda([this, TargetCoords, CropID, LatIdx]()
+	{
+		if (!IsValid(this)) return;
+		for (const FIntPoint& Coords : TargetCoords)
+		{
+			PresetMatureCropPlot(Coords, CropID);
+		}
+		UE_LOG(LogTemp, Log, TEXT("[CellManager] Preset %d mature crop plots on row %d"), TargetCoords.Num(), LatIdx);
+	});
+
+	FTimerHandle PresetTimer;
+	GetWorld()->GetTimerManager().SetTimer(PresetTimer, PresetDelegate, 0.2f, false);
+}
+
+void UCellManagerComponent::PresetMatureCropPlot(FIntPoint Coords, const FName& CropID)
+{
+	FMassEntityHandle Entity;
+	if (!GetCellEntity(Coords, Entity)) return;
+
+	// 播种（作物 fragment 与初始化均在 Defer 队列中）
+	PlantCrop(Coords, CropID.ToString());
+
+	// 追加"直接成熟"指令：同帧 Defer 按入队顺序执行，位于播种初始化之后
+	FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+	EntityManager.Defer().PushCommand<FMassDeferredSetCommand>(
+		[Entity](const FMassEntityManager& EM)
+		{
+			if (!EM.IsEntityActive(Entity)) return;
+			FCropStateFragment* CropState = EM.GetFragmentDataPtr<FCropStateFragment>(Entity);
+			if (!CropState) return;
+			CropState->CropGrowthStage = ECropGrowthStage::Mature;
+			CropState->CropStateData.AddState(ECropState::ReadyForHarvest);
+		});
+}
+
 void UCellManagerComponent::ResetLand(FIntPoint Coords)
 {
 	ClearWeeds(Coords);
@@ -809,25 +881,25 @@ void UCellManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
 
         	//-----------------
             // 生长计算随机初始生长时间
-            FCropGrowthTimerFragment& Timer = EM.GetFragmentDataChecked<FCropGrowthTimerFragment>(Entity);
-            Timer.TotalGrowthTime = FMath::RandRange(0.f, Row->GrowthSeedTime + Row->GrowthSeedlingTime);
-            const float SeedlingStart = CropStaticConfig.GrowthSeedTime;
-            const float MatureStart = CropStaticConfig.GrowthSeedTime + CropStaticConfig.GrowthSeedlingTime;
-            if (Timer.TotalGrowthTime < SeedlingStart)
-            {
-	            CropState.CropGrowthStage = ECropGrowthStage::Seed;
-	            Timer.CurrentStageGrowthTime = Timer.TotalGrowthTime;
-            }
-            else if (Timer.TotalGrowthTime < MatureStart)
-            {
-	            CropState.CropGrowthStage = ECropGrowthStage::Seedling;
-	            Timer.CurrentStageGrowthTime = Timer.TotalGrowthTime - SeedlingStart;
-            }
-            else
-            {
-	            CropState.CropGrowthStage = ECropGrowthStage::Mature;
-	            Timer.CurrentStageGrowthTime = Timer.TotalGrowthTime - MatureStart;
-            }
+            // FCropGrowthTimerFragment& Timer = EM.GetFragmentDataChecked<FCropGrowthTimerFragment>(Entity);
+            // Timer.TotalGrowthTime = FMath::RandRange(0.f, Row->GrowthSeedTime + Row->GrowthSeedlingTime);
+            // const float SeedlingStart = CropStaticConfig.GrowthSeedTime;
+            // const float MatureStart = CropStaticConfig.GrowthSeedTime + CropStaticConfig.GrowthSeedlingTime;
+            // if (Timer.TotalGrowthTime < SeedlingStart)
+            // {
+	           //  CropState.CropGrowthStage = ECropGrowthStage::Seed;
+	           //  Timer.CurrentStageGrowthTime = Timer.TotalGrowthTime;
+            // }
+            // else if (Timer.TotalGrowthTime < MatureStart)
+            // {
+	           //  CropState.CropGrowthStage = ECropGrowthStage::Seedling;
+	           //  Timer.CurrentStageGrowthTime = Timer.TotalGrowthTime - SeedlingStart;
+            // }
+            // else
+            // {
+	           //  CropState.CropGrowthStage = ECropGrowthStage::Mature;
+	           //  Timer.CurrentStageGrowthTime = Timer.TotalGrowthTime - MatureStart;
+            // }
             //-----------------
         });
 

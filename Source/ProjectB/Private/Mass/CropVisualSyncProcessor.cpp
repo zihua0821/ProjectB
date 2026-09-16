@@ -95,7 +95,9 @@ void UCropVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
             }
             
             FTransform CropTransform = Cell.Transform;
-            CropTransform.AddToTranslation(CropOffset);
+            CropTransform.SetScale3D(FVector::One());
+            // 作物偏移以格子局部坐标系（球面切空间：Z=法线方向）为参考，经格子旋转转到世界空间后再平移
+            CropTransform.AddToTranslation(Cell.Transform.TransformVectorNoScale(CropOffset));
 
             // 移除旧阶段实例：按当前 Mesh 归组累积（BatchRemoveInstances 需按 Mesh 分组）
             if (CropRender.InstanceId.IsValid() && CropRender.CurrentMesh)

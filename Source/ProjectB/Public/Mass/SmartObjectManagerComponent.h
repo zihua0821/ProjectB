@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "SmartObjectRuntime.h"       // FSmartObjectClaimHandle（认领句柄）
 #include "SmartObjectTypes.h"        // FSmartObjectHandle / FSmartObjectSlotHandle
 #include "SmartObjectManagerComponent.generated.h"
 
@@ -54,6 +55,20 @@ public:
 
 	/** 设置 Crop Slot（1）启停（播种 Enable / 移除作物 Disable） */
 	bool SetCropSlotEnabled(const FIntPoint Coords, const bool bEnabled) const;
+
+	// ---- 认领/释放（B 路径：坐标直连，不走引擎查询） ----
+
+	/**
+	 * 尝试认领指定格子的 Slot（坐标 → SlotHandle → MarkSlotAsClaimed）
+	 * @param Coords     格子坐标
+	 * @param SlotIndex  0=Plot, 1=Crop
+	 * @param Priority   认领优先级（卫星 Normal / 玩家 High）
+	 * @return 认领句柄（无效 = 失败：Slot 未启用或已被占用）
+	 */
+	FSmartObjectClaimHandle TryClaimSlot(const FIntPoint Coords, const int32 SlotIndex, const ESmartObjectClaimPriority Priority) const;
+
+	/** 释放认领（MarkSlotAsFree） */
+	bool ReleaseClaim(const FSmartObjectClaimHandle& ClaimHandle) const;
 
 protected:
 	virtual void BeginPlay() override;

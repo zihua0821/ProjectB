@@ -71,6 +71,15 @@ public:
 
 	UFUNCTION(BlueprintCallable)
 	void Test();
+
+	/**
+	 * 测试预置：在赤道行（默认水平轨道正下方）均匀布设一批"已耕地+已播种+直接成熟"地块
+	 * 用于卫星收获演示（正常播种需等生长时间，此入口跳过等待）
+	 * @param PlotCount 预置数量（沿经度均分）
+	 * @param CropID    作物 ID（为空则取数据表首行）
+	 */
+	UFUNCTION(BlueprintCallable)
+	void PresetMatureCropPlots(int32 PlotCount = 8, FName CropID = NAME_None);
 protected:
 	virtual void BeginPlay() override;
 
@@ -80,6 +89,9 @@ private:
 
 	// 重置地块
 	void ResetLand(FIntPoint Coords);
+
+	// 预置单个成熟地块（耕地 → 播种 → 直接成熟）
+	void PresetMatureCropPlot(FIntPoint Coords, const FName& CropID);
 
 	// 耕地
 	void PlowLand(FIntPoint Coords);

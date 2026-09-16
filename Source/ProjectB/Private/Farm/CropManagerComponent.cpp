@@ -191,7 +191,8 @@ void UCropManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
 
     // 计算作物位置
     FTransform PlotCropTransform = PlotInfo.Transform;
-    PlotCropTransform.AddToTranslation(FarmlandConfig->CropOffset);
+    // 作物偏移以格子局部坐标系（球面切空间：Z=法线方向）为参考，经格子旋转转到世界空间后再平移
+    PlotCropTransform.AddToTranslation(PlotInfo.Transform.TransformVectorNoScale(FarmlandConfig->CropOffset));
     CropInfo.CropTransform = PlotCropTransform;
     
     // 计算作物世界位置

@@ -78,6 +78,8 @@ USatelliteOrbitMovementProcessor::USatelliteOrbitMovementProcessor()
 	// 纯 fragment 数据修改，不触碰 ISM/世界对象，允许并行 chunk 执行
 	// 执行组：渲染同步处理器按此组名排在其后（同帧读到最新角度）
 	ExecutionOrder.ExecuteInGroup = TEXT("SatelliteOrbitMovement");
+	// 排在任务决策（认领/目标设定）之后，同帧使用最新 TargetAngle/MoveState
+	ExecutionOrder.ExecuteAfter.Add(TEXT("SatelliteTask"));
 }
 
 void USatelliteOrbitMovementProcessor::ConfigureQueries()

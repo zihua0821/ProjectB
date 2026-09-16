@@ -39,17 +39,21 @@ void USatelliteManagerComponent::Initialize(APlanetActor* InPlanetActor)
 
 	FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
 
-	// 2. 构建共享数据（ConstSharedFragment：轨道几何 + Mesh + 缩放，同值共享）
+	// 2. 构建共享数据（ConstSharedFragment：轨道几何 + Mesh + 缩放 + 依赖引用，同值共享）
 	FMassSatelliteSharedFragment SatelliteShared;
 	SatelliteShared.OrbitTransform = OrbitDefinition.Transform;
 	SatelliteShared.Radius = OrbitDefinition.Radius;
 	SatelliteShared.SatelliteMesh = SatelliteMesh;
 	SatelliteShared.SatelliteScale = SatelliteScale;
+	SatelliteShared.PlanetConfig = PlanetActor->PlanetConfig;
+	SatelliteShared.CellManager = PlanetActor->GetCellManagerComponent();
+	SatelliteShared.SmartObjectManager = PlanetActor->GetSmartObjectManagerComponent();
 	const FConstSharedStruct SatelliteSharedStruct = EntityManager.GetOrCreateConstSharedFragment(SatelliteShared);
 
 	// 3. 建原型（手写路线，与格子创建模式一致）
 	TArray<const UScriptStruct*> FragmentTypes;
 	FragmentTypes.Add(FMassOrbitFragment::StaticStruct());
+	FragmentTypes.Add(FMassSatelliteTaskFragment::StaticStruct());
 	FragmentTypes.Add(FSatelliteTag::StaticStruct());
 	FragmentTypes.Add(FSatelliteRenderFragment::StaticStruct());
 	if (StateTreeAsset)
