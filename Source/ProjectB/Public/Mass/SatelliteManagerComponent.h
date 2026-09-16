@@ -59,6 +59,14 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Satellite")
 	FName DefaultOrbitName = NAME_None;
 
+	/** 卫星网格体（渲染用的静态网格；为空则仅创建实体不渲染） */
+	UPROPERTY(EditDefaultsOnly, Category = "Satellite", meta = (DisplayName = "卫星网格"))
+	TObjectPtr<UStaticMesh> SatelliteMesh;
+
+	/** 卫星缩放倍率（应用于网格体） */
+	UPROPERTY(EditDefaultsOnly, Category = "Satellite", meta = (DisplayName = "卫星缩放", ClampMin = "0.01"))
+	float SatelliteScale = 10.0f;
+
 	// ---- 运行时 ----
 
 	UPROPERTY()

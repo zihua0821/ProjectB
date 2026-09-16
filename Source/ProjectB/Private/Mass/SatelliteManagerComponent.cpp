@@ -8,6 +8,7 @@
 #include "Planet/PlanetActor.h"
 #include "Planet/PlanetConfigDataAsset.h"
 #include "StateTree.h"
+#include "Subsystem/ISMManager.h"
 
 USatelliteManagerComponent::USatelliteManagerComponent()
 {
@@ -36,23 +37,34 @@ void USatelliteManagerComponent::Initialize(APlanetActor* InPlanetActor)
 		return;
 	}
 
-	// 2. 建原型（手写路线，与格子创建模式一致）
 	FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
 
+	// 2. 构建共享数据（ConstSharedFragment：轨道几何 + Mesh + 缩放，同值共享）
+	FMassSatelliteSharedFragment SatelliteShared;
+	SatelliteShared.OrbitTransform = OrbitDefinition.Transform;
+	SatelliteShared.Radius = OrbitDefinition.Radius;
+	SatelliteShared.SatelliteMesh = SatelliteMesh;
+	SatelliteShared.SatelliteScale = SatelliteScale;
+	const FConstSharedStruct SatelliteSharedStruct = EntityManager.GetOrCreateConstSharedFragment(SatelliteShared);
+
+	// 3. 建原型（手写路线，与格子创建模式一致）
 	TArray<const UScriptStruct*> FragmentTypes;
 	FragmentTypes.Add(FMassOrbitFragment::StaticStruct());
 	FragmentTypes.Add(FSatelliteTag::StaticStruct());
+	FragmentTypes.Add(FSatelliteRenderFragment::StaticStruct());
 	if (StateTreeAsset)
 	{
 		FragmentTypes.Add(FMassStateTreeInstanceFragment::StaticStruct());
 	}
 	const FMassArchetypeHandle ArchetypeHandle = EntityManager.CreateArchetype(FragmentTypes);
 
-	// 3. 批量创建实体
+	// 4. 批量创建实体
 	TArray<FMassEntityHandle> Entities;
 	EntityManager.BatchCreateEntities(ArchetypeHandle, SatelliteCount, Entities);
 
-	// 4. 写轨道运动数据（初始角度沿轨道均分）
+	// 5. 写轨道运动数据 + 组装初始位置（角度沿轨道均分）
+	TArray<FTransform> InitialTransforms;
+	InitialTransforms.Reserve(Entities.Num());
 	for (int32 Index = 0; Index < Entities.Num(); ++Index)
 	{
 		FMassOrbitFragment& OrbitFragment = EntityManager.GetFragmentDataChecked<FMassOrbitFragment>(Entities[Index]);
@@ -62,9 +74,17 @@ void USatelliteManagerComponent::Initialize(APlanetActor* InPlanetActor)
 		OrbitFragment.AngularVelocity = DefaultAngularVelocity;
 		OrbitFragment.bClockwise = bDefaultClockwise;
 		OrbitFragment.MoveState = ESatelliteMoveState::Idle;
+
+		// 初始世界变换：轨道位置 + 卫星缩放（朝向暂为零旋转）
+		const FVector WorldLocation = ComputeOrbitWorldPosition(SatelliteShared.OrbitTransform, SatelliteShared.Radius, OrbitFragment.CurrentAngle);
+		InitialTransforms.Add(FTransform(FRotator::ZeroRotator, WorldLocation, FVector(SatelliteScale)));
 	}
 
-	// 5. 挂 StateTree（ConstSharedFragment 携带资产；实例分配与激活由引擎 Processor 自动完成）
+	// 6. 挂共享数据（轨道几何 + StateTree；StateTree 实例分配与激活由引擎 Processor 自动完成）
+	for (const FMassEntityHandle& Entity : Entities)
+	{
+		EntityManager.AddConstSharedFragmentToEntity(Entity, SatelliteSharedStruct);
+	}
 	if (StateTreeAsset)
 	{
 		FMassStateTreeSharedFragment SharedStateTree;
@@ -76,12 +96,41 @@ void USatelliteManagerComponent::Initialize(APlanetActor* InPlanetActor)
 		}
 	}
 
+	// 7. 注册 ISM 实例（单桶路径：空 GridCoords + bDisableBuckets，与格子分桶完全隔离）
+	if (SatelliteMesh)
+	{
+		if (UISMManager* ISMManager = GetWorld()->GetSubsystem<UISMManager>())
+		{
+			FISMComponentParams ISMParams;
+			ISMParams.AttachParent = GetOwner() ? GetOwner()->GetRootComponent() : nullptr;
+			ISMParams.bDisableBuckets = true;
+
+			const TArray<FGlobalInstanceId> InstanceIds = ISMManager->BatchAddInstances(
+				SatelliteMesh,
+				InitialTransforms,
+				TArray<FIntPoint>(),   // 空坐标 → 单桶路径
+				0,                     // 无 CustomData
+				ISMParams,
+				/*bWorldSpace=*/true);
+
+			for (int32 Index = 0; Index < Entities.Num() && Index < InstanceIds.Num(); ++Index)
+			{
+				EntityManager.GetFragmentDataChecked<FSatelliteRenderFragment>(Entities[Index]).InstanceId = InstanceIds[Index];
+			}
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[SatelliteManager] SatelliteMesh is not set - satellites will be invisible"));
+	}
+
 	SatelliteEntities = MoveTemp(Entities);
 
-	UE_LOG(LogTemp, Log, TEXT("[SatelliteManager] Created %d satellites on orbit '%s' (StateTree: %s)"),
+	UE_LOG(LogTemp, Log, TEXT("[SatelliteManager] Created %d satellites on orbit '%s' (StateTree: %s, Mesh: %s)"),
 		SatelliteEntities.Num(),
 		*OrbitDefinition.OrbitName.ToString(),
-		StateTreeAsset ? *StateTreeAsset->GetName() : TEXT("none"));
+		StateTreeAsset ? *StateTreeAsset->GetName() : TEXT("none"),
+		SatelliteMesh ? *SatelliteMesh->GetName() : TEXT("none"));
 }
 
 bool USatelliteManagerComponent::ResolveOrbitDefinition(FOrbitDefinition& OutDefinition) const
