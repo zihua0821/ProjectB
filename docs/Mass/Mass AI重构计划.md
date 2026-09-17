@@ -94,42 +94,73 @@
 - 运行时停 Tick 用 `SetComponentTickEnabled(false)`（`bCanEverTick` 运行时修改无效）
 - **验证**：控制台（~）调试通过；注册完成日志确认全量注册成功
 
-### 阶段 2：纯实体卫星骨架
-- **改动**：
-  1. 定义卫星 fragment：`FMassOrbitFragment`（轨道名、当前角度、目标角度、速度）
-  2. `MassSpawner` 生成卫星实体（或复用格子实体批量创建模式）
-  3. 挂 `UMassStateTreeTrait`，配最简 StateTree（最小决策：空闲/待命）
-  4. **Build.cs 追加依赖**：MassSpawner / MassCommon / MassSignals / MassAIBehavior / StateTreeModule（详见《Mass AI模块调研.md》第四章）
-- **验证**：实体生成、fragment 注入、最简 StateTree 运行
+### 阶段 2：纯实体卫星骨架（✅ 已实施完成 2026-09-16）
 
-### 阶段 3：ISM 渲染接入
-- **改动**：
-  1. `UISMManager` 新增卫星实例类型（复用球面分桶配置）
-  2. 卫星实体 → ISM 实例绑定（沿用 `FPlotRenderFragment.InstanceId` 同款模式，新增 `FSatelliteRenderFragment`）
-  3. 位置来源：`FMassOrbitFragment` 角度 → 世界位置（复用轨道数学层）
-- **验证**：卫星在轨道上可见渲染、剔除正确
+**实际落地内容**：
+1. **轨道数据化**：新增 `FOrbitDefinition`（OrbitName/Transform/Radius）+ `PlanetConfig.OrbitDefinitions` 数组；`OrbitManager::InitOrbit` 优先读配置（空则兜底 Default）
+2. **Fragment 层**：`Mass/SatelliteMassFragments.h`——`FMassOrbitFragment`（轨道名/当前角度/目标角度/角速度/方向/移动状态）+ `FSatelliteTag`；`ESatelliteMoveState` 自旧组件迁入
+3. **生成组件**：`SatelliteManagerComponent`（挂 PlanetActor）——**手写批量创建**（决策 A：CreateArchetype + BatchCreateEntities，非 MassSpawner）；角度沿轨道均分；参数（数量/角速度/StateTree 资产/网格）蓝图可配
+4. **StateTree 挂载**：`FMassStateTreeInstanceFragment` + `FMassStateTreeSharedFragment`（`AddConstSharedFragmentToEntity`）；**实例分配/激活/Tick/清理全部由引擎三个 Processor 自动完成**
+5. **构建配置**：`.uproject` 启用 MassAI 插件；Build.cs 加 `MassAIBehavior` / `StateTreeModule`
 
-### 阶段 4：轨道移动 Processor
-- **改动**：
-  1. `OrbitMovementComponent` 的 1D 角度推进逻辑迁入 `FMassOrbitMovementProcessor`
-  2. 轨道定义数据源：`OrbitManagerComponent` 覆盖计算几何化（遍历 `GetAllCoords` + 投影判定），作为 agent 可及边界
-  3. 数学层 `PlanetBlueprintFunctionLibrary` 保留，改格子坐标来源（fragment/几何）
-- **验证**：卫星沿轨道移动，覆盖集合正确（DebugDraw 对照）
+**验证**：实体数量 = 格子数 + 卫星数（54003）；`mass.PrintEntityFragments` 确认 fragment 值；`MassStateTreeActivatedTag` 确认 StateTree 激活
 
-### 阶段 5：智能对象认领/占用打通（v1.3 后置）
-- **改动**：
-  1. 认领时校验 Mass fragment（状态以实体为准）
-  2. `FMassSmartObjectHandler` 打通认领/占用闭环（FindCandidatesAsync→Claim→Use）
-  3. 成熟通知走 `UMassSignalSubsystem`（SignalEntity/DelaySignalEntity）
-- **验证**：两个 agent 不抢同一格子（冲突仲裁生效）
+### 阶段 3：ISM 渲染接入（✅ 已实施完成 2026-09-16）
 
-### 阶段 6：完整 StateTree 决策
-- **改动**：行为树节点（选格子/排队/作业）语义 → StateTree 任务（MassFindSmartObjectTask/MassClaimSmartObjectTask/MassUseSmartObjectTask 或自定义任务）；选点 → 普通 EQS（规模小）或 MassEQS（上规模）
-- **验证**：卫星行为与旧行为树语义等价
+**实际落地内容**：
+1. **渲染 fragment**：`FSatelliteRenderFragment { FGlobalInstanceId }`（注册时回写）
+2. **共享数据**：`FMassSatelliteSharedFragment`（ConstShared）——轨道几何 + Mesh + Scale（同值去重）
+3. **渲染同步 Processor**：`USatelliteRenderSyncProcessor`（游戏线程）——`CurrentAngle` → `ComputeOrbitWorldPosition` → `BatchUpdateInstancesTransforms`
+4. **单桶路径**：空 `GridCoords` + `bDisableBuckets`——卫星桶与格子球面分桶完全隔离（卫星数量少、位置动态，分桶无收益）
+5. **执行排序**：`SatelliteOrbitMovement`（移动）→ `SatelliteRenderSync`（渲染）——同帧用最新角度
 
-### 阶段 7：玩家共享
+**验证**：卫星在轨道上可见（3 颗均分 360°）；运行时移动跟随正常
+
+### 阶段 4：轨道移动 Processor（✅ 已实施完成 2026-09-16）
+
+**实际落地内容**：
+1. `USatelliteOrbitMovementProcessor`——精确迁移 `UOrbitMovementComponent::UpdateOrbitMovement` 全部语义（Idle 推进 / MovingToTarget 最短弧 / Paused 不动 / 角度归一化）
+2. 到达事件以 `MoveState = Paused` 状态表达（委托交付改为状态表达；信号留后续）
+3. **覆盖集合几何化：已关闭**——被"**球面几何反推**"替代（见阶段 5）：卫星选点直接用「位置方向 → lat/lon → 格子索引」（复用 `ConvertLocationToCellCoord`，与 `CreateMassCell` 互逆），**不再依赖 CoveredCoordsMap**
+
+**验证**：卫星沿轨道可见移动；`mass.PrintEntityFragments` 确认 CurrentAngle 持续推进
+
+### 阶段 5：认领/占用打通（✅ 已实施完成 2026-09-17）
+
+**实际落地内容（B 路径版，不走 FindCandidatesAsync）**：
+1. **认领/释放封装**：`SmartObjectManagerComponent::TryClaimSlot / ReleaseClaim`（坐标 → SlotHandle → `MarkSlotAsClaimed`/`MarkSlotAsFree`）
+2. **任务 fragment**：`FMassSatelliteTaskFragment { TargetCoord, ClaimHandle }`（跨任务传递）
+3. **选点**：球面反推最近格子 → 直读格子实体 `FCropStateFragment`（成熟判定）→ **选点后立即认领**（移动前占位防抢）
+4. **执行**：复用玩家同一入口 `CellManager->HandleLeftMouseClicked(HarvestCrop, Coord)`；成功/失败均释放（统一重选出口）
+5. **预置工具**：`CellManagerComponent::PresetMatureCropPlots`（赤道行均分预置"已耕地+已播种+直接成熟"地块，供演示；正常播种需等生长时间）
+
+**验证**：`claimed → harvested` 循环日志连续出现（认领→移动→收获→释放→继续巡航闭环成立）；手动操作对 Slot 启停的同步阶段 1 已就绪
+
+### 阶段 6：完整 StateTree 决策（✅ 已实施完成 2026-09-18）
+
+**实际落地内容**：
+1. **三个自定义 Task**（`SatelliteStateTreeTasks.h/.cpp`，继承 `FMassStateTreeTaskBase`）：`Select Target`（选点+认领）/ `Move To Target`（等待到达）/ `Harvest`（收获+释放，EnterState 瞬时完成）
+2. **状态编排**（资产 ST_Satellite）：`Cruise → MoveToTarget → Harvest → Cruise`，转换均为 `On State Succeeded`；Task 通过 Mass Context 直读/写 fragment（无 External Data 配置）
+3. **手写状态机退役**：删除 `SatelliteTaskProcessor`；`ESatelliteTaskState` 与 fragment `TaskState` 字段清理（状态由 StateTree 表达）
+4. **关键发现与对策——Mass StateTree 是信号驱动的**：`UMassStateTreeProcessor` 只在收到订阅信号时 Tick（无信号不跑）；等待/轮询类任务必须外部驱动 → 新增 `USatelliteStateTreeTickProcessor`（每帧向卫星发 `NewStateTreeTaskRequired` 信号，Build.cs 加 `MassSignals`）
+5. **失败处理**：Task 业务失败全内部消化（认领失败→Running 跳过）；结构性失败（数据/引用缺失）→ 日志 Warning + 默认转根到 Cruise 自愈
+
+**验证**：行为与阶段 5 等价（claimed/harvested 日志）+ StateTree 调试器可实时观察状态流转
+
+### 阶段 7：玩家共享（待做，下一阶段）
 - **改动**：玩家交互走同一智能对象协议（GameplayInteractions + 智能对象），玩家与 AI 共享认领/占用
 - **验证**：玩家与 AI 对同一格子的交互互斥正确
+
+---
+
+## 四·附：遗留待办清单（阶段 6 后）
+
+| 项 | 说明 | 优先级 |
+|---|---|---|
+| **阶段 7 玩家共享** | 玩家认领走同一协议（High 优先级抢占已由引擎保证）；玩家直调与认领的一致性 | 下一阶段 |
+| **旧系统退役** | `FarmPrototype`（已标废弃）+ 旧卫星 Actor/行为树/EQS/OrbitMovementComponent 的清理（待确认关卡是否还有旧卫星在用） | 中 |
+| 心跳降频优化 | `SatelliteStateTreeTickProcessor` 当前每帧发信号；规模化后降频（如 0.2s）+ 成熟事件（MassSignals）加速 | 低（规模化时） |
+| MassEQS 选点 | 当前选点为 O(1) 球面反推 + 单格状态直读；若将来需求变为"多条件/多目标扫描"再上 MassEQS | 低（按需求） |
 
 ---
 
@@ -147,15 +178,14 @@
 ## 六、并行机会与风险
 
 **可并行**：
-- 阶段 1（底座）✅ 已完成；阶段 2（实体骨架）依赖阶段 1，但与阶段 3（ISM 渲染）/ 阶段 4（轨道 Processor）可部分并行
-- 阶段 5（认领/占用）依赖阶段 2 与阶段 1，但可早于完整 StateTree 决策
+- 阶段 1~6 ✅ 已完成（底座 → 骨架 → 渲染 → 移动 → 认领 → StateTree 决策）；阶段 7（玩家共享）待做
 
-**风险**：
-1. **行为树语义迁移量大**：所有 BT 节点语义需重写为 StateTree 任务（一次性成本，无法复用旧资产）
-2. **纯实体无 Actor 的交互路径**：玩家点选/交互需智能对象或射线命中替代，需在阶段 6 前验证
-3. 轨道覆盖从物理 Overlap 改几何：边界判定语义可能微变，需对照验证
-4. 6 万格子遍历计算覆盖：需控制频率（仅在轨道变更时计算，不进 Tick）
-5. `UISMManager` 新增卫星实例类型的分桶与剔除需验证（复用格子配置但 mesh/规模不同）
+**风险（阶段 6 后更新）**：
+1. ~~行为树语义迁移量大~~ → **已完成**（阶段 6：三个自定义 Task + 状态编排；旧 BT 可退役）
+2. ~~纯实体无 Actor 的交互路径~~ → **已验证**（B 路径：球面反推 + 状态直读 + 坐标直连认领，不依赖 Actor/引擎查询）
+3. ~~轨道覆盖从物理 Overlap 改几何~~ → **方案替换关闭**：Mass 版选点改用球面几何反推（O(1)，与网格生成互逆），不再需要覆盖集几何化
+4. 旧系统退役范围：FarmPrototype 与旧 BT/EQS/卫星 Actor 的清理需确认关卡引用关系后执行
+5. 玩家共享（阶段 7）：玩家直调与认领协议的统一（玩家 High 抢占已由引擎保证，仅 Claimed 状态可抢）
 
 ---
 
@@ -163,6 +193,7 @@
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v1.6 | 2026-09-18 | **阶段 2~6 全部实施完成**：轨道数据化、卫星实体骨架、ISM 单桶渲染、移动 Processor、认领闭环（B路径）、StateTree 决策（含信号驱动心跳关键发现）；新增遗留待办清单 |
 | v1.5 | 2026-09-03 | **阶段 1 实施完成**：坐标统一、FarmSmartObjectTypes 类型层、DA_FarmCell 资产、SmartObjectManagerComponent 分批注册、意图委托（方案 C）状态驱动启停；B 路径选点定稿 |
 | v1.4 | 2026-09-01 | **共享底座合并为阶段1**：格子坐标来源 + 智能对象底座（都只依赖格子层）；实体骨架顺延为阶段2 |
 | v1.3 | 2026-09-01 | **智能对象底座提前**：拆分为底座层（阶段2，只依赖格子层）与认领/占用层（阶段5）；阶段编号顺延（1~7） |

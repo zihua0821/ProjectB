@@ -22,14 +22,6 @@ enum class ESatelliteMoveState : uint8
 	Paused           UMETA(DisplayName = "暂停")
 };
 
-/** 卫星任务状态枚举（认领→移动→执行→释放 流程） */
-UENUM(BlueprintType)
-enum class ESatelliteTaskState : uint8
-{
-	Cruising          UMETA(DisplayName = "巡航"),
-	MovingToTarget    UMETA(DisplayName = "前往目标")
-};
-
 /**
  * 卫星轨道运动状态（核心 fragment）
  * 对应旧 UOrbitMovementComponent 的运行状态字段
@@ -124,23 +116,19 @@ struct PROJECTB_API FMassSatelliteSharedFragment : public FMassConstSharedFragme
 };
 
 /**
- * 卫星任务状态（认领→移动→执行→释放 闭环）
- * - TaskState：巡航时检测可操作目标并认领；前往目标时等待到达后执行
+ * 卫星任务上下文（跨 StateTree 任务传递的数据）
+ * 任务状态（巡航/前往目标/收获）由 StateTree 资产中的状态编排，不再存于 fragment
  */
 USTRUCT()
 struct PROJECTB_API FMassSatelliteTaskFragment : public FMassFragment
 {
 	GENERATED_BODY()
 
-	/** 任务状态 */
-	UPROPERTY(VisibleAnywhere, Category = "Satellite")
-	ESatelliteTaskState TaskState = ESatelliteTaskState::Cruising;
-
 	/** 目标格子坐标（无效 = 无目标） */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
 	FIntPoint TargetCoord = FIntPoint(-1, -1);
 
-	/** 已认领的智能对象 Slot 句柄（前往目标期间有效） */
+	/** 已认领的智能对象 Slot 句柄（选点任务写入，收获任务释放） */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
 	FSmartObjectClaimHandle ClaimHandle;
 };
