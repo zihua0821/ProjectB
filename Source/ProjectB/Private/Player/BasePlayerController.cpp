@@ -7,6 +7,7 @@
 #include "Farm/CellManagerComponent.h"
 #include "Farm/FarmlandActor.h"
 #include "Farm/FarmlandComponent.h"
+#include "Mass/SmartObjectManagerComponent.h"
 #include "Planet/PlanetActor.h"
 #include "ProjectB/Public/TimeSync/TimeSyncComponent.h"
 
@@ -57,16 +58,47 @@ void ABasePlayerController::OnLeftMouseClick()
 	FIntPoint CellCoords;
 	if (TraceForFarmlandAndCell(HitLocation, HitPlanet, CellCoords))
 	{
-		// DrawDebugSphere(GetWorld(), HitLocation, 10.f, 12, FColor::Red, false, 3.f);
-		// const FFarmLandPlotInfo& PlotInfo = HitFarmland->GetPlotInfo(CellCoords);
-		
-		HitPlanet->HandleLeftMouseClicked(EditMode, CellCoords);
-		
-		// GEngine->AddOnScreenDebugMessage(-1,
-		// 		3.f,
-		// 		FColor::Red,
-		// 		FString::Printf(TEXT("Hit :(%d,%d)"), CellCoords.X, CellCoords.Y));
+		ExecuteEditModeWithClaim(HitPlanet, CellCoords);
 	}
+}
+
+void ABasePlayerController::ExecuteEditModeWithClaim(APlanetActor* Planet, const FIntPoint CellCoords)
+{
+	if (!Planet)
+	{
+		return;
+	}
+
+	USmartObjectManagerComponent* SmartObjectManager = Planet->GetSmartObjectManagerComponent();
+	const int32 SlotIndex = USmartObjectManagerComponent::GetSlotIndexForEditMode(EditMode);
+
+	// 无智能对象系统 / 操作不适用认领（None/Count）：直接执行
+	if (!SmartObjectManager || SlotIndex < 0)
+	{
+		Planet->HandleLeftMouseClicked(EditMode, CellCoords);
+		return;
+	}
+
+	// 目标 Slot 未启用（对象不存在，如未耕地/未播种）：无竞争对象，直接执行创建类操作
+	if (!SmartObjectManager->IsSlotEnabled(CellCoords, SlotIndex))
+	{
+		Planet->HandleLeftMouseClicked(EditMode, CellCoords);
+		return;
+	}
+
+	// 已启用：走认领协议（与卫星共享认领/占用；High 优先级可抢占卫星的 Claimed）
+	const FSmartObjectClaimHandle ClaimHandle = SmartObjectManager->TryClaimSlot(
+		CellCoords, SlotIndex, ESmartObjectClaimPriority::High);
+	if (!ClaimHandle.IsValid())
+	{
+		// 被同级或更高优先级占用：拒绝本次操作
+		UE_LOG(LogTemp, Warning, TEXT("[Player] Edit operation rejected: slot occupied at (%d, %d)"), CellCoords.X, CellCoords.Y);
+		return;
+	}
+
+	// 执行操作（同帧瞬时完成）→ 释放认领
+	Planet->HandleLeftMouseClicked(EditMode, CellCoords);
+	SmartObjectManager->ReleaseClaim(ClaimHandle);
 }
 
 bool ABasePlayerController::TraceForFarmlandAndCell(FVector& OutHitLocation, APlanetActor*& OutPlanetActor,

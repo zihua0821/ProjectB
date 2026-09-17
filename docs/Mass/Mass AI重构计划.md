@@ -147,18 +147,33 @@
 
 **验证**：行为与阶段 5 等价（claimed/harvested 日志）+ StateTree 调试器可实时观察状态流转
 
-### 阶段 7：玩家共享（待做，下一阶段）
-- **改动**：玩家交互走同一智能对象协议（GameplayInteractions + 智能对象），玩家与 AI 共享认领/占用
-- **验证**：玩家与 AI 对同一格子的交互互斥正确
+### 阶段 7：玩家共享（✅ 已实施完成 2026-09-18）
+
+**实际落地内容**：
+1. **玩家认领守卫**（`BasePlayerController::ExecuteEditModeWithClaim`）：
+   - `GetSlotIndexForEditMode`（操作→Slot 映射：Crop 类→1 / Plot 类→0 / None·Count→-1）
+   - 已启用 Slot（存在竞争对象）：认领（**High 可抢占卫星的 Claimed**）→ 执行 → 释放（同帧瞬时）
+   - 未启用 Slot（创建类操作：耕地/播种）：直接执行（无竞争对象；操作内状态检查兜底）
+2. **Slot 启用查询**：`SmartObjectManagerComponent::IsSlotEnabled`（功能性接口，非调试）
+3. **抢占语义**：玩家 High 抢卫星 Normal——仅 Claimed（未开始用）可抢，由引擎 `CanBeClaimed` 保证
+
+**验证**：玩家常规操作正常（耕地/播种直执行、收获走认领）；与卫星共享认领/占用无冲突
+
+**遗留决策**：`FCropTag`（RemoveLand 的"有作物禁止移除"守卫的判断依据）至今无添加点 → 该守卫实际未生效；暂定保持"片段存在性"判断（用户决策），FCropTag 接线留待后续
 
 ---
 
-## 四·附：遗留待办清单（阶段 6 后）
+## 四·附：遗留待办清单（路线图 1~7 收官后）
+
+> 主线路线图（阶段 1~7）已全部实施完成；以下为遗留优化项与收尾工作。
 
 | 项 | 说明 | 优先级 |
 |---|---|---|
-| **阶段 7 玩家共享** | 玩家认领走同一协议（High 优先级抢占已由引擎保证）；玩家直调与认领的一致性 | 下一阶段 |
-| **旧系统退役** | `FarmPrototype`（已标废弃）+ 旧卫星 Actor/行为树/EQS/OrbitMovementComponent 的清理（待确认关卡是否还有旧卫星在用） | 中 |
+| ~~旧系统退役~~ | ✅ 已完成（2026-09-18）：`FarmPrototype`、`AutomationSatellite`、`OrbitMovementComponent`、`SatelliteAIController` 已删除；旧 AI 行为树（Task/Decorator/Service/EQS）移入 `docs/参考/旧AI行为树/`（留档不编译）；蓝图资产待手动清理 | 已完成 |
+| 蓝图资产清理 | 旧卫星相关蓝图（BP_AutomationSatellite / BT_AutomationSatellite / BB_AutomationSatellite 等）待手动删除（引用已删 C++ 类的资产会显示类丢失） | 用户手册 |
+| `FCropTag` 接线 | RemoveLand 的"有作物禁止移除"守卫暂无生效依据（tag 未添加）；当前用"片段存在性"判断替代 | 中 |
+| 存档路径 Slot 同步 | 加载存档恢复已耕地/已播种格子时，SO Slot 启停未同步（`ApplySaveData` 空实现） | 中 |
+| 卫星多操作类型 | 当前卫星只做收获（Harvest）；耕地/播种/灌溉等按同模式（Task+状态）扩展 | 按需求 |
 | 心跳降频优化 | `SatelliteStateTreeTickProcessor` 当前每帧发信号；规模化后降频（如 0.2s）+ 成熟事件（MassSignals）加速 | 低（规模化时） |
 | MassEQS 选点 | 当前选点为 O(1) 球面反推 + 单格状态直读；若将来需求变为"多条件/多目标扫描"再上 MassEQS | 低（按需求） |
 
@@ -178,7 +193,7 @@
 ## 六、并行机会与风险
 
 **可并行**：
-- 阶段 1~6 ✅ 已完成（底座 → 骨架 → 渲染 → 移动 → 认领 → StateTree 决策）；阶段 7（玩家共享）待做
+- 阶段 1~7 ✅ **全部实施完成（路线图收官）**：底座 → 骨架 → 渲染 → 移动 → 认领 → StateTree 决策 → 玩家共享
 
 **风险（阶段 6 后更新）**：
 1. ~~行为树语义迁移量大~~ → **已完成**（阶段 6：三个自定义 Task + 状态编排；旧 BT 可退役）
@@ -193,6 +208,8 @@
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v1.8 | 2026-09-18 | **旧系统退役（C++ 侧）**：删除 FarmPrototype/AutomationSatellite/OrbitMovementComponent/SatelliteAIController（8 文件）；旧 AI 行为树 28 文件移入 docs/参考/旧AI行为树/（留档不编译）；OrbitManagerComponent 保留（清理其对 AutomationSatellite 的无用 include） |
+| v1.7 | 2026-09-18 | **阶段 7 实施完成——路线图 1~7 全部收官**：玩家认领守卫（High 抢占/创建类操作直执行）、Slot 映射与启用查询接口；遗留清单更新（旧系统退役/FCropTag/存档同步/多操作类型） |
 | v1.6 | 2026-09-18 | **阶段 2~6 全部实施完成**：轨道数据化、卫星实体骨架、ISM 单桶渲染、移动 Processor、认领闭环（B路径）、StateTree 决策（含信号驱动心跳关键发现）；新增遗留待办清单 |
 | v1.5 | 2026-09-03 | **阶段 1 实施完成**：坐标统一、FarmSmartObjectTypes 类型层、DA_FarmCell 资产、SmartObjectManagerComponent 分批注册、意图委托（方案 C）状态驱动启停；B 路径选点定稿 |
 | v1.4 | 2026-09-01 | **共享底座合并为阶段1**：格子坐标来源 + 智能对象底座（都只依赖格子层）；实体骨架顺延为阶段2 |

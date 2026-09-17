@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Crops/CropData.h"          // EEditMode（操作模式 → Slot 映射）
 #include "SmartObjectRuntime.h"       // FSmartObjectClaimHandle（认领句柄）
 #include "SmartObjectTypes.h"        // FSmartObjectHandle / FSmartObjectSlotHandle
 #include "SmartObjectManagerComponent.generated.h"
@@ -69,6 +70,15 @@ public:
 
 	/** 释放认领（MarkSlotAsFree） */
 	bool ReleaseClaim(const FSmartObjectClaimHandle& ClaimHandle) const;
+
+	/** 指定坐标 Slot 是否启用（启用 = 对象存在，才参与认领协议） */
+	bool IsSlotEnabled(const FIntPoint Coords, const int32 SlotIndex) const;
+
+	/**
+	 * 操作模式 → 智能对象 Slot 索引映射
+	 * @return 0=Plot（地块操作）/ 1=Crop（作物操作）/ -1=不适用认领（None/Count 等）
+	 */
+	static int32 GetSlotIndexForEditMode(const EEditMode EditMode);
 
 protected:
 	virtual void BeginPlay() override;

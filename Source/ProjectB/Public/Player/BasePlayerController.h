@@ -64,6 +64,9 @@ private:
 	// 射线检测获取点击的农场和单元格
 	bool TraceForFarmlandAndCell(FVector& OutHitLocation, APlanetActor*& OutPlanetActor, FIntPoint& OutCellCoords);
 
+	// 执行编辑操作（玩家认领守卫：已启用 Slot 走认领协议，未启用直接执行）
+	void ExecuteEditModeWithClaim(APlanetActor* Planet, const FIntPoint CellCoords);
+
 	void UpdateHoveredPlot();
 
 	UPROPERTY()

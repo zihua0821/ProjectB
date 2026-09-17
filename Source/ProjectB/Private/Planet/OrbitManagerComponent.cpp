@@ -5,7 +5,6 @@
 
 #include "Engine/OverlapResult.h"
 #include "Farm/FarmlandComponent.h"
-#include "Planet/AutomationSatellite.h"
 #include "Planet/PlanetBlueprintFunctionLibrary.h"
 #include "Planet/PlanetConfigDataAsset.h"
 #include "ProjectB/ProjectB.h"

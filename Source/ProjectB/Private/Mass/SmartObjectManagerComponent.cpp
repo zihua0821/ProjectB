@@ -3,6 +3,7 @@
 
 #include "SmartObjectDefinition.h"
 #include "SmartObjectSubsystem.h"
+#include "Crops/CropData.h"             // EEditMode（操作模式 → Slot 映射）
 #include "Farm/CellManagerComponent.h"
 #include "Mass/FarmSmartObjectTypes.h"   // FCoordinatePayload
 
@@ -263,4 +264,47 @@ bool USmartObjectManagerComponent::ReleaseClaim(const FSmartObjectClaimHandle& C
 		return false;
 	}
 	return SmartObjectSubsystem->MarkSlotAsFree(ClaimHandle);
+}
+
+bool USmartObjectManagerComponent::IsSlotEnabled(const FIntPoint Coords, const int32 SlotIndex) const
+{
+	FSmartObjectSlotHandle SlotHandle;
+	if (!GetSlotHandle(Coords, SlotIndex, SlotHandle) || !SmartObjectSubsystem)
+	{
+		return false;
+	}
+	const FSmartObjectSlotView SlotView = SmartObjectSubsystem->GetSlotView(SlotHandle);
+	return SlotView.IsEnabled();
+}
+
+int32 USmartObjectManagerComponent::GetSlotIndexForEditMode(const EEditMode EditMode)
+{
+	switch (EditMode)
+	{
+	// 作物类操作（Crop Slot = 1）
+	case EEditMode::PlantCrop:
+	case EEditMode::HarvestCrop:
+	case EEditMode::RemoveCrop:
+	case EEditMode::CropDried:
+	case EEditMode::UnCropDried:
+		return 1;
+
+	// 地块类操作（Plot Slot = 0）
+	case EEditMode::Reset:
+	case EEditMode::Plow:
+	case EEditMode::UnPlow:
+	case EEditMode::Wet:
+	case EEditMode::UnWet:
+	case EEditMode::Fertilize:
+	case EEditMode::UnFertilize:
+	case EEditMode::Weed:
+	case EEditMode::UnWeed:
+	case EEditMode::Pest:
+	case EEditMode::UnPest:
+		return 0;
+
+	default:
+		// None / Count：无操作或无效
+		return -1;
+	}
 }
