@@ -349,6 +349,38 @@ void UCellManagerComponent::HandleLeftMouseClicked(const EEditMode EditMode, con
 	}
 }
 
+void UCellManagerComponent::ExecuteFarmAction(const EEditMode EditMode, const FIntPoint Coords)
+{
+	switch (EditMode)
+	{
+	// 地块操作（与玩家入口一致）
+	case EEditMode::Reset:       ResetLand(Coords); break;
+	case EEditMode::Plow:        PlowLand(Coords); break;
+	case EEditMode::UnPlow:      RemoveLand(Coords); break;
+	case EEditMode::Wet:         WetLand(Coords); break;
+	case EEditMode::UnWet:       LandDried(Coords); break;
+	case EEditMode::Fertilize:   FertilizeLand(Coords); break;
+	case EEditMode::UnFertilize: ClearFertilize(Coords); break;
+	case EEditMode::Weed:        GenerateWeeds(Coords); break;
+	case EEditMode::UnWeed:      ClearWeeds(Coords); break;
+	case EEditMode::Pest:        GeneratePest(Coords); break;
+	case EEditMode::UnPest:      ClearPest(Coords); break;
+
+	// 作物操作
+	case EEditMode::PlantCrop:
+		// 空作物名：重播时 PlantCrop 内部沿用格子已有作物的 CropID（同类型作物）
+		PlantCrop(Coords, FString());
+		break;
+	case EEditMode::HarvestCrop: HarvestCrop(Coords); break;
+	case EEditMode::RemoveCrop:  RemoveCrop(Coords); break;
+	case EEditMode::CropDried:   CropDried(Coords); break;
+	case EEditMode::UnCropDried: RemoveCropDried(Coords); break;
+
+	default:
+		break;
+	}
+}
+
 TArray<FFarmLandPlotSaveGameData> UCellManagerComponent::GetSaveData() const
 {
 	TArray<FFarmLandPlotSaveGameData> SaveData;
@@ -819,11 +851,14 @@ void UCellManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
     FPlotStateFragment* PlotState = EntityManager.GetFragmentDataPtr<FPlotStateFragment>(Entity);
     if (!PlotState || !PlotState->StateData.HasState(EPlotState::Plowed)) return;
 
-    // 检查是否已有作物
-    if (EntityManager.GetFragmentDataPtr<FCropStateFragment>(Entity)) return;
+    // 检查是否已有作物（已收获的作物允许覆盖重播：收获后循环种植同类型作物）
+    FCropStateFragment* ExistingCropState = EntityManager.GetFragmentDataPtr<FCropStateFragment>(Entity);
+    const bool bReplant = ExistingCropState != nullptr && ExistingCropState->CropGrowthStage == ECropGrowthStage::Harvested;
+    if (ExistingCropState != nullptr && !bReplant) return;
 
-    // 从数据表读取作物配置
-    FName CropID = FName(CropName);
+    // 作物配置：重播沿用格子已有作物的 CropID（同类型作物），忽略传入名；首次播种从数据表取
+    FCropStaticConfigFragment* ExistingCropConfig = EntityManager.GetFragmentDataPtr<FCropStaticConfigFragment>(Entity);
+    FName CropID = (bReplant && ExistingCropConfig) ? ExistingCropConfig->CropID : FName(CropName);
     const FCropTableRow* Row = CropDataTable->FindRow<FCropTableRow>(CropID, TEXT("PlantCrop"));
     if (!Row) return;
 
@@ -834,12 +869,15 @@ void UCellManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
 	PlanetPower -= Row->SeedPrice;
 	IPlanetInterface::Execute_CallPlanetInfoChanged(OwnerActor.Get());
 	
-    // 通过命令缓冲添加作物 Tag 和全部 Fragment
-    EntityManager.Defer().AddFragment<FCropStaticConfigFragment>(Entity);
-    EntityManager.Defer().AddFragment<FCropStateFragment>(Entity);
-    EntityManager.Defer().AddFragment<FCropGrowthTimerFragment>(Entity);
-    EntityManager.Defer().AddFragment<FCropQualityFragment>(Entity);
-	EntityManager.Defer().AddFragment<FCropRenderFragment>(Entity);
+    // 通过命令缓冲添加作物 Fragment（重播时 Fragment 已存在，仅走重置逻辑）
+    if (!bReplant)
+    {
+        EntityManager.Defer().AddFragment<FCropStaticConfigFragment>(Entity);
+        EntityManager.Defer().AddFragment<FCropStateFragment>(Entity);
+        EntityManager.Defer().AddFragment<FCropGrowthTimerFragment>(Entity);
+        EntityManager.Defer().AddFragment<FCropQualityFragment>(Entity);
+        EntityManager.Defer().AddFragment<FCropRenderFragment>(Entity);
+    }
 
     // 初始化所有作物数据
     EntityManager.Defer().PushCommand<FMassDeferredSetCommand>(
@@ -863,11 +901,19 @@ void UCellManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
 			CropStaticConfig.HarvestedMesh = Variant.HarvestedMesh;
         	CropStaticConfig.CropNumCustomDataFloats = Row->CropNumCustomDataFloats;
 
-            // 生长阶段与状态
+            // 生长阶段与状态（重播时先整体重置，避免继承上一轮残留状态位；Reset 后默认需水+需肥）
             FCropStateFragment& CropState = EM.GetFragmentDataChecked<FCropStateFragment>(Entity);
             CropState.CropGrowthStage = ECropGrowthStage::Seed;
-            CropState.CropStateData.AddState(ECropState::NeedsWater);
-            CropState.CropStateData.AddState(ECropState::NeedsFertilizer);
+            CropState.CropStateData.Reset();
+            CropState.LastRenderedStage = ECropGrowthStage::None;
+
+            // 生长计时与品质重置（重播需清零；首次播种为默认值无副作用）
+            FCropGrowthTimerFragment& CropTimer = EM.GetFragmentDataChecked<FCropGrowthTimerFragment>(Entity);
+            CropTimer.TotalGrowthTime = 0.f;
+            CropTimer.CurrentStageGrowthTime = 0.f;
+
+            FCropQualityFragment& CropQuality = EM.GetFragmentDataChecked<FCropQualityFragment>(Entity);
+            CropQuality.QualityData.Reset();
 
             // 根据地块初始状态调整作物状态
             if (PlotState->StateData.HasState(EPlotState::Watered))

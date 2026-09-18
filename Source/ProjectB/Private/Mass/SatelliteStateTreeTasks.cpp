@@ -2,7 +2,9 @@
 #include "Mass/SatelliteStateTreeTasks.h"
 
 #include "Farm/CellManagerComponent.h"
-#include "Mass/CellMassFragments.h"     // FCropStateFragment / ECropGrowthStage
+#include "Mass/CellMassFragments.h"              // FPlotStateFragment / FCropStateFragment（缺口判定）
+#include "Mass/FarmSmartObjectTypes.h"           // UFarmActionBehaviorBase（作业时长）
+#include "Mass/SatelliteManagerComponent.h"      // FSatelliteScoringWeights / USatelliteManagerComponent
 #include "Mass/SatelliteMassFragments.h"
 #include "Mass/SmartObjectManagerComponent.h"
 #include "MassEntityManager.h"
@@ -10,14 +12,18 @@
 #include "Planet/OrbitManagerComponent.h"          // FOrbitData
 #include "Planet/PlanetBlueprintFunctionLibrary.h"
 #include "Planet/PlanetConfigDataAsset.h"
+#include "SmartObjectSubsystem.h"
 
 namespace
 {
-	/** 智能对象 Slot 索引约定：0=Plot（地块），1=Crop（作物） */
-	constexpr int32 CropSlotIndex = 1;
-
 	/** 卫星认领优先级（玩家 High 可抢占，见《智能对象架构与落地.md》7.5） */
 	constexpr ESmartObjectClaimPriority SatelliteClaimPriority = ESmartObjectClaimPriority::Normal;
+
+	/** 选点节流间隔（秒；仅巡航态生效，避免每帧遍历候选集） */
+	constexpr double SelectIntervalSeconds = 0.2;
+
+	/** 作业时长缺省值（秒；认领句柄/行为定义缺失时使用） */
+	constexpr float DefaultActionDuration = 2.0f;
 
 	/** 卫星任务数据聚合（fragment + 共享引用） */
 	struct FSattelliteTaskData
@@ -43,6 +49,102 @@ namespace
 		Data.Task = Data.EntityManager->GetFragmentDataPtr<FMassSatelliteTaskFragment>(Data.Entity);
 		return Data;
 	}
+
+	/** 选点候选（评分结果） */
+	struct FSatelliteTargetCandidate
+	{
+		FIntPoint Coord = FIntPoint(-1, -1);
+		float TargetAngle = 0.f;
+		EEditMode EditMode = EEditMode::None;
+		float Score = 0.f;
+
+		bool IsValid() const { return Coord.X >= 0 && EditMode != EEditMode::None; }
+	};
+
+	/**
+	 * 轨道覆盖判定（几何替代旧物理 Overlap）
+	 * 格子中心到轨道平面的垂直距离 ≤ 半格高 × 系数
+	 * 旧语义：轨道平面上下各半格高（CellHeight = Radius × 纬度步长弧度）
+	 */
+	bool IsCellInOrbitCoverage(const FTransform& CellTransform, const FVector& OrbitNormal, const UPlanetConfigDataAsset& Config, const float HalfThicknessScale)
+	{
+		const float LatStep = (Config.MaxLat - Config.MinLat) / static_cast<float>(Config.NumLat - 1);
+		const float CellHeight = Config.Radius * FMath::DegreesToRadians(LatStep);
+		const FVector CellCenter = CellTransform.GetLocation().GetSafeNormal() * Config.Radius;
+		const float PlaneDistance = FMath::Abs(FVector::DotProduct(CellCenter, OrbitNormal));
+		return PlaneDistance <= CellHeight * 0.5f * HalfThicknessScale;
+	}
+
+	/**
+	 * 缺口评估（缺什么补什么）：各缺口按权重计分取最高——权重即优先级（可配）
+	 * @return true=存在缺口（OutEditMode/OutScore 有效）
+	 */
+	bool EvaluateCellNeeds(const FPlotStateFragment& PlotState, const FCropStateFragment* CropState, const FSatelliteScoringWeights& Weights, EEditMode& OutEditMode, float& OutScore)
+	{
+		OutEditMode = EEditMode::None;
+		OutScore = 0.f;
+
+		// 作物缺口：成熟 → 收获；已收获 → 重播（PlantCrop 内部沿用格子已有作物的 CropID）
+		if (CropState != nullptr)
+		{
+			if (CropState->CropGrowthStage == ECropGrowthStage::Mature && Weights.HarvestWeight > OutScore)
+			{
+				OutScore = Weights.HarvestWeight;
+				OutEditMode = EEditMode::HarvestCrop;
+			}
+			else if (CropState->CropGrowthStage == ECropGrowthStage::Harvested && Weights.ReplantWeight > OutScore)
+			{
+				OutScore = Weights.ReplantWeight;
+				OutEditMode = EEditMode::PlantCrop;
+			}
+		}
+
+		// 地块缺口：杂草 / 虫害（二值权重）
+		if (PlotState.StateData.HasState(EPlotState::WeedInfested) && Weights.WeedWeight > OutScore)
+		{
+			OutScore = Weights.WeedWeight;
+			OutEditMode = EEditMode::UnWeed;
+		}
+		if (PlotState.StateData.HasState(EPlotState::PestInfested) && Weights.PestWeight > OutScore)
+		{
+			OutScore = Weights.PestWeight;
+			OutEditMode = EEditMode::UnPest;
+		}
+
+		// 地块缺口：缺水 / 缺肥（阈值判定 + 连续计分，旧 EQS 公式）
+		if (PlotState.MoisturePercentage < Weights.MoistureThreshold)
+		{
+			const float MoistureScore = (1.f - PlotState.MoisturePercentage) * Weights.MoistureWeight;
+			if (MoistureScore > OutScore)
+			{
+				OutScore = MoistureScore;
+				OutEditMode = EEditMode::Wet;
+			}
+		}
+		if (PlotState.FertilityPercentage < Weights.FertilityThreshold)
+		{
+			const float FertilityScore = (1.f - PlotState.FertilityPercentage) * Weights.FertilityWeight;
+			if (FertilityScore > OutScore)
+			{
+				OutScore = FertilityScore;
+				OutEditMode = EEditMode::Fertilize;
+			}
+		}
+
+		return OutEditMode != EEditMode::None;
+	}
+
+	/** 角度差绝对值（0~180 度） */
+	float AngularDistanceDegrees(const float FromAngle, const float ToAngle)
+	{
+		return FMath::Abs(FMath::FindDeltaAngleDegrees(FromAngle, ToAngle));
+	}
+
+	/** 操作枚举名（日志用，如 "EEditMode::HarvestCrop"） */
+	FString GetEditModeName(const EEditMode EditMode)
+	{
+		return StaticEnum<EEditMode>()->GetNameStringByValue(static_cast<int64>(EditMode));
+	}
 }
 
 EStateTreeRunStatus FSatelliteSelectTargetTask::Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const
@@ -57,59 +159,112 @@ EStateTreeRunStatus FSatelliteSelectTargetTask::Tick(FStateTreeExecutionContext&
 	FMassOrbitFragment& Orbit = *Data.Orbit;
 	FMassSatelliteTaskFragment& Task = *Data.Task;
 
-	if (!Shared.PlanetConfig || !Shared.CellManager || !Shared.SmartObjectManager)
+	if (!Shared.PlanetConfig || !Shared.CellManager || !Shared.SmartObjectManager || !Shared.SatelliteManager)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] SelectTarget: shared references not injected (PlanetConfig/CellManager/SmartObjectManager)"));
+		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] SelectTarget: shared references not injected (PlanetConfig/CellManager/SmartObjectManager/SatelliteManager)"));
 		return EStateTreeRunStatus::Failed;
 	}
 
-	// 1. 卫星当前位置 → 最近格子
-	// 球面几何反推：位置方向投影到星球表面点，复用网格生成公式的逆运算
-	const FVector WorldLocation = ComputeOrbitWorldPosition(Shared.OrbitTransform, Shared.Radius, Orbit.CurrentAngle);
-	const FVector SurfacePoint = WorldLocation.GetSafeNormal() * Shared.PlanetConfig->Radius;
-	const FIntPoint CellCoord = UPlanetBlueprintFunctionLibrary::ConvertLocationToCellCoord(
-		SurfacePoint, Shared.PlanetConfig, /*IsWorldLocation=*/false);
-
-	// 2. 状态筛选：作物成熟才操作（B 路径：直接读格子实体 fragment，不走引擎查询）
-	FMassEntityHandle CellEntity;
-	if (!Shared.CellManager->GetCellEntity(CellCoord, CellEntity))
+	// 1. 节流：巡航态每 SelectIntervalSeconds 选一次
+	FSatelliteSelectTargetTaskInstanceData& InstanceData = Context.GetInstanceData(*this);
+	const double Now = FPlatformTime::Seconds();
+	if (Now - InstanceData.LastSelectTime < SelectIntervalSeconds)
 	{
 		return EStateTreeRunStatus::Running;
 	}
-	const FCropStateFragment* CropState = Data.EntityManager->GetFragmentDataPtr<FCropStateFragment>(CellEntity);
-	if (CropState == nullptr || CropState->CropGrowthStage != ECropGrowthStage::Mature)
+	InstanceData.LastSelectTime = Now;
+
+	const USatelliteManagerComponent& SatelliteManager = *Shared.SatelliteManager;
+	const TSet<FIntPoint>& ActiveFarmlands = SatelliteManager.GetActiveFarmlandCoords();
+	if (ActiveFarmlands.Num() == 0)
 	{
 		return EStateTreeRunStatus::Running;
 	}
 
-	// 3. 选点后立即认领（移动前占位，避免多卫星同抢同一格子）
-	const FSmartObjectClaimHandle ClaimHandle = Shared.SmartObjectManager->TryClaimSlot(
-		CellCoord, CropSlotIndex, SatelliteClaimPriority);
-	if (!ClaimHandle.IsValid())
-	{
-		// 已被其它卫星认领 / Slot 未启用：跳过（下一帧最近格子可能已变化）
-		return EStateTreeRunStatus::Running;
-	}
-
-	// 4. 计算目标角度（格子中心角度）并写入任务与移动意图
-	FTransform CellTransform;
-	if (!Shared.CellManager->GetCellWorldTransform(CellCoord, CellTransform))
-	{
-		Shared.SmartObjectManager->ReleaseClaim(ClaimHandle);
-		return EStateTreeRunStatus::Running;
-	}
+	const FSatelliteScoringWeights& Weights = SatelliteManager.GetScoringWeights();
+	const UPlanetConfigDataAsset& PlanetConfig = *Shared.PlanetConfig;
+	const FVector OrbitNormal = Shared.OrbitTransform.GetRotation().GetAxisZ();
 
 	FOrbitData OrbitData;
 	OrbitData.Transform = Shared.OrbitTransform;
 	OrbitData.Radius = Shared.Radius;
 
-	Task.ClaimHandle = ClaimHandle;
-	Task.TargetCoord = CellCoord;
-	Orbit.MoveState = ESatelliteMoveState::MovingToTarget;
-	Orbit.TargetAngle = UPlanetBlueprintFunctionLibrary::CalculateOrbitAngleFromCell(CellTransform, OrbitData);
+	// 2. 遍历活跃农田评分：覆盖带硬过滤 → 缺口评估 → 距离扣分 → 取最高分
+	FSatelliteTargetCandidate Best;
+	for (const FIntPoint& Coord : ActiveFarmlands)
+	{
+		// 2.1 轨道覆盖硬过滤（几何，替代旧物理 Overlap）
+		FTransform CellTransform;
+		if (!Shared.CellManager->GetCellWorldTransform(Coord, CellTransform))
+		{
+			continue;
+		}
+		if (!IsCellInOrbitCoverage(CellTransform, OrbitNormal, PlanetConfig, Weights.CoverageHalfThicknessScale))
+		{
+			continue;
+		}
 
-	UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] claimed cell (%d, %d) for harvest"),
-		Data.Entity.Index, CellCoord.X, CellCoord.Y);
+		// 2.2 状态读取（B 路径：直读格子实体 fragment）
+		FMassEntityHandle CellEntity;
+		if (!Shared.CellManager->GetCellEntity(Coord, CellEntity))
+		{
+			continue;
+		}
+		const FPlotStateFragment* PlotState = Data.EntityManager->GetFragmentDataPtr<FPlotStateFragment>(CellEntity);
+		if (PlotState == nullptr)
+		{
+			continue;
+		}
+		const FCropStateFragment* CropState = Data.EntityManager->GetFragmentDataPtr<FCropStateFragment>(CellEntity);
+
+		// 2.3 缺口评估（缺什么补什么）
+		EEditMode EditMode = EEditMode::None;
+		float NeedScore = 0.f;
+		if (!EvaluateCellNeeds(*PlotState, CropState, Weights, EditMode, NeedScore))
+		{
+			continue;
+		}
+
+		// 2.4 距离扣分（角度差越小越好）
+		const float TargetAngle = UPlanetBlueprintFunctionLibrary::CalculateOrbitAngleFromCell(CellTransform, OrbitData);
+		const float Score = NeedScore - AngularDistanceDegrees(Orbit.CurrentAngle, TargetAngle) * Weights.DistanceWeight;
+		if (Score > Best.Score)
+		{
+			Best.Coord = Coord;
+			Best.TargetAngle = TargetAngle;
+			Best.EditMode = EditMode;
+			Best.Score = Score;
+		}
+	}
+
+	// 3. 无合适目标（无候选或最高分低于阈值）→ 继续巡航
+	if (!Best.IsValid() || Best.Score < Weights.MinScoreThreshold)
+	{
+		return EStateTreeRunStatus::Running;
+	}
+
+	// 4. 按操作类型认领对应 Slot（Plot=0 / Crop=1；不适用认领的操作直接执行）
+	FSmartObjectClaimHandle ClaimHandle;
+	const int32 SlotIndex = USmartObjectManagerComponent::GetSlotIndexForEditMode(Best.EditMode);
+	if (SlotIndex >= 0)
+	{
+		ClaimHandle = Shared.SmartObjectManager->TryClaimSlot(Best.Coord, SlotIndex, SatelliteClaimPriority);
+		if (!ClaimHandle.IsValid())
+		{
+			// 已被其它卫星/玩家占位：跳过（下一轮节流重选）
+			return EStateTreeRunStatus::Running;
+		}
+	}
+
+	// 5. 写入任务数据与移动意图
+	Task.ClaimHandle = ClaimHandle;
+	Task.TargetCoord = Best.Coord;
+	Task.TargetEditMode = Best.EditMode;
+	Orbit.MoveState = ESatelliteMoveState::MovingToTarget;
+	Orbit.TargetAngle = Best.TargetAngle;
+
+	UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] target cell (%d, %d) action=%s score=%.1f"),
+		Data.Entity.Index, Best.Coord.X, Best.Coord.Y, *GetEditModeName(Best.EditMode), Best.Score);
 
 	return EStateTreeRunStatus::Succeeded;
 }
@@ -129,36 +284,81 @@ EStateTreeRunStatus FSatelliteMoveToTargetTask::Tick(FStateTreeExecutionContext&
 		: EStateTreeRunStatus::Running;
 }
 
-EStateTreeRunStatus FSatelliteHarvestTask::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
+EStateTreeRunStatus FSatelliteExecuteActionTask::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
 {
 	const FSattelliteTaskData Data = GetSatelliteTaskData(Context);
 	if (!Data.IsValid())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] Harvest: satellite data missing (fragment/shared). Entity[%d]"), Data.Entity.Index);
+		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] ExecuteAction: satellite data missing (fragment/shared). Entity[%d]"), Data.Entity.Index);
+		return EStateTreeRunStatus::Failed;
+	}
+	const FMassSatelliteSharedFragment& Shared = *Data.Shared;
+	if (!Shared.CellManager || !Shared.SmartObjectManager)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] ExecuteAction: CellManager/SmartObjectManager not injected"));
+		return EStateTreeRunStatus::Failed;
+	}
+
+	// 作业时长：认领有效 → 取智能对象行为定义 Duration（DA_FarmCell）；否则用缺省
+	FSatelliteExecuteActionTaskInstanceData& InstanceData = Context.GetInstanceData(*this);
+	InstanceData.ActionDuration = DefaultActionDuration;
+	if (Data.Task->ClaimHandle.IsValid())
+	{
+		// 注意：GetBehaviorDefinition<T> 为非 const 成员函数，Subsystem 指针不可加 const
+		UWorld* World = Context.GetWorld();
+		USmartObjectSubsystem* SmartObjectSubsystem = World ? World->GetSubsystem<USmartObjectSubsystem>() : nullptr;
+		if (SmartObjectSubsystem != nullptr)
+		{
+			if (const UFarmActionBehaviorBase* Behavior = SmartObjectSubsystem->GetBehaviorDefinition<UFarmActionBehaviorBase>(Data.Task->ClaimHandle))
+			{
+				InstanceData.ActionDuration = Behavior->Duration;
+			}
+		}
+	}
+	InstanceData.ActionStartTime = FPlatformTime::Seconds();
+
+	UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] working at cell (%d, %d) action=%s duration=%.2fs"),
+		Data.Entity.Index, Data.Task->TargetCoord.X, Data.Task->TargetCoord.Y,
+		*GetEditModeName(Data.Task->TargetEditMode), InstanceData.ActionDuration);
+
+	return EStateTreeRunStatus::Running;
+}
+
+EStateTreeRunStatus FSatelliteExecuteActionTask::Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const
+{
+	const FSattelliteTaskData Data = GetSatelliteTaskData(Context);
+	if (!Data.IsValid())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] ExecuteAction: satellite data missing (fragment/shared). Entity[%d]"), Data.Entity.Index);
 		return EStateTreeRunStatus::Failed;
 	}
 	const FMassSatelliteSharedFragment& Shared = *Data.Shared;
 	FMassOrbitFragment& Orbit = *Data.Orbit;
 	FMassSatelliteTaskFragment& Task = *Data.Task;
 
-	if (!Shared.CellManager || !Shared.SmartObjectManager)
+	// 作业停留：倒计时未到 → Running
+	const FSatelliteExecuteActionTaskInstanceData& InstanceData = Context.GetInstanceData(*this);
+	if (FPlatformTime::Seconds() - InstanceData.ActionStartTime < InstanceData.ActionDuration)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] Harvest: CellManager/SmartObjectManager not injected"));
-		return EStateTreeRunStatus::Failed;
+		return EStateTreeRunStatus::Running;
 	}
 
-	// 执行收获（复用玩家同一操作入口；成功/失败均释放，统一重选出口）
-	Shared.CellManager->HandleLeftMouseClicked(EEditMode::HarvestCrop, Task.TargetCoord);
+	// 执行操作（AI 入口：播种/重播自动沿用格子已有作物的 CropID）
+	Shared.CellManager->ExecuteFarmAction(Task.TargetEditMode, Task.TargetCoord);
 
-	// 释放认领
-	Shared.SmartObjectManager->ReleaseClaim(Task.ClaimHandle);
+	// 释放认领（创建类操作无认领句柄时跳过）
+	if (Task.ClaimHandle.IsValid())
+	{
+		Shared.SmartObjectManager->ReleaseClaim(Task.ClaimHandle);
+	}
 
-	UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] harvested cell (%d, %d)"),
-		Data.Entity.Index, Task.TargetCoord.X, Task.TargetCoord.Y);
+	UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] executed action=%s at cell (%d, %d)"),
+		Data.Entity.Index, *GetEditModeName(Task.TargetEditMode), Task.TargetCoord.X, Task.TargetCoord.Y);
 
 	// 清理任务数据并恢复巡航（下一状态选择将从 Cruise 重新开始）
 	Task.ClaimHandle = FSmartObjectClaimHandle::InvalidHandle;
 	Task.TargetCoord = FIntPoint(-1, -1);
+	Task.TargetEditMode = EEditMode::None;
 	Orbit.MoveState = ESatelliteMoveState::Idle;
 
 	return EStateTreeRunStatus::Succeeded;

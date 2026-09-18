@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "MassEntityTypes.h"
+#include "Crops/CropData.h"          // EEditMode（目标操作类型）
 #include "SmartObjectRuntime.h"      // FSmartObjectClaimHandle（卫星任务认领句柄）
 #include "Subsystem/ISMManager.h"   // FGlobalInstanceId（卫星渲染实例句柄）
 #include "SatelliteMassFragments.generated.h"
@@ -12,6 +13,7 @@
 class UPlanetConfigDataAsset;
 class UCellManagerComponent;
 class USmartObjectManagerComponent;
+class USatelliteManagerComponent;
 
 /** 卫星移动状态枚举 */
 UENUM(BlueprintType)
@@ -113,6 +115,10 @@ struct PROJECTB_API FMassSatelliteSharedFragment : public FMassConstSharedFragme
 	/** 智能对象管理器（认领/释放） */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
 	TObjectPtr<USmartObjectManagerComponent> SmartObjectManager = nullptr;
+
+	/** 卫星管理组件（活跃农田集合 + 选点评分权重） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	TObjectPtr<USatelliteManagerComponent> SatelliteManager = nullptr;
 };
 
 /**
@@ -128,9 +134,13 @@ struct PROJECTB_API FMassSatelliteTaskFragment : public FMassFragment
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
 	FIntPoint TargetCoord = FIntPoint(-1, -1);
 
-	/** 已认领的智能对象 Slot 句柄（选点任务写入，收获任务释放） */
+	/** 已认领的智能对象 Slot 句柄（选点任务写入，执行任务释放） */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
 	FSmartObjectClaimHandle ClaimHandle;
+
+	/** 目标操作类型（选点任务写入，执行任务读取；TEnumAsByte 包装 unscoped 枚举以满足 UHT 规则） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	TEnumAsByte<EEditMode> TargetEditMode = EEditMode::None;
 };
 
 /**

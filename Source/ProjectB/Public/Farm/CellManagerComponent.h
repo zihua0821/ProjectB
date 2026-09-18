@@ -44,6 +44,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Cell")
 	void HandleLeftMouseClicked(const EEditMode EditMode, const FIntPoint Coords);
 
+	/**
+	 * AI/卫星操作入口（不依赖玩家上下文）
+	 * 与 HandleLeftMouseClicked 的差异：播种不使用玩家选中的作物——
+	 * 重播（格子中已有已收获作物）自动沿用其 CropID（同类型作物）
+	 */
+	void ExecuteFarmAction(const EEditMode EditMode, const FIntPoint Coords);
+
 	/** 获取所有单元格保存数据 */
 	TArray<FFarmLandPlotSaveGameData> GetSaveData() const;
 

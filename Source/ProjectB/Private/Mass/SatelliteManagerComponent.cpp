@@ -1,6 +1,7 @@
 // SatelliteManagerComponent.cpp
 #include "Mass/SatelliteManagerComponent.h"
 
+#include "Farm/CellManagerComponent.h"    // 意图委托订阅（活跃农田集合维护）
 #include "MassEntityManager.h"
 #include "MassEntitySubsystem.h"
 #include "MassStateTreeFragments.h"   // FMassStateTreeInstanceFragment / FMassStateTreeSharedFragment
@@ -9,6 +10,12 @@
 #include "Planet/PlanetConfigDataAsset.h"
 #include "StateTree.h"
 #include "Subsystem/ISMManager.h"
+
+namespace
+{
+	/** 智能对象 Slot 索引约定：0=Plot（地块），1=Crop（作物） */
+	constexpr int32 CropSlotIndex = 1;
+}
 
 USatelliteManagerComponent::USatelliteManagerComponent()
 {
@@ -27,6 +34,12 @@ void USatelliteManagerComponent::Initialize(APlanetActor* InPlanetActor)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[SatelliteManager] Initialize skipped: SatelliteCount <= 0"));
 		return;
+	}
+
+	// 订阅格子 Slot 启停意图：维护活跃农田集合（Crop Slot=1 启用即播种/重播成功）
+	if (UCellManagerComponent* CellManager = PlanetActor->GetCellManagerComponent())
+	{
+		CellManager->OnCellSlotStateChanged.AddUObject(this, &USatelliteManagerComponent::HandleCellSlotStateChanged);
 	}
 
 	// 1. 解析目标轨道定义
@@ -48,6 +61,7 @@ void USatelliteManagerComponent::Initialize(APlanetActor* InPlanetActor)
 	SatelliteShared.PlanetConfig = PlanetActor->PlanetConfig;
 	SatelliteShared.CellManager = PlanetActor->GetCellManagerComponent();
 	SatelliteShared.SmartObjectManager = PlanetActor->GetSmartObjectManagerComponent();
+	SatelliteShared.SatelliteManager = this;
 	const FConstSharedStruct SatelliteSharedStruct = EntityManager.GetOrCreateConstSharedFragment(SatelliteShared);
 
 	// 3. 建原型（手写路线，与格子创建模式一致）
@@ -167,4 +181,22 @@ bool USatelliteManagerComponent::ResolveOrbitDefinition(FOrbitDefinition& OutDef
 	OutDefinition.Transform.SetRotation(FRotator(0.f, 180.f, 0.f).Quaternion());
 	OutDefinition.Radius = 30000.f;
 	return true;
+}
+
+void USatelliteManagerComponent::HandleCellSlotStateChanged(const FIntPoint Coords, const int32 SlotIndex, const bool bEnabled)
+{
+	// 仅关心作物 Slot（1）：启用=播种/重播成功入集合，禁用=移除作物出集合
+	if (SlotIndex != CropSlotIndex)
+	{
+		return;
+	}
+
+	if (bEnabled)
+	{
+		ActiveFarmlandCoords.Add(Coords);
+	}
+	else
+	{
+		ActiveFarmlandCoords.Remove(Coords);
+	}
 }
