@@ -7,6 +7,7 @@
 #include "MassStateTreeFragments.h"   // FMassStateTreeInstanceFragment / FMassStateTreeSharedFragment
 #include "Mass/SatelliteMassFragments.h"
 #include "Planet/PlanetActor.h"
+#include "Planet/PlanetBlueprintFunctionLibrary.h"   // ComputeOrbitWorldPosition（轨道几何，Planet 域）
 #include "Planet/PlanetConfigDataAsset.h"
 #include "StateTree.h"
 #include "Subsystem/ISMManager.h"
@@ -15,11 +16,49 @@ namespace
 {
 	/** 智能对象 Slot 索引约定：0=Plot（地块），1=Crop（作物） */
 	constexpr int32 CropSlotIndex = 1;
+
+	/** 未配置轨道时的兜底轨道参数 */
+	constexpr float FallbackOrbitRadius = 55000.f;
+
+	/** 轨道默认调色板（视觉色 / 覆盖格色成对；按轨道序循环分配） */
+	struct FOrbitColorPreset
+	{
+		FLinearColor VisualColor;
+		FLinearColor CoverageColor;
+	};
+
+	const FOrbitColorPreset OrbitColorPresets[] =
+	{
+		{ FLinearColor(0.10f, 0.70f, 0.95f, 1.f), FLinearColor(1.00f, 0.75f, 0.10f, 1.f) },   // 青 / 金
+		{ FLinearColor(0.95f, 0.25f, 0.60f, 1.f), FLinearColor(1.00f, 0.45f, 0.10f, 1.f) },   // 品红 / 橙
+		{ FLinearColor(0.25f, 0.85f, 0.40f, 1.f), FLinearColor(0.70f, 1.00f, 0.20f, 1.f) },   // 绿 / 黄绿
+		{ FLinearColor(0.60f, 0.40f, 1.00f, 1.f), FLinearColor(1.00f, 0.50f, 0.80f, 1.f) },   // 紫 / 粉
+		{ FLinearColor(1.00f, 0.60f, 0.20f, 1.f), FLinearColor(0.40f, 0.80f, 1.00f, 1.f) },   // 橙 / 浅蓝
+		{ FLinearColor(0.30f, 0.50f, 1.00f, 1.f), FLinearColor(0.40f, 1.00f, 0.80f, 1.f) },   // 蓝 / 薄荷
+	};
+	constexpr int32 OrbitColorPresetCount = UE_ARRAY_COUNT(OrbitColorPresets);
 }
 
 USatelliteManagerComponent::USatelliteManagerComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
+}
+
+int32 USatelliteManagerComponent::GetColorPresetCount()
+{
+	return OrbitColorPresetCount;
+}
+
+FLinearColor USatelliteManagerComponent::GetPresetVisualColor(const int32 Index)
+{
+	const int32 SafeIndex = ((Index % OrbitColorPresetCount) + OrbitColorPresetCount) % OrbitColorPresetCount;
+	return OrbitColorPresets[SafeIndex].VisualColor;
+}
+
+FLinearColor USatelliteManagerComponent::GetPresetCoverageColor(const int32 Index)
+{
+	const int32 SafeIndex = ((Index % OrbitColorPresetCount) + OrbitColorPresetCount) % OrbitColorPresetCount;
+	return OrbitColorPresets[SafeIndex].CoverageColor;
 }
 
 void USatelliteManagerComponent::Initialize(APlanetActor* InPlanetActor)
@@ -30,11 +69,6 @@ void USatelliteManagerComponent::Initialize(APlanetActor* InPlanetActor)
 		UE_LOG(LogTemp, Error, TEXT("[SatelliteManager] Initialize failed: PlanetActor is null"));
 		return;
 	}
-	if (SatelliteCount <= 0)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[SatelliteManager] Initialize skipped: SatelliteCount <= 0"));
-		return;
-	}
 
 	// 订阅格子 Slot 启停意图：维护活跃农田集合（Crop Slot=1 启用即播种/重播成功）
 	if (UCellManagerComponent* CellManager = PlanetActor->GetCellManagerComponent())
@@ -42,20 +76,138 @@ void USatelliteManagerComponent::Initialize(APlanetActor* InPlanetActor)
 		CellManager->OnCellSlotStateChanged.AddUObject(this, &USatelliteManagerComponent::HandleCellSlotStateChanged);
 	}
 
-	// 1. 解析目标轨道定义
-	FOrbitDefinition OrbitDefinition;
-	if (!ResolveOrbitDefinition(OrbitDefinition))
+	// 注册卫星网格 ISM 参数（单一事实来源；单桶路径，父级 = 星球根组件）
+	if (SatelliteMesh)
 	{
-		UE_LOG(LogTemp, Error, TEXT("[SatelliteManager] Initialize failed: no valid orbit definition"));
+		if (UISMManager* ISMManager = GetWorld()->GetSubsystem<UISMManager>())
+		{
+			FISMComponentParams SatelliteParams;
+			SatelliteParams.AttachParent = GetOwner() ? GetOwner()->GetRootComponent() : nullptr;
+			SatelliteParams.bDisableBuckets = true;
+			ISMManager->RegisterMeshParams(SatelliteMesh, SatelliteParams);
+		}
+	}
+
+	// 1. 构建运行时轨道数据（可编辑副本；来自 PlanetConfig->OrbitDefinitions，空则兜底默认）
+	BuildRuntimeOrbits();
+	if (RuntimeOrbits.Num() == 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[SatelliteManager] Initialize failed: no valid runtime orbit"));
 		return;
 	}
 
+	// 2. 为全部轨道创建卫星（含渲染实例注册）
+	CreateAllSatellites();
+
+	if (SatelliteMesh == nullptr)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[SatelliteManager] SatelliteMesh is not set - satellites will be invisible"));
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[SatelliteManager] Created %d satellites on %d orbit(s) (StateTree: %s, Mesh: %s)"),
+		SatelliteEntities.Num(),
+		RuntimeOrbits.Num(),
+		StateTreeAsset ? *StateTreeAsset->GetName() : TEXT("none"),
+		SatelliteMesh ? *SatelliteMesh->GetName() : TEXT("none"));
+}
+
+void USatelliteManagerComponent::BuildRuntimeOrbits()
+{
+	RuntimeOrbits.Reset();
+
+	const UPlanetConfigDataAsset* Config = PlanetActor ? PlanetActor->PlanetConfig : nullptr;
+
+	// 优先读取星球配置中的轨道定义（每个定义生成一条运行时轨道）
+	if (Config && Config->OrbitDefinitions.Num() > 0)
+	{
+		for (const FOrbitDefinition& Definition : Config->OrbitDefinitions)
+		{
+			if (Definition.OrbitName == NAME_None)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[SatelliteManager] Skipping orbit definition with NAME_None"));
+				continue;
+			}
+
+			FRuntimeOrbitData Data;
+			Data.OrbitName = Definition.OrbitName;
+			Data.Transform = Definition.Transform;
+			Data.Radius = Definition.Radius;
+			// 服务距离：配置值优先；未配置（0）时兜底半格高
+			Data.ServiceDistance = (Definition.ServiceDistance > 0.f) ? Definition.ServiceDistance : ComputeDefaultServiceDistance();
+			Data.SatelliteCount = SatelliteCount;
+			Data.AngularVelocity = DefaultAngularVelocity;
+			Data.bClockwise = bDefaultClockwise;
+			// 默认颜色：按轨道序从调色板分配（面板可改）
+			const int32 PresetIndex = RuntimeOrbits.Num() % OrbitColorPresetCount;
+			Data.VisualColor = OrbitColorPresets[PresetIndex].VisualColor;
+			Data.CoverageColor = OrbitColorPresets[PresetIndex].CoverageColor;
+			RuntimeOrbits.Add(MoveTemp(Data));
+		}
+	}
+
+	// 兜底：未配置时使用默认轨道（与 OrbitManager 未配置时一致）
+	if (RuntimeOrbits.Num() == 0)
+	{
+		FRuntimeOrbitData Data;
+		Data.OrbitName = FName("Default");
+		Data.Transform = FTransform::Identity;
+		Data.Transform.SetRotation(FRotator(0.f, 180.f, 0.f).Quaternion());
+		Data.Radius = FallbackOrbitRadius;
+		Data.ServiceDistance = ComputeDefaultServiceDistance();
+		Data.SatelliteCount = SatelliteCount;
+		Data.AngularVelocity = DefaultAngularVelocity;
+		Data.bClockwise = bDefaultClockwise;
+		Data.VisualColor = OrbitColorPresets[0].VisualColor;
+		Data.CoverageColor = OrbitColorPresets[0].CoverageColor;
+		RuntimeOrbits.Add(MoveTemp(Data));
+	}
+}
+
+float USatelliteManagerComponent::ComputeDefaultServiceDistance() const
+{
+	const UPlanetConfigDataAsset* Config = PlanetActor ? PlanetActor->PlanetConfig : nullptr;
+	if (Config == nullptr)
+	{
+		return 0.f;
+	}
+
+	// 半格高：CellHeight = Radius × 纬度步长弧度（与网格生成同源公式）
+	const float LatStepDeg = (Config->MaxLat - Config->MinLat) / static_cast<float>(Config->NumLat - 1);
+	const float CellHeight = Config->Radius * FMath::DegreesToRadians(LatStepDeg);
+
+	// 服务距离 = 半格高（覆盖带半厚：板厚 = 一个格子高，与旧系统语义一致）
+	return CellHeight * 0.5f;
+}
+
+void USatelliteManagerComponent::CreateAllSatellites()
+{
 	FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
 
-	// 2. 构建共享数据（ConstSharedFragment：轨道几何 + Mesh + 缩放 + 依赖引用，同值共享）
+	TArray<FMassEntityHandle> AllEntities;
+	TArray<FTransform> AllTransforms;
+
+	for (const FRuntimeOrbitData& Orbit : RuntimeOrbits)
+	{
+		CreateSatellitesForOrbit(Orbit, EntityManager, AllEntities, AllTransforms);
+	}
+
+	RegisterRenderInstances(AllEntities, AllTransforms);
+
+	SatelliteEntities = MoveTemp(AllEntities);
+}
+
+void USatelliteManagerComponent::CreateSatellitesForOrbit(const FRuntimeOrbitData& Orbit, FMassEntityManager& EntityManager, TArray<FMassEntityHandle>& OutEntities, TArray<FTransform>& OutTransforms)
+{
+	if (Orbit.SatelliteCount <= 0)
+	{
+		return;
+	}
+
+	// 共享数据（每条轨道一份：轨道几何 + 服务半径 + Mesh + 依赖引用；同值共享）
 	FMassSatelliteSharedFragment SatelliteShared;
-	SatelliteShared.OrbitTransform = OrbitDefinition.Transform;
-	SatelliteShared.Radius = OrbitDefinition.Radius;
+	SatelliteShared.OrbitTransform = Orbit.Transform;
+	SatelliteShared.Radius = Orbit.Radius;
+	SatelliteShared.ServiceDistance = Orbit.ServiceDistance;
 	SatelliteShared.SatelliteMesh = SatelliteMesh;
 	SatelliteShared.SatelliteScale = SatelliteScale;
 	SatelliteShared.PlanetConfig = PlanetActor->PlanetConfig;
@@ -64,7 +216,7 @@ void USatelliteManagerComponent::Initialize(APlanetActor* InPlanetActor)
 	SatelliteShared.SatelliteManager = this;
 	const FConstSharedStruct SatelliteSharedStruct = EntityManager.GetOrCreateConstSharedFragment(SatelliteShared);
 
-	// 3. 建原型（手写路线，与格子创建模式一致）
+	// 建原型（手写路线，与格子创建模式一致）
 	TArray<const UScriptStruct*> FragmentTypes;
 	FragmentTypes.Add(FMassOrbitFragment::StaticStruct());
 	FragmentTypes.Add(FMassSatelliteTaskFragment::StaticStruct());
@@ -76,29 +228,26 @@ void USatelliteManagerComponent::Initialize(APlanetActor* InPlanetActor)
 	}
 	const FMassArchetypeHandle ArchetypeHandle = EntityManager.CreateArchetype(FragmentTypes);
 
-	// 4. 批量创建实体
+	// 批量创建实体
 	TArray<FMassEntityHandle> Entities;
-	EntityManager.BatchCreateEntities(ArchetypeHandle, SatelliteCount, Entities);
+	EntityManager.BatchCreateEntities(ArchetypeHandle, Orbit.SatelliteCount, Entities);
 
-	// 5. 写轨道运动数据 + 组装初始位置（角度沿轨道均分）
-	TArray<FTransform> InitialTransforms;
-	InitialTransforms.Reserve(Entities.Num());
+	// 写轨道运动数据 + 组装初始世界变换（角度沿该轨道均分）
 	for (int32 Index = 0; Index < Entities.Num(); ++Index)
 	{
 		FMassOrbitFragment& OrbitFragment = EntityManager.GetFragmentDataChecked<FMassOrbitFragment>(Entities[Index]);
-		OrbitFragment.OrbitName = OrbitDefinition.OrbitName;
-		OrbitFragment.CurrentAngle = 360.0f * static_cast<float>(Index) / static_cast<float>(SatelliteCount);
+		OrbitFragment.OrbitName = Orbit.OrbitName;
+		OrbitFragment.CurrentAngle = 360.0f * static_cast<float>(Index) / static_cast<float>(Entities.Num());
 		OrbitFragment.TargetAngle = OrbitFragment.CurrentAngle;
-		OrbitFragment.AngularVelocity = DefaultAngularVelocity;
-		OrbitFragment.bClockwise = bDefaultClockwise;
+		OrbitFragment.AngularVelocity = Orbit.AngularVelocity;
+		OrbitFragment.bClockwise = Orbit.bClockwise;
 		OrbitFragment.MoveState = ESatelliteMoveState::Idle;
 
-		// 初始世界变换：轨道位置 + 卫星缩放（朝向暂为零旋转）
-		const FVector WorldLocation = ComputeOrbitWorldPosition(SatelliteShared.OrbitTransform, SatelliteShared.Radius, OrbitFragment.CurrentAngle);
-		InitialTransforms.Add(FTransform(FRotator::ZeroRotator, WorldLocation, FVector(SatelliteScale)));
+		const FVector WorldLocation = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(Orbit.Transform, Orbit.Radius, OrbitFragment.CurrentAngle);
+		OutTransforms.Add(FTransform(FRotator::ZeroRotator, WorldLocation, FVector(SatelliteScale)));
 	}
 
-	// 6. 挂共享数据（轨道几何 + StateTree；StateTree 实例分配与激活由引擎 Processor 自动完成）
+	// 挂共享数据（轨道共享 + StateTree 共享；实例分配与激活由引擎 Processor 自动完成）
 	for (const FMassEntityHandle& Entity : Entities)
 	{
 		EntityManager.AddConstSharedFragmentToEntity(Entity, SatelliteSharedStruct);
@@ -114,73 +263,140 @@ void USatelliteManagerComponent::Initialize(APlanetActor* InPlanetActor)
 		}
 	}
 
-	// 7. 注册 ISM 实例（单桶路径：空 GridCoords + bDisableBuckets，与格子分桶完全隔离）
-	if (SatelliteMesh)
-	{
-		if (UISMManager* ISMManager = GetWorld()->GetSubsystem<UISMManager>())
-		{
-			FISMComponentParams ISMParams;
-			ISMParams.AttachParent = GetOwner() ? GetOwner()->GetRootComponent() : nullptr;
-			ISMParams.bDisableBuckets = true;
-
-			const TArray<FGlobalInstanceId> InstanceIds = ISMManager->BatchAddInstances(
-				SatelliteMesh,
-				InitialTransforms,
-				TArray<FIntPoint>(),   // 空坐标 → 单桶路径
-				0,                     // 无 CustomData
-				ISMParams,
-				/*bWorldSpace=*/true);
-
-			for (int32 Index = 0; Index < Entities.Num() && Index < InstanceIds.Num(); ++Index)
-			{
-				EntityManager.GetFragmentDataChecked<FSatelliteRenderFragment>(Entities[Index]).InstanceId = InstanceIds[Index];
-			}
-		}
-	}
-	else
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[SatelliteManager] SatelliteMesh is not set - satellites will be invisible"));
-	}
-
-	SatelliteEntities = MoveTemp(Entities);
-
-	UE_LOG(LogTemp, Log, TEXT("[SatelliteManager] Created %d satellites on orbit '%s' (StateTree: %s, Mesh: %s)"),
-		SatelliteEntities.Num(),
-		*OrbitDefinition.OrbitName.ToString(),
-		StateTreeAsset ? *StateTreeAsset->GetName() : TEXT("none"),
-		SatelliteMesh ? *SatelliteMesh->GetName() : TEXT("none"));
+	OutEntities.Append(Entities);
 }
 
-bool USatelliteManagerComponent::ResolveOrbitDefinition(FOrbitDefinition& OutDefinition) const
+void USatelliteManagerComponent::RegisterRenderInstances(const TArray<FMassEntityHandle>& Entities, const TArray<FTransform>& Transforms)
 {
-	const UPlanetConfigDataAsset* Config = PlanetActor ? PlanetActor->PlanetConfig : nullptr;
-	if (Config && Config->OrbitDefinitions.Num() > 0)
+	if (SatelliteMesh == nullptr || Entities.Num() == 0)
 	{
-		// 指定轨道名优先
-		if (DefaultOrbitName != NAME_None)
-		{
-			for (const FOrbitDefinition& Definition : Config->OrbitDefinitions)
-			{
-				if (Definition.OrbitName == DefaultOrbitName)
-				{
-					OutDefinition = Definition;
-					return true;
-				}
-			}
-			UE_LOG(LogTemp, Warning, TEXT("[SatelliteManager] Orbit '%s' not found, fallback to first definition"),
-				*DefaultOrbitName.ToString());
-		}
-
-		OutDefinition = Config->OrbitDefinitions[0];
-		return OutDefinition.OrbitName != NAME_None;
+		return;
 	}
 
-	// 兜底：与 OrbitManager 未配置时一致的默认轨道
-	OutDefinition.OrbitName = FName("Default");
-	OutDefinition.Transform = FTransform::Identity;
-	OutDefinition.Transform.SetRotation(FRotator(0.f, 180.f, 0.f).Quaternion());
-	OutDefinition.Radius = 30000.f;
+	UISMManager* ISMManager = GetWorld()->GetSubsystem<UISMManager>();
+	if (ISMManager == nullptr)
+	{
+		return;
+	}
+
+	// 单桶路径：空 GridCoords + 注册参数（Initialize 已 RegisterMeshParams——含 bDisableBuckets）
+	FISMComponentParams ISMParams;
+
+	const TArray<FGlobalInstanceId> InstanceIds = ISMManager->BatchAddInstances(
+		SatelliteMesh,
+		Transforms,
+		TArray<FIntPoint>(),   // 空坐标 → 单桶路径
+		0,                     // 无 CustomData
+		ISMParams,
+		/*bWorldSpace=*/true);
+
+	FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+	for (int32 Index = 0; Index < Entities.Num() && Index < InstanceIds.Num(); ++Index)
+	{
+		EntityManager.GetFragmentDataChecked<FSatelliteRenderFragment>(Entities[Index]).InstanceId = InstanceIds[Index];
+	}
+}
+
+void USatelliteManagerComponent::DestroyAllSatellites()
+{
+	if (SatelliteEntities.Num() == 0)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+	FMassEntityManager& EntityManager = World->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+
+	// 1. 移除渲染实例（收集稳定句柄 → 批量移除）
+	if (SatelliteMesh)
+	{
+		if (UISMManager* ISMManager = World->GetSubsystem<UISMManager>())
+		{
+			TArray<FGlobalInstanceId> InstanceIds;
+			InstanceIds.Reserve(SatelliteEntities.Num());
+			for (const FMassEntityHandle& Entity : SatelliteEntities)
+			{
+				if (const FSatelliteRenderFragment* RenderFragment = EntityManager.GetFragmentDataPtr<FSatelliteRenderFragment>(Entity))
+				{
+					InstanceIds.Add(RenderFragment->InstanceId);
+				}
+			}
+			if (InstanceIds.Num() > 0)
+			{
+				ISMManager->BatchRemoveInstances(SatelliteMesh, InstanceIds);
+			}
+		}
+	}
+
+	// 2. 销毁实体
+	EntityManager.BatchDestroyEntities(SatelliteEntities);
+	SatelliteEntities.Reset();
+}
+
+void USatelliteManagerComponent::ApplyOrbitChanges()
+{
+	DestroyAllSatellites();
+	CreateAllSatellites();
+
+	UE_LOG(LogTemp, Log, TEXT("[SatelliteManager] Applied orbit changes: %d satellites on %d orbit(s)"),
+		SatelliteEntities.Num(), RuntimeOrbits.Num());
+}
+
+bool USatelliteManagerComponent::UpdateOrbitData(const FName OrbitName, const FRuntimeOrbitData& NewData)
+{
+	for (FRuntimeOrbitData& Data : RuntimeOrbits)
+	{
+		if (Data.OrbitName == OrbitName)
+		{
+			Data = NewData;
+			Data.OrbitName = OrbitName;   // 名称不可通过此接口变更
+			OnRuntimeOrbitChanged.Broadcast(OrbitName);
+			return true;
+		}
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[SatelliteManager] UpdateOrbitData failed: orbit '%s' not found"), *OrbitName.ToString());
+	return false;
+}
+
+bool USatelliteManagerComponent::AddOrbit(const FRuntimeOrbitData& NewOrbit)
+{
+	if (NewOrbit.OrbitName == NAME_None)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[SatelliteManager] AddOrbit failed: OrbitName is None"));
+		return false;
+	}
+	for (const FRuntimeOrbitData& Data : RuntimeOrbits)
+	{
+		if (Data.OrbitName == NewOrbit.OrbitName)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[SatelliteManager] AddOrbit failed: orbit '%s' already exists"), *NewOrbit.OrbitName.ToString());
+			return false;
+		}
+	}
+
+	RuntimeOrbits.Add(NewOrbit);
+	ApplyOrbitChanges();
+	OnRuntimeOrbitChanged.Broadcast(NewOrbit.OrbitName);
 	return true;
+}
+
+void USatelliteManagerComponent::RemoveOrbit(const FName OrbitName)
+{
+	const int32 RemovedCount = RuntimeOrbits.RemoveAll(
+		[OrbitName](const FRuntimeOrbitData& Data) { return Data.OrbitName == OrbitName; });
+
+	if (RemovedCount == 0)
+	{
+		return;
+	}
+
+	ApplyOrbitChanges();
+	OnRuntimeOrbitChanged.Broadcast(OrbitName);
 }
 
 void USatelliteManagerComponent::HandleCellSlotStateChanged(const FIntPoint Coords, const int32 SlotIndex, const bool bEnabled)

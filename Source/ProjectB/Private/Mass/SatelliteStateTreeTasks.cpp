@@ -9,7 +9,7 @@
 #include "Mass/SmartObjectManagerComponent.h"
 #include "MassEntityManager.h"
 #include "MassStateTreeExecutionContext.h"
-#include "Planet/OrbitManagerComponent.h"          // FOrbitData
+#include "Planet/OrbitManagerComponent.h"          // FOrbitDefinition（轨道定义权威结构）
 #include "Planet/PlanetBlueprintFunctionLibrary.h"
 #include "Planet/PlanetConfigDataAsset.h"
 #include "SmartObjectSubsystem.h"
@@ -58,22 +58,8 @@ namespace
 		EEditMode EditMode = EEditMode::None;
 		float Score = 0.f;
 
-		bool IsValid() const { return Coord.X >= 0 && EditMode != EEditMode::None; }
+		bool IsValid() const { return Coord != FIntPoint(-1, -1) && EditMode != EEditMode::None; }
 	};
-
-	/**
-	 * 轨道覆盖判定（几何替代旧物理 Overlap）
-	 * 格子中心到轨道平面的垂直距离 ≤ 半格高 × 系数
-	 * 旧语义：轨道平面上下各半格高（CellHeight = Radius × 纬度步长弧度）
-	 */
-	bool IsCellInOrbitCoverage(const FTransform& CellTransform, const FVector& OrbitNormal, const UPlanetConfigDataAsset& Config, const float HalfThicknessScale)
-	{
-		const float LatStep = (Config.MaxLat - Config.MinLat) / static_cast<float>(Config.NumLat - 1);
-		const float CellHeight = Config.Radius * FMath::DegreesToRadians(LatStep);
-		const FVector CellCenter = CellTransform.GetLocation().GetSafeNormal() * Config.Radius;
-		const float PlaneDistance = FMath::Abs(FVector::DotProduct(CellCenter, OrbitNormal));
-		return PlaneDistance <= CellHeight * 0.5f * HalfThicknessScale;
-	}
 
 	/**
 	 * 缺口评估（缺什么补什么）：各缺口按权重计分取最高——权重即优先级（可配）
@@ -184,8 +170,9 @@ EStateTreeRunStatus FSatelliteSelectTargetTask::Tick(FStateTreeExecutionContext&
 	const FSatelliteScoringWeights& Weights = SatelliteManager.GetScoringWeights();
 	const UPlanetConfigDataAsset& PlanetConfig = *Shared.PlanetConfig;
 	const FVector OrbitNormal = Shared.OrbitTransform.GetRotation().GetAxisZ();
+	const FVector OrbitCenter = Shared.OrbitTransform.GetLocation();
 
-	FOrbitData OrbitData;
+	FOrbitDefinition OrbitData;
 	OrbitData.Transform = Shared.OrbitTransform;
 	OrbitData.Radius = Shared.Radius;
 
@@ -193,13 +180,14 @@ EStateTreeRunStatus FSatelliteSelectTargetTask::Tick(FStateTreeExecutionContext&
 	FSatelliteTargetCandidate Best;
 	for (const FIntPoint& Coord : ActiveFarmlands)
 	{
-		// 2.1 轨道覆盖硬过滤（几何，替代旧物理 Overlap）
+		// 2.1 轨道覆盖硬过滤（管∩球面：格子中心到轨道圆距离 ≤ 服务半径）
 		FTransform CellTransform;
 		if (!Shared.CellManager->GetCellWorldTransform(Coord, CellTransform))
 		{
 			continue;
 		}
-		if (!IsCellInOrbitCoverage(CellTransform, OrbitNormal, PlanetConfig, Weights.CoverageHalfThicknessScale))
+		const FVector CellCenter = CellTransform.GetLocation().GetSafeNormal() * PlanetConfig.Radius;
+		if (!UPlanetBlueprintFunctionLibrary::IsPointInOrbitCoverage(CellCenter, OrbitCenter, OrbitNormal, Shared.ServiceDistance))
 		{
 			continue;
 		}
@@ -263,7 +251,7 @@ EStateTreeRunStatus FSatelliteSelectTargetTask::Tick(FStateTreeExecutionContext&
 	Orbit.MoveState = ESatelliteMoveState::MovingToTarget;
 	Orbit.TargetAngle = Best.TargetAngle;
 
-	UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] target cell (%d, %d) action=%s score=%.1f"),
+	UE_LOG(LogTemp, Verbose, TEXT("[SatelliteTask] Entity[%d] target cell (%d, %d) action=%s score=%.1f"),
 		Data.Entity.Index, Best.Coord.X, Best.Coord.Y, *GetEditModeName(Best.EditMode), Best.Score);
 
 	return EStateTreeRunStatus::Succeeded;
@@ -317,7 +305,7 @@ EStateTreeRunStatus FSatelliteExecuteActionTask::EnterState(FStateTreeExecutionC
 	}
 	InstanceData.ActionStartTime = FPlatformTime::Seconds();
 
-	UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] working at cell (%d, %d) action=%s duration=%.2fs"),
+	UE_LOG(LogTemp, Verbose, TEXT("[SatelliteTask] Entity[%d] working at cell (%d, %d) action=%s duration=%.2fs"),
 		Data.Entity.Index, Data.Task->TargetCoord.X, Data.Task->TargetCoord.Y,
 		*GetEditModeName(Data.Task->TargetEditMode), InstanceData.ActionDuration);
 
@@ -352,7 +340,7 @@ EStateTreeRunStatus FSatelliteExecuteActionTask::Tick(FStateTreeExecutionContext
 		Shared.SmartObjectManager->ReleaseClaim(Task.ClaimHandle);
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] executed action=%s at cell (%d, %d)"),
+	UE_LOG(LogTemp, Verbose, TEXT("[SatelliteTask] Entity[%d] executed action=%s at cell (%d, %d)"),
 		Data.Entity.Index, *GetEditModeName(Task.TargetEditMode), Task.TargetCoord.X, Task.TargetCoord.Y);
 
 	// 清理任务数据并恢复巡航（下一状态选择将从 Cruise 重新开始）

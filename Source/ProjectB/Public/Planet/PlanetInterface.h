@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -51,8 +51,8 @@ public:
 
 	// 获取轨道数据
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Orbit")
-	FOrbitData GetOrbitData(FName OrbitName) const;
-	virtual FOrbitData GetOrbitData_Implementation(FName OrbitName) const;
+	FOrbitDefinition GetOrbitData(FName OrbitName) const;
+	virtual FOrbitDefinition GetOrbitData_Implementation(FName OrbitName) const;
 
 	// 获取单元格世界坐标
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Cell")

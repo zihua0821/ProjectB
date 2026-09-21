@@ -18,6 +18,7 @@ class UFarmlandConfigDataAsset;
 class UFarmlandComponent;
 class USmartObjectManagerComponent;
 class USatelliteManagerComponent;
+class UOrbitCoverageVisualComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlanetInfoChanged, FPlanetInfo, PlanetInfo);
 
@@ -46,6 +47,10 @@ public:
 	// 获取卫星管理组件
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
 	USatelliteManagerComponent* GetSatelliteManagerComponent() const { return SatelliteManagerComponent; }
+
+	// 获取轨道覆盖可视化组件
+	UFUNCTION(BlueprintCallable, Category = "Farmland")
+	UOrbitCoverageVisualComponent* GetOrbitCoverageVisualComponent() const { return OrbitCoverageVisualComponent; }
 	
 	// 获取地块组件
 	UFUNCTION(BlueprintCallable, Category = "Farmland")
@@ -87,7 +92,7 @@ public:
 	virtual void UpdateRotation_Implementation(float NewAngle) override;
 
 	// 获取轨道定义
-	virtual FOrbitData GetOrbitData_Implementation(FName OrbitName) const override;
+	virtual FOrbitDefinition GetOrbitData_Implementation(FName OrbitName) const override;
 
 	// 获取单元格坐标Transform
 	virtual FTransform GetCellWorldTransform_Implementation(FIntPoint CellCoord) const override;
@@ -140,6 +145,10 @@ public:
 	// 卫星管理组件
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<USatelliteManagerComponent> SatelliteManagerComponent;
+
+	// 轨道覆盖可视化组件（轨道圆环 + 球面覆盖带 + 覆盖格高亮）
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UOrbitCoverageVisualComponent> OrbitCoverageVisualComponent;
 
 	// ==================== 配置属性 ====================
 

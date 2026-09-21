@@ -8,6 +8,7 @@
 #include "Farm/FarmlandComponent.h"
 #include "Mass/SmartObjectManagerComponent.h"
 #include "Mass/SatelliteManagerComponent.h"
+#include "Mass/OrbitCoverageVisualComponent.h"
 #include "Planet/OrbitManagerComponent.h"
 
 
@@ -45,6 +46,10 @@ APlanetActor::APlanetActor()
 
 	// SatelliteManagerComponent（StateTree/数量在蓝图或细节面板配置）
 	SatelliteManagerComponent = CreateDefaultSubobject<USatelliteManagerComponent>(TEXT("SatelliteManagerComponent"));
+
+	// OrbitCoverageVisualComponent（轨道覆盖可视化：轨道圆环 + 球面覆盖带 + 覆盖格高亮）
+	OrbitCoverageVisualComponent = CreateDefaultSubobject<UOrbitCoverageVisualComponent>(TEXT("OrbitCoverageVisualComponent"));
+	OrbitCoverageVisualComponent->SetupAttachment(RootSceneComponent);
 }
 
 void APlanetActor::BeginPlay()
@@ -67,6 +72,12 @@ void APlanetActor::BeginPlay()
 	if (SatelliteManagerComponent)
 	{
 		SatelliteManagerComponent->Initialize(this);
+	}
+
+	// 轨道覆盖可视化（依赖 SatelliteManager 的运行时轨道数据；默认关闭，编辑模式开启）
+	if (OrbitCoverageVisualComponent)
+	{
+		OrbitCoverageVisualComponent->Initialize(this);
 	}
 }
 
@@ -147,7 +158,7 @@ void APlanetActor::UpdateRotation_Implementation(float NewAngle)
 	SetActorRotation(FRotator(0.0f, NewAngle, 0.0f));
 }
 
-FOrbitData APlanetActor::GetOrbitData_Implementation(FName OrbitName) const
+FOrbitDefinition APlanetActor::GetOrbitData_Implementation(FName OrbitName) const
 {
 	if (OrbitManagerComponent)
 	{

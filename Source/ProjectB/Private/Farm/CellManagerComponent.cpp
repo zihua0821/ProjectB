@@ -269,9 +269,8 @@ void UCellManagerComponent::CreateMassCell()
 
 	if (CellTransforms.Num() > 0)
 	{
-		// 地块
+		// 地块：参数取网格注册表（PrecreateISMComponents 已注册）
 		FISMComponentParams PlotISMParams;
-		PlotISMParams.AttachParent = this;
 		TArray<FGlobalInstanceId> PlotIds = ISMManager->BatchAddInstances(
 			FarmlandConfig->LandCellMesh,
 			CellTransforms,
@@ -403,25 +402,21 @@ void UCellManagerComponent::UpdateOutline(const FIntPoint Coords, const bool bEn
 	{
 		CurrentOutlineCoords = Coords;
 	}
+
+	// 同步直写高亮 Fragment（统一写路径：与覆盖格高亮 OrbitCoverageVisualComponent 同款）
+	// 注意：此处不可用 Defer——延迟写会在帧末覆盖后续同步写入的覆盖色（悬停/覆盖双路径时序竞态）
 	const FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+	if (!EntityManager.IsEntityActive(Entity)) return;
 
-	// 构建一个命令，延迟修改实体的高亮 Fragment
-	EntityManager.Defer().PushCommand<FMassDeferredSetCommand>(
-		[&, Entity, bEnable](const FMassEntityManager& EM)
+	if (FHighlightFragment* HighlightFragment = EntityManager.GetFragmentDataPtr<FHighlightFragment>(Entity))
+	{
+		HighlightFragment->bHighlighted = bEnable;
+
+		if (bEnable)
 		{
-			if (!EM.IsEntityActive(Entity)) return;
-
-			if (FHighlightFragment* HighlightFragment = EM.GetFragmentDataPtr<FHighlightFragment>(Entity))
-			{
-				HighlightFragment->bHighlighted = bEnable;
-
-				if (bEnable)
-				{
-					HighlightFragment->HighlightColor = GetOutlineColorForEditMode();
-				}
-			}
+			HighlightFragment->HighlightColor = GetOutlineColorForEditMode();
 		}
-	);
+	}
 }
 
 bool UCellManagerComponent::GetCellCoordsFromScreenMouse(FIntPoint& OutCellCoords, float& OutWorldDistance) const
@@ -1096,19 +1091,14 @@ void UCellManagerComponent::OnEditModeChanged(EEditMode NewEditMode)
 	FMassEntityHandle Entity;
 	if (!GetCellEntity(CurrentOutlineCoords, Entity)) return;
 
+	// 同步直写（与 UpdateOutline 统一写路径——避免 Defer 与覆盖标记的时序竞态）
 	const FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+	if (!EntityManager.IsEntityActive(Entity)) return;
 
-	EntityManager.Defer().PushCommand<FMassDeferredSetCommand>(
-		[Entity, this](const FMassEntityManager& EM)
-		{
-			if (!EM.IsEntityActive(Entity)) return;
-
-			if (FHighlightFragment* HighlightFragment = EM.GetFragmentDataPtr<FHighlightFragment>(Entity))
-			{
-				HighlightFragment->HighlightColor = GetOutlineColorForEditMode();
-			}
-		}
-	);
+	if (FHighlightFragment* HighlightFragment = EntityManager.GetFragmentDataPtr<FHighlightFragment>(Entity))
+	{
+		HighlightFragment->HighlightColor = GetOutlineColorForEditMode();
+	}
 }
 
 
@@ -1117,13 +1107,27 @@ void UCellManagerComponent::PrecreateISMComponents()
 	if (!CropDataTable) return;
 	UISMManager* ISMManager = GetWorld()->GetSubsystem<UISMManager>();
 	if (!ISMManager) return;
+	UGlobalConfigSubsystem* ConfigSub = GetWorld()->GetSubsystem<UGlobalConfigSubsystem>();
+	if (!ConfigSub) return;
 
-	// 创建网格体组件
-	FISMComponentParams CellISMParams;
-	CellISMParams.AttachParent = this;
-	CellISMParams.bDisallowNanite = true;
-	CellISMParams.bCastShadow = false;
-	ISMManager->GetOrCreateBucket(FarmlandConfig->OutlineMesh, 0, 16, CellISMParams);
+	// ---- ISM 参数注册（一种网格一份参数——单一事实来源；预创建与实际创建共用，防漂移） ----
+	FISMComponentParams BaseParams;
+	BaseParams.AttachParent = ConfigSub->GetISMAttachParent();
+	if (!BaseParams.AttachParent)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[CellManager] PrecreateISMComponents: ISMAttachParent not set in GlobalConfigSubsystem"));
+		return;
+	}
+
+	// 地块（默认 Nanite/阴影策略）
+	ISMManager->RegisterMeshParams(FarmlandConfig->LandCellMesh, BaseParams);
+
+	// 轮廓（纯效果网格：禁用 Nanite + 不投影）——并预热桶 0
+	FISMComponentParams OutlineParams = BaseParams;
+	OutlineParams.bDisallowNanite = true;
+	OutlineParams.bCastShadow = false;
+	ISMManager->RegisterMeshParams(FarmlandConfig->OutlineMesh, OutlineParams);
+	ISMManager->GetOrCreateBucket(FarmlandConfig->OutlineMesh, 0, CellOutlineCustomData::Count, FISMComponentParams());
 	
 	TArray<TPair<TObjectPtr<UStaticMesh>, int32>> UniqueMeshes;
 	// 收集所有作物变体中所有阶段的网格体
@@ -1140,15 +1144,12 @@ void UCellManagerComponent::PrecreateISMComponents()
 			if (Variant.HarvestedMesh) UniqueMeshes.Emplace(Variant.HarvestedMesh, CropNumCustomDataFloats);
 		}
 	}
-	UGlobalConfigSubsystem* ConfigSub = GetWorld()->GetSubsystem<UGlobalConfigSubsystem>();
-	if (!ConfigSub) return;
 	ConfigSub->SetUniqueMeshes(UniqueMeshes);
 	
-	FISMComponentParams CropISMParams;
-	CropISMParams.AttachParent = this;
-
+	// 作物网格群：注册 + 预热桶 0
 	for (const auto& Pair : UniqueMeshes)
 	{
-		ISMManager->GetOrCreateBucket(Pair.Key, 0, Pair.Value, CropISMParams);
+		ISMManager->RegisterMeshParams(Pair.Key, BaseParams);
+		ISMManager->GetOrCreateBucket(Pair.Key, 0, Pair.Value, FISMComponentParams());
 	}
 }

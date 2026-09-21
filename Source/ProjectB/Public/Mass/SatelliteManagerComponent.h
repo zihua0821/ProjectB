@@ -60,11 +60,43 @@ struct PROJECTB_API FSatelliteScoringWeights
 	/** 最低选择分（最高分低于此值时不选目标） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scoring", meta = (DisplayName = "最低选择分"))
 	float MinScoreThreshold = 1.f;
-
-	/** 轨道覆盖半厚系数（1.0 = 旧语义：轨道平面±半格高；增大则更宽容） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scoring", meta = (DisplayName = "覆盖半厚系数", ClampMin = "0.1"))
-	float CoverageHalfThicknessScale = 1.f;
 };
+
+/**
+ * 运行时轨道数据（可编辑副本）
+ * 几何部分【继承项目唯一权威结构 FOrbitDefinition】
+ * （OrbitName / Transform / Radius / ServiceDistance）；其余为运行时可编辑的卫星与视觉属性。
+ * Initialize 时从 PlanetConfig->OrbitDefinitions 转换；编辑系统修改此数据，
+ * ApplyOrbitChanges 后生效到卫星实体；可视化组件订阅广播实时刷新
+ */
+USTRUCT(BlueprintType)
+struct PROJECTB_API FRuntimeOrbitData : public FOrbitDefinition
+{
+	GENERATED_BODY()
+
+	/** 该轨道的卫星数量 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbit", meta = (ClampMin = "0"))
+	int32 SatelliteCount = 3;
+
+	/** 默认角速度（度/秒；创建/重建卫星时写入其 fragment——运行时以卫星自身为准） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbit")
+	float AngularVelocity = 10.f;
+
+	/** 默认运行方向（创建/重建卫星时应用） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbit")
+	bool bClockwise = false;
+
+	/** 轨道视觉颜色（轨道环/范围圆柱；默认按轨道序自动分配；面板可改） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbit")
+	FLinearColor VisualColor = FLinearColor(0.10f, 0.70f, 0.95f, 1.0f);
+
+	/** 覆盖格高亮颜色（默认按轨道序自动分配；面板可改；多轨道覆盖冲突时取列表序靠前者） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbit")
+	FLinearColor CoverageColor = FLinearColor(1.00f, 0.75f, 0.10f, 1.0f);
+};
+
+/** 运行时轨道数据变化广播（可视化组件订阅） */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRuntimeOrbitChanged, FName, OrbitName);
 
 /**
  * 卫星管理组件
@@ -93,9 +125,63 @@ public:
 	/** 选点评分权重（EQS 迁移版） */
 	const FSatelliteScoringWeights& GetScoringWeights() const { return ScoringWeights; }
 
+	// ---- 调色板（面板/UMG 复用；与默认分配一致） ----
+
+	/** 调色板预设数量 */
+	static int32 GetColorPresetCount();
+
+	/** 调色板预设视觉色（Index 自动取模） */
+	static FLinearColor GetPresetVisualColor(const int32 Index);
+
+	/** 调色板预设覆盖色（Index 自动取模） */
+	static FLinearColor GetPresetCoverageColor(const int32 Index);
+
+	// ---- 轨道编辑接口（运行时数据编辑 → 可视化实时刷新 → ApplyOrbitChanges 重建卫星） ----
+
+	/** 获取运行时轨道数据（可编辑副本） */
+	const TArray<FRuntimeOrbitData>& GetRuntimeOrbits() const { return RuntimeOrbits; }
+
+	/**
+	 * 更新指定轨道数据（按 OrbitName 定位；广播 OnRuntimeOrbitChanged 供可视化刷新）
+	 * 注意：仅更新数据与可视化；卫星运动需调用 ApplyOrbitChanges 重建
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Satellite|Orbit")
+	bool UpdateOrbitData(const FName OrbitName, const FRuntimeOrbitData& NewData);
+
+	/** 新建轨道（成功后重建全部卫星） */
+	UFUNCTION(BlueprintCallable, Category = "Satellite|Orbit")
+	bool AddOrbit(const FRuntimeOrbitData& NewOrbit);
+
+	/** 移除轨道（成功后重建剩余轨道的卫星） */
+	UFUNCTION(BlueprintCallable, Category = "Satellite|Orbit")
+	void RemoveOrbit(const FName OrbitName);
+
+	/** 应用轨道变更：重建全部卫星实体（销毁 + 按运行时数据重建） */
+	UFUNCTION(BlueprintCallable, Category = "Satellite|Orbit")
+	void ApplyOrbitChanges();
+
+	/** 轨道数据变化广播（可视化组件订阅） */
+	UPROPERTY(BlueprintAssignable, Category = "Satellite|Orbit")
+	FOnRuntimeOrbitChanged OnRuntimeOrbitChanged;
+
 private:
-	/** 解析目标轨道定义（指定名优先，其次第一个配置，最后兜底默认轨道） */
-	bool ResolveOrbitDefinition(FOrbitDefinition& OutDefinition) const;
+	/** 构建运行时轨道数据（从 PlanetConfig->OrbitDefinitions 转换；空则兜底默认轨道） */
+	void BuildRuntimeOrbits();
+
+	/** 服务距离默认值（半格高 = 覆盖带半厚，与旧系统语义一致） */
+	float ComputeDefaultServiceDistance() const;
+
+	/** 为全部运行时轨道创建卫星（汇总实体与初始变换后统一注册渲染） */
+	void CreateAllSatellites();
+
+	/** 为单条轨道创建一组卫星实体（写入 OutEntities/OutTransforms） */
+	void CreateSatellitesForOrbit(const FRuntimeOrbitData& Orbit, FMassEntityManager& EntityManager, TArray<FMassEntityHandle>& OutEntities, TArray<FTransform>& OutTransforms);
+
+	/** 注册卫星渲染实例（ISM 单桶路径）并回写 InstanceId */
+	void RegisterRenderInstances(const TArray<FMassEntityHandle>& Entities, const TArray<FTransform>& Transforms);
+
+	/** 销毁全部卫星（渲染实例 + 实体） */
+	void DestroyAllSatellites();
 
 	/** CellManager 意图委托回调：Crop Slot（1）启停 → 维护活跃农田集合 */
 	void HandleCellSlotStateChanged(const FIntPoint Coords, const int32 SlotIndex, const bool bEnabled);
@@ -144,6 +230,9 @@ private:
 	UPROPERTY()
 	TObjectPtr<APlanetActor> PlanetActor;
 
-	/** 已创建的卫星实体 */
+	/** 已创建的卫星实体（全部轨道汇总） */
 	TArray<FMassEntityHandle> SatelliteEntities;
+
+	/** 运行时轨道数据（Initialize 构建；编辑系统修改后 ApplyOrbitChanges 生效到卫星） */
+	TArray<FRuntimeOrbitData> RuntimeOrbits;
 };

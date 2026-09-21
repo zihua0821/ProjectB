@@ -3,6 +3,7 @@
 
 #include "MassExecutionContext.h"
 #include "Mass/SatelliteMassFragments.h"
+#include "Planet/PlanetBlueprintFunctionLibrary.h"   // ComputeOrbitWorldPosition（轨道几何，Planet 域）
 #include "Subsystem/ISMManager.h"
 
 USatelliteRenderSyncProcessor::USatelliteRenderSyncProcessor()
@@ -52,7 +53,7 @@ void USatelliteRenderSyncProcessor::Execute(FMassEntityManager& EntityManager, F
 			}
 
 			// 角度 → 世界位置（与注册时同一公式）
-			const FVector WorldLocation = ComputeOrbitWorldPosition(Shared.OrbitTransform, Shared.Radius, OrbitFragments[Index].CurrentAngle);
+			const FVector WorldLocation = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(Shared.OrbitTransform, Shared.Radius, OrbitFragments[Index].CurrentAngle);
 			InstanceIds.Add(RenderFragments[Index].InstanceId);
 			NewTransforms.Add(FTransform(FRotator::ZeroRotator, WorldLocation, ScaleVector));
 		}

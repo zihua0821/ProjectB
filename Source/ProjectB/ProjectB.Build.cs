@@ -10,6 +10,8 @@ public class ProjectB : ModuleRules
 	
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "Niagara"});
 		PublicDependencyModuleNames.AddRange(new string[] { "AIModule", "MassEntity", "MassAIBehavior", "MassSignals", "StateTreeModule", "SmartObjectsModule", "GameplayTags"  });
+		// Slate UI（轨道编辑面板）：Slate/SlateCore + AppFramework（SColorPicker）+ UMG（面板 UMG 包装），均 Runtime 模块
+		PublicDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore", "AppFramework", "UMG" });
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });
 		

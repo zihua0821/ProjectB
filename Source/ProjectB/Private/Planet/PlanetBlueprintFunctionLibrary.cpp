@@ -3,11 +3,12 @@
 
 #include "Planet/PlanetBlueprintFunctionLibrary.h"
 
+#include "Planet/OrbitManagerComponent.h"    // FOrbitDefinition（轨道定义权威结构）
 #include "Planet/PlanetConfigDataAsset.h"
 #include "Planet/PlanetInterface.h"
 
 float UPlanetBlueprintFunctionLibrary::CalculateOrbitAngleFromCell(const FIntPoint& CellCoord,
-                                                                   const FOrbitData& OrbitData, const UObject* PlanetActor)
+                                                                   const FOrbitDefinition& OrbitData, const UObject* PlanetActor)
 {
 	if (!PlanetActor) return 0.0f;
 	const FTransform CellWorldTransform = IPlanetInterface::Execute_GetCellWorldTransform(PlanetActor, CellCoord);
@@ -15,7 +16,7 @@ float UPlanetBlueprintFunctionLibrary::CalculateOrbitAngleFromCell(const FIntPoi
 }
 
 float UPlanetBlueprintFunctionLibrary::CalculateOrbitAngleFromCell(const FTransform& CellWorldTransform,
-	const FOrbitData& OrbitData)
+	const FOrbitDefinition& OrbitData)
 {
 	// 从轨道数据中获取轨道中心位置和法线
 	const FVector OrbitCenter = OrbitData.Transform.GetLocation();
@@ -38,23 +39,6 @@ float UPlanetBlueprintFunctionLibrary::CalculateOrbitAngleFromCell(const FTransf
 	if (AngleDeg < 0.0f) AngleDeg += 360.0f;
 
 	return AngleDeg;
-}
-
-FIntPoint UPlanetBlueprintFunctionLibrary::GetNearestCellCoordFromOrbitAngle(const float OrbitAngle,
-	const FOrbitData& OrbitData)
-{
-	float BestDelta = 360.0f;
-	FIntPoint BestCell;
-	for (const auto& Pair : OrbitData.CoveredCoordsMap)
-	{
-		const float Delta = FMath::Abs(FMath::FindDeltaAngleDegrees(OrbitAngle, Pair.Value));
-		if (Delta < BestDelta)
-		{
-			BestDelta = Delta;
-			BestCell = Pair.Key;
-		}
-	}
-	return BestCell;
 }
 
 FIntPoint UPlanetBlueprintFunctionLibrary::ConvertLocationToCellCoord(const FVector& Location, const UPlanetConfigDataAsset* PlanetConfig, const bool IsWorldLocation,
@@ -94,4 +78,21 @@ FIntPoint UPlanetBlueprintFunctionLibrary::ConvertLocationToCellCoord(const FVec
 	LonIdx = FMath::Clamp(LonIdx, 0, PlanetConfig->NumLon - 1);
 	
 	return FIntPoint(LatIdx, LonIdx);
+}
+
+FVector UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(const FTransform& OrbitTransform, const float Radius, const float AngleDeg)
+{
+	const float RadAngle = FMath::DegreesToRadians(AngleDeg);
+	const FVector OrbitPlanePosition = FVector(Radius * FMath::Cos(RadAngle), Radius * FMath::Sin(RadAngle), 0.0f);
+	return OrbitTransform.TransformPosition(OrbitPlanePosition);
+}
+
+float UPlanetBlueprintFunctionLibrary::ComputeDistanceToOrbitPlane(const FVector& Point, const FVector& OrbitCenter, const FVector& OrbitNormal)
+{
+	return FMath::Abs(FVector::DotProduct(Point - OrbitCenter, OrbitNormal));
+}
+
+bool UPlanetBlueprintFunctionLibrary::IsPointInOrbitCoverage(const FVector& Point, const FVector& OrbitCenter, const FVector& OrbitNormal, const float ServiceDistance)
+{
+	return ComputeDistanceToOrbitPlane(Point, OrbitCenter, OrbitNormal) <= ServiceDistance;
 }

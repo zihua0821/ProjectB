@@ -1,0 +1,143 @@
+// OrbitEditorWidget.h
+// 轨道编辑界面（一体两件）：Slate 面板（SOrbitEditorPanel）+ UMG 包装控件（UOrbitEditorWidget）
+// - UMG 用法：蓝图中放置 UOrbitEditorWidget（承载整个面板内容）
+// - Viewport 用法：控制器 OrbitShowEditor（Exec 命令）直接 SNew(SOrbitEditorPanel) 加入 Viewport
+// - 纯 Runtime（Slate + UMG）；不依赖任何编辑器模块
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/Widget.h"
+#include "Mass/SatelliteManagerComponent.h"   // FRuntimeOrbitData（WorkingData 值成员需完整类型）
+#include "Widgets/SCompoundWidget.h"
+#include "OrbitEditorWidget.generated.h"
+
+class ABasePlayerController;
+class USatelliteManagerComponent;
+class SVerticalBox;
+
+/**
+ * 轨道编辑面板（Slate）
+ * - 轨道列表（新建/删除/选中）+ 参数编辑（实时预览）+ 应用（重建卫星）
+ * - 数据经 ABasePlayerController 接口转发（SetOrbitData / CreateOrbit / ApplyOrbitChanges...）
+ * - 颜色：调色板快选 + SColorPicker 微调（独立数值模式，非编辑器属性系统）
+ */
+class SOrbitEditorPanel : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SOrbitEditorPanel) {}
+		SLATE_ARGUMENT(TWeakObjectPtr<ABasePlayerController>, PlayerController)
+		/** 关闭请求（× 按钮触发）；由宿主处理（UMG 包装收起自身等） */
+		SLATE_EVENT(FSimpleDelegate, OnCloseRequested)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs);
+	virtual ~SOrbitEditorPanel() override;
+
+private:
+	// ---- 数据 ----
+
+	/** 宿主控制器（提供全部轨道接口） */
+	TWeakObjectPtr<ABasePlayerController> Controller;
+
+	/** 关闭请求（× 按钮；由宿主绑定处理——Construct 时从 InArgs 保存） */
+	FSimpleDelegate OnCloseRequested;
+
+	/** 轨道名列表（面板列表） */
+	TArray<FName> OrbitNames;
+
+	/** 当前选中轨道名 */
+	FName SelectedOrbitName = NAME_None;
+
+	/** 编辑副本（控件真值源；变更实时推送到运行时数据） */
+	FRuntimeOrbitData WorkingData;
+
+	/** 是否有有效选中 */
+	bool bHasSelection = false;
+
+	/** 倾角/方位编辑状态（面板内维护；与法线互算） */
+	float EditingTiltDeg = 0.f;
+	float EditingAzimuthDeg = 0.f;
+
+	// ---- 控件 ----
+
+	TSharedPtr<SVerticalBox> OrbitListContainer;
+	TSharedPtr<SWindow> ColorPickerWindow;
+
+	// ---- 内部逻辑 ----
+
+	/** 拉取轨道名 + 重建列表 + 选中兜底 */
+	void RefreshOrbitList();
+
+	/** 仅重建列表行（选中态高亮） */
+	void RebuildOrbitListRows();
+
+	/** 选中轨道（加载数据 + 反算倾角方位） */
+	void SelectOrbit(const FName Name);
+
+	/** 推送编辑副本到运行时数据（实时预览） */
+	void PushWorkingDataToManager();
+
+	/** 法线 ↔ 倾角/方位 换算 */
+	FVector MakeNormalFromTiltAzimuth() const;
+
+	// ---- 参数变更 ----
+
+	void SetCenterAxis(const int32 Axis, const float Value);
+	void SetTiltDegrees(const float Value);
+	void SetAzimuthDegrees(const float Value);
+	void SetOrbitRadius(const float Value);
+	void SetServiceDistance(const float Value);
+	void SetSatelliteCount(const int32 Value);
+	void SetAngularVelocity(const float Value);
+	void SetClockwise(const bool bClockwise);
+	void ApplyPresetColor(const int32 PresetIndex, const bool bVisual);
+	void ApplyPickedColor(const FLinearColor NewColor, const bool bVisual);
+
+	// ---- 回调 ----
+
+	FReply OnAddOrbitClicked();
+	FReply OnDeleteOrbitClicked();
+	FReply OnApplyClicked();
+	FReply OnCloseClicked();
+	void OpenColorPicker(const bool bVisual);
+
+	// ---- UI 构建 ----
+
+	TSharedRef<SWidget> BuildOrbitListSection();
+	TSharedRef<SWidget> BuildParamSection();
+	TSharedRef<SWidget> BuildButtonSection();
+	TSharedRef<SWidget> MakeOrbitRow(const FName Name);
+	TSharedRef<SWidget> MakeParamRow(const FText& Label, const TSharedRef<SWidget>& Content);
+	TSharedRef<SWidget> BuildColorRow(const bool bVisual);
+};
+
+/**
+ * 轨道编辑面板（UMG 包装）
+ * 用法：
+ *   1. UMG 蓝图中放置本控件（默认隐藏）
+ *   2. 打开：SetVisibility(Visible) + EnterOrbitEditMode()
+ *   3. 关闭：× 按钮（内置收起 + Exit）或手动 ExitOrbitEditMode()
+ */
+UCLASS()
+class PROJECTB_API UOrbitEditorWidget : public UWidget
+{
+	GENERATED_BODY()
+
+public:
+	/** 进入轨道编辑模式（开启覆盖可视化 + 悬停互斥）——蓝图在显示控件时调用 */
+	UFUNCTION(BlueprintCallable, Category = "OrbitEditor")
+	void EnterOrbitEditMode();
+
+	/** 退出轨道编辑模式 */
+	UFUNCTION(BlueprintCallable, Category = "OrbitEditor")
+	void ExitOrbitEditMode();
+
+protected:
+	// UWidget interface
+	virtual TSharedRef<SWidget> RebuildWidget() override;
+	virtual void ReleaseSlateResources(bool bReleaseChildren) override;
+
+private:
+	/** Slate 面板实例 */
+	TSharedPtr<SOrbitEditorPanel> OrbitPanel;
+};

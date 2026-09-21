@@ -34,7 +34,7 @@ struct PROJECTB_API FMassOrbitFragment : public FMassFragment
 {
 	GENERATED_BODY()
 
-	/** 所属轨道名（查 FOrbitData 用） */
+	/** 所属轨道名（查 FOrbitDefinition 用） */
 	UPROPERTY(VisibleAnywhere, Category = "Orbit")
 	FName OrbitName = NAME_None;
 
@@ -94,7 +94,11 @@ struct PROJECTB_API FMassSatelliteSharedFragment : public FMassConstSharedFragme
 
 	/** 轨道半径（cm） */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
-	float Radius = 30000.0f;
+	float Radius = 55000.0f;
+
+	/** 服务距离（覆盖带半厚 cm；默认 = 半格高，轨道编辑系统可运行时调整） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	float ServiceDistance = 0.0f;
 
 	/** 卫星网格体（渲染用） */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
@@ -143,13 +147,3 @@ struct PROJECTB_API FMassSatelliteTaskFragment : public FMassFragment
 	TEnumAsByte<EEditMode> TargetEditMode = EEditMode::None;
 };
 
-/**
- * 角度 → 轨道世界位置（与原 UOrbitMovementComponent::CalculateOrbitPosition 同源）
- * 平面圆参数化后经轨道变换转换到世界空间
- */
-FORCEINLINE FVector ComputeOrbitWorldPosition(const FTransform& OrbitTransform, const float Radius, const float AngleDeg)
-{
-	const float RadAngle = FMath::DegreesToRadians(AngleDeg);
-	const FVector OrbitPlanePosition = FVector(Radius * FMath::Cos(RadAngle), Radius * FMath::Sin(RadAngle), 0.0f);
-	return OrbitTransform.TransformPosition(OrbitPlanePosition);
-}

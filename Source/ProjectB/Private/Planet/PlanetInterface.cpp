@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Planet/PlanetInterface.h"
@@ -30,9 +30,9 @@ void IPlanetInterface::UpdateRotation_Implementation(float NewAngle)
 {
 }
 
-FOrbitData IPlanetInterface::GetOrbitData_Implementation(FName OrbitName) const
+FOrbitDefinition IPlanetInterface::GetOrbitData_Implementation(FName OrbitName) const
 {
-	return FOrbitData();
+	return FOrbitDefinition();
 }
 
 FTransform IPlanetInterface::GetCellWorldTransform_Implementation(FIntPoint CellCoord) const
