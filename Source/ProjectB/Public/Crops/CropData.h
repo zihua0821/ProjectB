@@ -28,6 +28,7 @@ namespace CellOutlineCustomData
     constexpr int32 X11 = 13;
     constexpr int32 Y11 = 14;
     constexpr int32 Z11 = 15;
+    constexpr int32 Count = 16;
 }
 
 /**

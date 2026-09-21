@@ -23,6 +23,48 @@ namespace
     constexpr float DebugListRowHeight = 18.0f; // 行高
 }
 
+// ---- ISM 网格参数解析（Mesh → Params 单一事实来源） ----
+namespace
+{
+    /** 两套 ISM 参数是否等价（比对影响组件创建的字段） */
+    bool AreISMParamsEquivalent(const FISMComponentParams& A, const FISMComponentParams& B)
+    {
+        return A.AttachParent == B.AttachParent
+            && A.bDisallowNanite == B.bDisallowNanite
+            && A.bCastShadow == B.bCastShadow
+            && A.bDisableBuckets == B.bDisableBuckets;
+    }
+
+    /**
+     * 解析某网格实际生效的 ISM 参数（唯一权威为 Group.CachedParams）：
+     * - 未注册 + 传入非空 → 以传入值注册（首次定格，兼容旧调用）
+     * - 未注册 + 传入为空 → 返回默认（调用方判空处理）
+     * - 已注册 → 以注册值为准；传入非空且不一致 → 每网格一次性告警（暴露漂移）
+     */
+    FISMComponentParams ResolveEffectiveParams(FISMBucketGroup& Group, UStaticMesh* Mesh, const FISMComponentParams& Incoming)
+    {
+        if (!Group.bParamsRegistered)
+        {
+            if (Incoming.AttachParent)
+            {
+                Group.CachedParams = Incoming;
+                Group.bParamsRegistered = true;
+                return Group.CachedParams;
+            }
+            return FISMComponentParams();
+        }
+
+        if (Incoming.AttachParent && !Group.bParamMismatchWarned && !AreISMParamsEquivalent(Group.CachedParams, Incoming))
+        {
+            UE_LOG(LogTemp, Warning,
+                TEXT("ISMManager: mesh '%s' 传入的 ISM 参数与注册值不一致——以注册值为准（请统一走 RegisterMeshParams）"),
+                *FSoftObjectPath(Mesh).ToString());
+            Group.bParamMismatchWarned = true;
+        }
+        return Group.CachedParams;
+    }
+}
+
 // ============================================================================
 // 生命周期
 // ============================================================================
@@ -189,11 +231,17 @@ TArray<FGlobalInstanceId> UISMManager::BatchAddInstances(
     const int32 AddCount = Transforms.Num();
     const FISMMeshKey Key(Mesh);
     FISMBucketGroup& Group = MeshToBucketGroups.FindOrAdd(Key);
+    // 参数解析（Mesh → Params 单一事实来源；空参数自动取注册值）
+    const FISMComponentParams EffectiveParams = ResolveEffectiveParams(Group, Mesh, ISMParams);
+    if (EffectiveParams.AttachParent == nullptr)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ISMManager: mesh '%s' 无可用 ISM 参数（未注册且未传入——请先 RegisterMeshParams）"), *Key.MeshPath.ToString());
+        return AllGlobalIds;
+    }
     // 新组：创建即继承全局分桶配置（分桶判定在此之后立即执行，不能在 GetOrCreateBucket 才继承——鸡生蛋）；预创建组不覆盖
     if (Group.Buckets.Num() == 0)
     {
-        Group.bDisableBuckets = ISMParams.bDisableBuckets;
-        Group.CachedParams = ISMParams;
+        Group.bDisableBuckets = EffectiveParams.bDisableBuckets;
         Group.BucketingThreshold = BucketingThreshold;
         Group.NumCustomDataFloats = NumCustomDataFloats;
     }
@@ -205,7 +253,7 @@ TArray<FGlobalInstanceId> UISMManager::BatchAddInstances(
     if (!bUseSphereBucketing)
     {
         // 单桶路径（Buckets[0]）
-        UInstancedStaticMeshComponent* ISMComp = GetOrCreateBucket(Mesh, 0, NumCustomDataFloats, ISMParams);
+        UInstancedStaticMeshComponent* ISMComp = GetOrCreateBucket(Mesh, 0, NumCustomDataFloats, EffectiveParams);
         if (!ISMComp) return AllGlobalIds;
         TArray<FPrimitiveInstanceId> Ids = ISMComp->AddInstancesById(Transforms, bWorldSpace);
         AllGlobalIds.Reserve(Ids.Num());
@@ -216,8 +264,14 @@ TArray<FGlobalInstanceId> UISMManager::BatchAddInstances(
             const int32 Expected = Ids.Num() * NumCustomDataFloats;
             if (CustomData.Num() == Expected) ISMComp->SetCustomDataById(Ids, CustomData);
         }
+        const bool bWasEmpty = (Group.BucketInstanceCounts[0] == 0);
         Group.TotalInstanceCount += AddCount;
         Group.BucketInstanceCounts[0] += AddCount;
+        // 空桶 → 非空：显式重算 Bounds（增量 API 不会自动更新——否则视锥剔除失效）
+        if (bWasEmpty)
+        {
+            ISMComp->UpdateBounds();
+        }
         return AllGlobalIds;
     }
 
@@ -232,7 +286,7 @@ TArray<FGlobalInstanceId> UISMManager::BatchAddInstances(
     {
         const int32 BucketIdx = Pair.Key;
         const TArray<int32>& Indices = Pair.Value;
-        UInstancedStaticMeshComponent* Bucket = GetOrCreateBucket(Mesh, BucketIdx, NumCustomDataFloats, ISMParams);
+        UInstancedStaticMeshComponent* Bucket = GetOrCreateBucket(Mesh, BucketIdx, NumCustomDataFloats, EffectiveParams);
         if (!Bucket) continue;
         TArray<FTransform> SliceTransforms;
         SliceTransforms.Reserve(Indices.Num());
@@ -252,8 +306,14 @@ TArray<FGlobalInstanceId> UISMManager::BatchAddInstances(
                     SliceData.Add(CustomData[Idx * Floats + f]);
             Bucket->SetCustomDataById(SliceIds, SliceData);
         }
+        const bool bWasEmpty = (Group.BucketInstanceCounts[BucketIdx] == 0);
         Group.TotalInstanceCount += Indices.Num();
         Group.BucketInstanceCounts[BucketIdx] += Indices.Num();
+        // 空桶 → 非空：显式重算 Bounds（增量 API 不会自动更新——否则视锥剔除失效）
+        if (bWasEmpty)
+        {
+            Bucket->UpdateBounds();
+        }
     }
     return AllGlobalIds;
 }
@@ -402,11 +462,17 @@ UInstancedStaticMeshComponent* UISMManager::GetOrCreateBucket(UStaticMesh* Mesh,
 
     const FISMMeshKey Key(Mesh);
     FISMBucketGroup& Group = MeshToBucketGroups.FindOrAdd(Key);
+    // 参数解析（Mesh → Params 单一事实来源；空参数自动取注册值）
+    const FISMComponentParams EffectiveParams = ResolveEffectiveParams(Group, Mesh, Params);
+    if (EffectiveParams.AttachParent == nullptr)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ISMManager: mesh '%s' 无可用 ISM 参数（未注册且未传入）"), *Key.MeshPath.ToString());
+        return nullptr;
+    }
     // 新组：继承全局分桶配置（否则 BucketingThreshold=0 → 永远单桶）
     if (Group.Buckets.Num() == 0)
     {
-        Group.bDisableBuckets = Params.bDisableBuckets;
-        Group.CachedParams = Params;
+        Group.bDisableBuckets = EffectiveParams.bDisableBuckets;
         Group.BucketingThreshold = BucketingThreshold;
         Group.NumCustomDataFloats = NumCustomDataFloats;
     }
@@ -421,9 +487,45 @@ UInstancedStaticMeshComponent* UISMManager::GetOrCreateBucket(UStaticMesh* Mesh,
         Group.Buckets[BucketIndex]->SetHiddenInGame(false);
         return Group.Buckets[BucketIndex];
     }
-    UInstancedStaticMeshComponent* NewBucket = CreateISMComponent(Mesh, NumCustomDataFloats, Params);
+    UInstancedStaticMeshComponent* NewBucket = CreateISMComponent(Mesh, NumCustomDataFloats, EffectiveParams);
     Group.Buckets[BucketIndex] = NewBucket;
     return NewBucket;
+}
+
+// ============================================================================
+// 网格参数注册表
+// ============================================================================
+
+void UISMManager::RegisterMeshParams(UStaticMesh* Mesh, const FISMComponentParams& Params)
+{
+    if (!Mesh) return;
+    // 线程约定：仅限游戏线程（写共享参数状态，非游戏线程断言）
+    checkf(IsInGameThread(), TEXT("RegisterMeshParams 仅限游戏线程调用（见 ISMManager 技术文档 §3.3）"));
+
+    const FISMMeshKey Key(Mesh);
+    FISMBucketGroup& Group = MeshToBucketGroups.FindOrAdd(Key);
+
+    if (Group.bParamsRegistered)
+    {
+        if (!AreISMParamsEquivalent(Group.CachedParams, Params))
+        {
+            UE_LOG(LogTemp, Warning, TEXT("ISMManager: mesh '%s' 重复注册参数与首次不一致——保留首次注册值"), *Key.MeshPath.ToString());
+        }
+        return;
+    }
+
+    Group.CachedParams = Params;
+    Group.bParamsRegistered = true;
+}
+
+FISMComponentParams UISMManager::GetMeshParams(UStaticMesh* Mesh) const
+{
+    if (!Mesh) return FISMComponentParams();
+    // 线程约定：无锁读，仅限游戏线程
+    checkf(IsInGameThread(), TEXT("GetMeshParams 仅限游戏线程调用（无锁读，见 ISMManager 技术文档 §3.3）"));
+
+    const FISMBucketGroup* Group = MeshToBucketGroups.Find(FISMMeshKey(Mesh));
+    return (Group && Group->bParamsRegistered) ? Group->CachedParams : FISMComponentParams();
 }
 
 // ============================================================================

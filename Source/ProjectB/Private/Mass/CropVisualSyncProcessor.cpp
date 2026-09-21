@@ -38,14 +38,6 @@ void UCropVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
     const UFarmlandConfigDataAsset* FarmConfig = ConfigSub->GetFarmlandConfig();
     if (!FarmConfig) return;
 
-    FISMComponentParams CropParams;
-    CropParams.AttachParent = ConfigSub->GetISMAttachParent();
-    if (!CropParams.AttachParent)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("UCropVisualSyncProcessor: ISMAttachParent not set in GlobalConfigSubsystem"));
-        return;
-    }
-
     const FVector CropOffset = FarmConfig->CropOffset;
 
     // 合批累积缓冲（高频路径：单帧累积后一次批量，BatchAddInstances 按 Mesh 分组）：
@@ -150,7 +142,7 @@ void UCropVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
         Transforms.Reserve(PendingAdds.Num());
         GridCoords.Reserve(PendingAdds.Num());
         Entities.Reserve(PendingAdds.Num());
-        CustomData.Reserve(PendingAdds.Num() * 3);
+        CustomData.Reserve(PendingAdds.Num() * CropCustomData::Count);
         for (const FPendingCropAdd& Add : PendingAdds)
         {
             Transforms.Add(Add.Tf);
@@ -160,7 +152,14 @@ void UCropVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
         }
 
         const TArray<FGlobalInstanceId> NewIds = ISMManager->BatchAddInstances(
-            Mesh, Transforms, GridCoords, 3, CropParams, /*bWorldSpace=*/true, CustomData);
+            Mesh,
+            Transforms,
+            GridCoords,
+            CropCustomData::Count,
+            FISMComponentParams(),
+            /*bWorldSpace=*/true,
+            CustomData
+            );
         // 返回与输入一一对应（保序），按实体回填
         for (int32 j = 0; j < NewIds.Num() && j < Entities.Num(); ++j)
         {

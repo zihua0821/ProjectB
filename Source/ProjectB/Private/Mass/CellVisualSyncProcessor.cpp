@@ -106,10 +106,11 @@ void UCellVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 						PendingRemoves.Add(HighlightFragment.InstanceId);
 					}
 		        	HighlightFragment.LastHighlightedState = HighlightFragment.bHighlighted;
+		        	HighlightFragment.LastHighlightColor = HighlightFragment.HighlightColor;
 		        }
         		
         		// 颜色变化时
-		        if (bColorChanged)
+		        else if (bColorChanged)
 		        {
 		        	PendingUpdates.Emplace(HighlightFragment.InstanceId, CellCustomData);
 		        	HighlightFragment.LastHighlightColor = HighlightFragment.HighlightColor;
@@ -138,11 +139,20 @@ void UCellVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
     		Entities.Add(Pair.Value.Value);
     	}
     	
-    	TArray<FGlobalInstanceId> NewIds = ISMManager->BatchAddInstances(
+    		// 轮廓实例坐标（分桶输入：与地块分桶同源格子坐标，分桶后可按视角剔除）
+    		TArray<FIntPoint> GridCoords;
+    		GridCoords.Reserve(Entities.Num());
+    		for (const FMassEntityHandle& Entity : Entities)
+    		{
+    			const FCellStaticFragment* StaticFrag = EntityManager.GetFragmentDataPtr<FCellStaticFragment>(Entity);
+    			GridCoords.Add(StaticFrag ? StaticFrag->Coords : FIntPoint::ZeroValue);
+    		}
+    	
+    	    TArray<FGlobalInstanceId> NewIds = ISMManager->BatchAddInstances(
 				FarmlandConfig->OutlineMesh,
 				Transforms,
-				{},                // S1 轮廓：单桶（空 = 全部单桶）
-				16,
+				GridCoords,        // 轮廓实例走球面分桶
+				CellOutlineCustomData::Count,
 				FISMComponentParams(),
 				true,              // bWorldSpace：轮廓变换继承自地块世界坐标
 				CellsCustomData

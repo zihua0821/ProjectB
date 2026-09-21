@@ -141,8 +141,14 @@ struct FISMBucketGroup
     int32 NumCustomDataFloats = 0;   // 每实例 CustomData 数量（组件创建时固化，CustomData 校验依据）
     bool bDisableBuckets = false;    // 强制单桶（Cell 轮廓等无分桶需求的系统）
 
-    // 缓存组件创建参数（扩容时复用）
+    // 缓存组件创建参数（扩容时复用；同时是“网格参数注册表”的权威值）
     FISMComponentParams CachedParams;
+
+    // 参数是否已注册（显式 RegisterMeshParams 或首次调用定格；每网格一份参数为唯一权威）
+    bool bParamsRegistered = false;
+
+    // 参数漂移告警去重（每网格仅告警一次，防刷屏）
+    bool bParamMismatchWarned = false;
 
     // 分桶阈值兼容开关（创建组件时继承全局值；≤ 0 = 强制单桶）
     int32 BucketingThreshold = 0;
@@ -179,6 +185,22 @@ public:
 
     virtual void Tick(float DeltaTime) override;
     virtual TStatId GetStatId() const override;
+
+    // ---- 网格参数注册表（Mesh → ISM 组件参数：一种网格对应一份参数，单一事实来源） ----
+    /**
+     * 注册指定网格的 ISM 组件参数（唯一权威）。
+     * - 同一网格的所有桶必须参数一致；重复注册且参数不同 → 告警并保留首次注册值；
+     * - 批量/组件接口传空参数（AttachParent == nullptr）时自动取用注册值；
+     * - 建议在系统初始化（如 PrecreateISMComponents）集中注册地块/轮廓/作物等全部网格。
+     * 线程约定：仅限游戏线程。
+     */
+    void RegisterMeshParams(UStaticMesh* Mesh, const FISMComponentParams& Params);
+
+    /**
+     * 查询网格的注册参数（未注册返回默认值——AttachParent 为空表示不可用）。
+     * 线程约定：仅限游戏线程（无锁读）。
+     */
+    FISMComponentParams GetMeshParams(UStaticMesh* Mesh) const;
 
     // ---- 组件管理（桶组件获取/创建；首桶 = Bucket[0]，统一走 GetOrCreateBucket / GetBucketComponent） ----
     /**
