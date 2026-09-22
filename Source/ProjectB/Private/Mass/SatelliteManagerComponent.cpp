@@ -20,45 +20,13 @@ namespace
 	/** 未配置轨道时的兜底轨道参数 */
 	constexpr float FallbackOrbitRadius = 55000.f;
 
-	/** 轨道默认调色板（视觉色 / 覆盖格色成对；按轨道序循环分配） */
-	struct FOrbitColorPreset
-	{
-		FLinearColor VisualColor;
-		FLinearColor CoverageColor;
-	};
-
-	const FOrbitColorPreset OrbitColorPresets[] =
-	{
-		{ FLinearColor(0.10f, 0.70f, 0.95f, 1.f), FLinearColor(1.00f, 0.75f, 0.10f, 1.f) },   // 青 / 金
-		{ FLinearColor(0.95f, 0.25f, 0.60f, 1.f), FLinearColor(1.00f, 0.45f, 0.10f, 1.f) },   // 品红 / 橙
-		{ FLinearColor(0.25f, 0.85f, 0.40f, 1.f), FLinearColor(0.70f, 1.00f, 0.20f, 1.f) },   // 绿 / 黄绿
-		{ FLinearColor(0.60f, 0.40f, 1.00f, 1.f), FLinearColor(1.00f, 0.50f, 0.80f, 1.f) },   // 紫 / 粉
-		{ FLinearColor(1.00f, 0.60f, 0.20f, 1.f), FLinearColor(0.40f, 0.80f, 1.00f, 1.f) },   // 橙 / 浅蓝
-		{ FLinearColor(0.30f, 0.50f, 1.00f, 1.f), FLinearColor(0.40f, 1.00f, 0.80f, 1.f) },   // 蓝 / 薄荷
-	};
-	constexpr int32 OrbitColorPresetCount = UE_ARRAY_COUNT(OrbitColorPresets);
+	/** 服务距离默认值（覆盖带半厚 cm；与 FOrbitDefinition::ServiceDistance 默认一致） */
+	constexpr float DefaultServiceDistance = 1000.f;
 }
 
 USatelliteManagerComponent::USatelliteManagerComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
-}
-
-int32 USatelliteManagerComponent::GetColorPresetCount()
-{
-	return OrbitColorPresetCount;
-}
-
-FLinearColor USatelliteManagerComponent::GetPresetVisualColor(const int32 Index)
-{
-	const int32 SafeIndex = ((Index % OrbitColorPresetCount) + OrbitColorPresetCount) % OrbitColorPresetCount;
-	return OrbitColorPresets[SafeIndex].VisualColor;
-}
-
-FLinearColor USatelliteManagerComponent::GetPresetCoverageColor(const int32 Index)
-{
-	const int32 SafeIndex = ((Index % OrbitColorPresetCount) + OrbitColorPresetCount) % OrbitColorPresetCount;
-	return OrbitColorPresets[SafeIndex].CoverageColor;
 }
 
 void USatelliteManagerComponent::Initialize(APlanetActor* InPlanetActor)
@@ -132,15 +100,11 @@ void USatelliteManagerComponent::BuildRuntimeOrbits()
 			Data.OrbitName = Definition.OrbitName;
 			Data.Transform = Definition.Transform;
 			Data.Radius = Definition.Radius;
-			// 服务距离：配置值优先；未配置（0）时兜底半格高
-			Data.ServiceDistance = (Definition.ServiceDistance > 0.f) ? Definition.ServiceDistance : ComputeDefaultServiceDistance();
+			// 服务距离：配置值优先；未配置（0）时用默认值（DefaultServiceDistance）
+			Data.ServiceDistance = (Definition.ServiceDistance > 0.f) ? Definition.ServiceDistance : DefaultServiceDistance;
 			Data.SatelliteCount = SatelliteCount;
 			Data.AngularVelocity = DefaultAngularVelocity;
 			Data.bClockwise = bDefaultClockwise;
-			// 默认颜色：按轨道序从调色板分配（面板可改）
-			const int32 PresetIndex = RuntimeOrbits.Num() % OrbitColorPresetCount;
-			Data.VisualColor = OrbitColorPresets[PresetIndex].VisualColor;
-			Data.CoverageColor = OrbitColorPresets[PresetIndex].CoverageColor;
 			RuntimeOrbits.Add(MoveTemp(Data));
 		}
 	}
@@ -153,30 +117,12 @@ void USatelliteManagerComponent::BuildRuntimeOrbits()
 		Data.Transform = FTransform::Identity;
 		Data.Transform.SetRotation(FRotator(0.f, 180.f, 0.f).Quaternion());
 		Data.Radius = FallbackOrbitRadius;
-		Data.ServiceDistance = ComputeDefaultServiceDistance();
+		Data.ServiceDistance = DefaultServiceDistance;
 		Data.SatelliteCount = SatelliteCount;
 		Data.AngularVelocity = DefaultAngularVelocity;
 		Data.bClockwise = bDefaultClockwise;
-		Data.VisualColor = OrbitColorPresets[0].VisualColor;
-		Data.CoverageColor = OrbitColorPresets[0].CoverageColor;
 		RuntimeOrbits.Add(MoveTemp(Data));
 	}
-}
-
-float USatelliteManagerComponent::ComputeDefaultServiceDistance() const
-{
-	const UPlanetConfigDataAsset* Config = PlanetActor ? PlanetActor->PlanetConfig : nullptr;
-	if (Config == nullptr)
-	{
-		return 0.f;
-	}
-
-	// 半格高：CellHeight = Radius × 纬度步长弧度（与网格生成同源公式）
-	const float LatStepDeg = (Config->MaxLat - Config->MinLat) / static_cast<float>(Config->NumLat - 1);
-	const float CellHeight = Config->Radius * FMath::DegreesToRadians(LatStepDeg);
-
-	// 服务距离 = 半格高（覆盖带半厚：板厚 = 一个格子高，与旧系统语义一致）
-	return CellHeight * 0.5f;
 }
 
 void USatelliteManagerComponent::CreateAllSatellites()
@@ -379,7 +325,14 @@ bool USatelliteManagerComponent::AddOrbit(const FRuntimeOrbitData& NewOrbit)
 		}
 	}
 
-	RuntimeOrbits.Add(NewOrbit);
+	// 兜底：服务距离未设置时取默认（半格高）——保证新轨道有有效覆盖（如删空后重建）
+	FRuntimeOrbitData SanitizedOrbit = NewOrbit;
+	if (SanitizedOrbit.ServiceDistance <= 0.f)
+	{
+		SanitizedOrbit.ServiceDistance = DefaultServiceDistance;
+	}
+
+	RuntimeOrbits.Add(SanitizedOrbit);
 	ApplyOrbitChanges();
 	OnRuntimeOrbitChanged.Broadcast(NewOrbit.OrbitName);
 	return true;

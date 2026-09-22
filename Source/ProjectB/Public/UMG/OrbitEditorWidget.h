@@ -54,9 +54,10 @@ private:
 	/** 是否有有效选中 */
 	bool bHasSelection = false;
 
-	/** 倾角/方位编辑状态（面板内维护；与法线互算） */
-	float EditingTiltDeg = 0.f;
-	float EditingAzimuthDeg = 0.f;
+	/** 朝向编辑状态（三自由度：绕 X / 绕 Y 定平面朝向；相位为绕法线的自转，与轨道定义 FTransform 对齐） */
+	float EditingAngleXDeg = 0.f;
+	float EditingAngleYDeg = 0.f;
+	float EditingPhaseDeg = 0.f;
 
 	// ---- 控件 ----
 
@@ -77,20 +78,20 @@ private:
 	/** 推送编辑副本到运行时数据（实时预览） */
 	void PushWorkingDataToManager();
 
-	/** 法线 ↔ 倾角/方位 换算 */
-	FVector MakeNormalFromTiltAzimuth() const;
+	/** 由三自由度（绕 X / 绕 Y / 相位）构造轨道朝向四元数（与 SelectOrbit 反算互逆） */
+	FQuat MakeOrbitRotation() const;
 
 	// ---- 参数变更 ----
 
 	void SetCenterAxis(const int32 Axis, const float Value);
-	void SetTiltDegrees(const float Value);
-	void SetAzimuthDegrees(const float Value);
+	void SetAngleXDegrees(const float Value);
+	void SetAngleYDegrees(const float Value);
+	void SetPhaseDegrees(const float Value);
 	void SetOrbitRadius(const float Value);
 	void SetServiceDistance(const float Value);
 	void SetSatelliteCount(const int32 Value);
 	void SetAngularVelocity(const float Value);
 	void SetClockwise(const bool bClockwise);
-	void ApplyPresetColor(const int32 PresetIndex, const bool bVisual);
 	void ApplyPickedColor(const FLinearColor NewColor, const bool bVisual);
 
 	// ---- 回调 ----

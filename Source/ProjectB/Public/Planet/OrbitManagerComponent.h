@@ -24,9 +24,9 @@ class UPlanetConfigDataAsset;
  *                    （三维中确定一个平面只需两个自由度；剩余的一个自由度
  *                      即"轨道起点"——卫星角度参数化的基准方向）
  * - Radius           轨道半径（cm）
- * - ServiceDistance  服务距离（cm）——覆盖"圆柱体"的半高：
+ * - ServiceDistance  服务距离（cm）——覆盖“圆柱体”的半高：
  *                      覆盖区 = 管（中线=轨道圆、半高=服务距离）∩ 球面；
- *                      配 0 时由运行时兜底"半格高"
+ *                      默认 1000；配 0 时由运行时兜底为默认值
  */
 USTRUCT(BlueprintType)
 struct FOrbitDefinition
@@ -45,9 +45,9 @@ struct FOrbitDefinition
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbit", meta = (DisplayName = "轨道半径(cm)"))
 	float Radius = 55000.f;
 
-	/** 服务距离（cm；覆盖圆柱半高；0 = 运行时兜底半格高） */
+	/** 服务距离（cm；覆盖圆柱半高；默认 1000，配 0 时由运行时兜底） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Orbit", meta = (DisplayName = "服务距离(cm)"))
-	float ServiceDistance = 0.f;
+	float ServiceDistance = 1000.f;
 };
 
 /**

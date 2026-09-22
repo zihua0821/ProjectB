@@ -9,6 +9,7 @@
 #include "Styling/CoreStyle.h"
 #include "Widgets/Colors/SColorBlock.h"
 #include "Widgets/Colors/SColorPicker.h"
+#include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SSpinBox.h"
@@ -18,6 +19,18 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SWindow.h"
 #include "Widgets/Text/STextBlock.h"
+
+namespace
+{
+	/** 轴标签（UE 编辑器惯例配色：X 红 / Y 绿 / Z 蓝） */
+	TSharedRef<SWidget> MakeAxisLabel(const TCHAR* AxisName, const FLinearColor& Color)
+	{
+		return SNew(STextBlock)
+			.Text(FText::FromString(AxisName))
+			.ColorAndOpacity(FSlateColor(Color))
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9));
+	}
+}
 
 #define LOCTEXT_NAMESPACE "OrbitEditor"
 
@@ -30,14 +43,15 @@ void SOrbitEditorPanel::Construct(const FArguments& InArgs)
 
 	ChildSlot
 	[
-		// 右上角对齐 + 固定宽度
+		// 右上角对齐 + 固定宽度；VAlign_Fill 让背景铺满槽位高度（避免下方内容“溢出无背景”）
 		SNew(SBox)
 		.HAlign(HAlign_Right)
-		.VAlign(VAlign_Top)
+		.VAlign(VAlign_Fill)
 		.Padding(16.f)
 		[
 			SNew(SBox)
 			.WidthOverride(460.f)
+			.MinDesiredHeight(520.f)   // 面板所需最小高度（自适应槽位可据此撑开；固定槽位请≥此值）
 			[
 				SNew(SBorder)
 				.Padding(12.f)
@@ -129,6 +143,19 @@ void SOrbitEditorPanel::RebuildOrbitListRows()
 	}
 
 	OrbitListContainer->ClearChildren();
+
+	// 空列表占位提示
+	if (OrbitNames.Num() == 0)
+	{
+		OrbitListContainer->AddSlot().AutoHeight().Padding(6.f, 6.f)
+		[
+			SNew(STextBlock)
+			.Text(LOCTEXT("NoOrbit", "（无轨道）"))
+			.ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f)))
+		];
+		return;
+	}
+
 	for (const FName& Name : OrbitNames)
 	{
 		OrbitListContainer->AddSlot().AutoHeight().Padding(0, 1)
@@ -156,10 +183,23 @@ void SOrbitEditorPanel::SelectOrbit(const FName Name)
 	WorkingData = Data;
 	bHasSelection = true;
 
-	// 反算倾角/方位（面板编辑状态；法线为轨道平面 Z 轴）
-	const FVector Normal = Data.Transform.GetRotation().GetAxisZ();
-	EditingTiltDeg = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(Normal.Z, -1.f, 1.f)));
-	EditingAzimuthDeg = FMath::RadiansToDegrees(FMath::Atan2(Normal.Y, Normal.X));
+	// 反算朝向三自由度（与 MakeOrbitRotation 互逆）
+	// 构造：Q = Ry(AY) · Rx(AX) · Qz(Phase)（Qz 绕旋转后的本地 Z；Q 的 Z 轴即平面法线）
+	// 法线 N = Ry(AY)·Rx(AX)·Z = (sinAY·cosAX, −sinAX, cosAY·cosAX)
+	const FQuat Rotation = Data.Transform.GetRotation();
+	const FVector Normal = Rotation.GetAxisZ();
+	EditingAngleXDeg = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(-Normal.Y, -1.f, 1.f)));
+	EditingAngleYDeg = FMath::RadiansToDegrees(FMath::Atan2(Normal.X, Normal.Z));
+
+	// 相位 = 相对基准姿态（Ry·Rx）的剩余绕法线自转
+	const FQuat BaseRotation = FQuat(FVector::YAxisVector, FMath::DegreesToRadians(EditingAngleYDeg))
+		* FQuat(FVector::XAxisVector, FMath::DegreesToRadians(EditingAngleXDeg));
+	const FQuat RelativeRotation = BaseRotation.Inverse() * Rotation;
+	FVector PhaseAxis;
+	float PhaseAngleRad = 0.f;
+	RelativeRotation.ToAxisAndAngle(PhaseAxis, PhaseAngleRad);
+	const float PhaseSign = (PhaseAxis.Z >= 0.f) ? 1.f : -1.f;
+	EditingPhaseDeg = FMath::UnwindDegrees(FMath::RadiansToDegrees(PhaseAngleRad) * PhaseSign);
 
 	RebuildOrbitListRows();
 }
@@ -176,14 +216,13 @@ void SOrbitEditorPanel::PushWorkingDataToManager()
 	}
 }
 
-FVector SOrbitEditorPanel::MakeNormalFromTiltAzimuth() const
+FQuat SOrbitEditorPanel::MakeOrbitRotation() const
 {
-	const float TiltRad = FMath::DegreesToRadians(EditingTiltDeg);
-	const float AzimuthRad = FMath::DegreesToRadians(EditingAzimuthDeg);
-	return FVector(
-		FMath::Sin(TiltRad) * FMath::Cos(AzimuthRad),
-		FMath::Sin(TiltRad) * FMath::Sin(AzimuthRad),
-		FMath::Cos(TiltRad));
+	// 平面朝向：先绕 X 再绕 Y（正交两倾斜角）；相位：绕旋转后的本地 Z（= 平面法线）自转
+	const FQuat BaseRotation = FQuat(FVector::YAxisVector, FMath::DegreesToRadians(EditingAngleYDeg))
+		* FQuat(FVector::XAxisVector, FMath::DegreesToRadians(EditingAngleXDeg));
+	const FQuat PhaseRotation(FVector::ZAxisVector, FMath::DegreesToRadians(EditingPhaseDeg));
+	return BaseRotation * PhaseRotation;
 }
 
 // ==================== 参数变更 ====================
@@ -200,25 +239,36 @@ void SOrbitEditorPanel::SetCenterAxis(const int32 Axis, const float Value)
 	PushWorkingDataToManager();
 }
 
-void SOrbitEditorPanel::SetTiltDegrees(const float Value)
+void SOrbitEditorPanel::SetAngleXDegrees(const float Value)
 {
-	EditingTiltDeg = Value;
+	EditingAngleXDeg = Value;
 	if (!bHasSelection)
 	{
 		return;
 	}
-	WorkingData.Transform.SetRotation(FRotationMatrix::MakeFromZ(MakeNormalFromTiltAzimuth()).Rotator().Quaternion());
+	WorkingData.Transform.SetRotation(MakeOrbitRotation());
 	PushWorkingDataToManager();
 }
 
-void SOrbitEditorPanel::SetAzimuthDegrees(const float Value)
+void SOrbitEditorPanel::SetAngleYDegrees(const float Value)
 {
-	EditingAzimuthDeg = Value;
+	EditingAngleYDeg = Value;
 	if (!bHasSelection)
 	{
 		return;
 	}
-	WorkingData.Transform.SetRotation(FRotationMatrix::MakeFromZ(MakeNormalFromTiltAzimuth()).Rotator().Quaternion());
+	WorkingData.Transform.SetRotation(MakeOrbitRotation());
+	PushWorkingDataToManager();
+}
+
+void SOrbitEditorPanel::SetPhaseDegrees(const float Value)
+{
+	EditingPhaseDeg = Value;
+	if (!bHasSelection)
+	{
+		return;
+	}
+	WorkingData.Transform.SetRotation(MakeOrbitRotation());
 	PushWorkingDataToManager();
 }
 
@@ -272,23 +322,6 @@ void SOrbitEditorPanel::SetClockwise(const bool bClockwise)
 	PushWorkingDataToManager();
 }
 
-void SOrbitEditorPanel::ApplyPresetColor(const int32 PresetIndex, const bool bVisual)
-{
-	if (!bHasSelection)
-	{
-		return;
-	}
-	if (bVisual)
-	{
-		WorkingData.VisualColor = USatelliteManagerComponent::GetPresetVisualColor(PresetIndex);
-	}
-	else
-	{
-		WorkingData.CoverageColor = USatelliteManagerComponent::GetPresetCoverageColor(PresetIndex);
-	}
-	PushWorkingDataToManager();
-}
-
 void SOrbitEditorPanel::ApplyPickedColor(const FLinearColor NewColor, const bool bVisual)
 {
 	if (!bHasSelection)
@@ -338,9 +371,7 @@ FReply SOrbitEditorPanel::OnAddOrbitClicked()
 	while (PC->GetOrbitNames().Contains(NewName));
 
 	NewData.OrbitName = NewName;
-	const int32 PresetIndex = PC->GetOrbitNames().Num();
-	NewData.VisualColor = USatelliteManagerComponent::GetPresetVisualColor(PresetIndex);
-	NewData.CoverageColor = USatelliteManagerComponent::GetPresetCoverageColor(PresetIndex);
+	// 颜色继承来源轨道（字段默认值）；需要区分时用取色器手动调整
 	// 沿法线偏移一点，避免与来源轨道完全重叠
 	NewData.Transform.AddToTranslation(NewData.Transform.GetRotation().GetAxisZ() * NewData.Radius * 0.15f);
 
@@ -359,12 +390,6 @@ FReply SOrbitEditorPanel::OnDeleteOrbitClicked()
 	{
 		return FReply::Handled();
 	}
-	// 保护：至少保留一条轨道
-	if (PC->GetOrbitNames().Num() <= 1)
-	{
-		return FReply::Handled();
-	}
-
 	PC->DeleteOrbit(SelectedOrbitName);
 	SelectedOrbitName = NAME_None;
 	bHasSelection = false;
@@ -411,13 +436,14 @@ void SOrbitEditorPanel::OpenColorPicker(const bool bVisual)
 
 	ColorPickerWindow = SNew(SWindow)
 		.Title(FText::FromString(bVisual ? TEXT("视觉色") : TEXT("覆盖色")))
-		.ClientSize(FVector2D(320.f, 420.f))
+		.ClientSize(SColorPicker::DEFAULT_WINDOW_SIZE)   // 引擎推荐的取色器窗口尺寸（避免调色盘被压扁）
 		.SupportsMinimize(false)
 		.SupportsMaximize(false)
 		[
 			SNew(SColorPicker)
 			.UseAlpha(true)
 			.DisplayGamma(2.2f)
+			.ExpandAdvancedSection(true)                 // 高级区默认展开
 			.TargetColorAttribute(bVisual ? WorkingData.VisualColor : WorkingData.CoverageColor)
 			.OnColorCommitted_Lambda([this, bVisual](FLinearColor NewColor)
 			{
@@ -433,7 +459,7 @@ void SOrbitEditorPanel::OpenColorPicker(const bool bVisual)
 TSharedRef<SWidget> SOrbitEditorPanel::BuildOrbitListSection()
 {
 	return SNew(SVerticalBox)
-		// 标题 + 新建
+		// 标题 + 操作按钮（新建 / 删除并排）
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)
 		[
 			SNew(SHorizontalBox)
@@ -443,18 +469,25 @@ TSharedRef<SWidget> SOrbitEditorPanel::BuildOrbitListSection()
 				.Text(LOCTEXT("OrbitListHeader", "轨道列表"))
 				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
 			]
-			+ SHorizontalBox::Slot().AutoWidth()
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 4, 0)
 			[
 				SNew(SButton)
 				.Text(LOCTEXT("AddOrbit", "+ 新建"))
 				.OnClicked(this, &SOrbitEditorPanel::OnAddOrbitClicked)
 			]
+			+ SHorizontalBox::Slot().AutoWidth()
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("DeleteOrbit", "删除"))
+				.IsEnabled_Lambda([this]() { return bHasSelection; })
+				.OnClicked(this, &SOrbitEditorPanel::OnDeleteOrbitClicked)
+			]
 		]
-		// 列表（滚动，限高）
+		// 列表（滚动；固定 4 条高度：背景恒定不随条目数抖动，超出滚动）
 		+ SVerticalBox::Slot().AutoHeight()
 		[
 			SNew(SBox)
-			.MaxDesiredHeight(120.f)
+			.HeightOverride(104.f)   // 4 × 行高(≈26)：行高含 ContentPadding 与 slot 间距，可按需微调
 			[
 				SNew(SScrollBox)
 				+ SScrollBox::Slot()
@@ -462,13 +495,6 @@ TSharedRef<SWidget> SOrbitEditorPanel::BuildOrbitListSection()
 					SAssignNew(OrbitListContainer, SVerticalBox)
 				]
 			]
-		]
-		// 删除
-		+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
-		[
-			SNew(SButton)
-			.Text(LOCTEXT("DeleteOrbit", "删除选中"))
-			.OnClicked(this, &SOrbitEditorPanel::OnDeleteOrbitClicked)
 		];
 }
 
@@ -478,7 +504,7 @@ TSharedRef<SWidget> SOrbitEditorPanel::MakeParamRow(const FText& Label, const TS
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
 		[
 			SNew(SBox)
-			.WidthOverride(80.f)
+			.WidthOverride(100.f)
 			[
 				SNew(STextBlock).Text(Label)
 			]
@@ -491,57 +517,101 @@ TSharedRef<SWidget> SOrbitEditorPanel::MakeParamRow(const FText& Label, const TS
 
 TSharedRef<SWidget> SOrbitEditorPanel::BuildParamSection()
 {
-	// 圆心（XYZ 数值框）
+	// 圆心（带轴标签：X 红 / Y 绿 / Z 蓝，与 UE 编辑器惯例一致）
 	TSharedRef<SWidget> CenterRow = SNew(SHorizontalBox)
 		+ SHorizontalBox::Slot().FillWidth(1.f).Padding(2.f, 0.f)
 		[
-			SNew(SSpinBox<float>)
-			.MinValue(-1.0e7f).MaxValue(1.0e7f).MinDesiredWidth(70.f)
-			.Value_Lambda([this]() { return bHasSelection ? static_cast<float>(WorkingData.Transform.GetLocation().X) : 0.f; })
-			.OnValueChanged_Lambda([this](float Value) { SetCenterAxis(0, Value); })
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.f, 0.f, 3.f, 0.f)
+			[
+				MakeAxisLabel(TEXT("X"), FLinearColor(0.90f, 0.15f, 0.15f))
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.f)
+			[
+				SNew(SSpinBox<float>)
+				.MinValue(-200000.f).MaxValue(200000.f).MinDesiredWidth(70.f)
+				.MinFractionalDigits(0).MaxFractionalDigits(2)
+				.Delta(10.f)
+				.Value_Lambda([this]() { return bHasSelection ? static_cast<float>(WorkingData.Transform.GetLocation().X) : 0.f; })
+				.OnValueChanged_Lambda([this](float Value) { SetCenterAxis(0, Value); })
+			]
 		]
 		+ SHorizontalBox::Slot().FillWidth(1.f).Padding(2.f, 0.f)
 		[
-			SNew(SSpinBox<float>)
-			.MinValue(-1.0e7f).MaxValue(1.0e7f).MinDesiredWidth(70.f)
-			.Value_Lambda([this]() { return bHasSelection ? static_cast<float>(WorkingData.Transform.GetLocation().Y) : 0.f; })
-			.OnValueChanged_Lambda([this](float Value) { SetCenterAxis(1, Value); })
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.f, 0.f, 3.f, 0.f)
+			[
+				MakeAxisLabel(TEXT("Y"), FLinearColor(0.20f, 0.85f, 0.20f))
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.f)
+			[
+				SNew(SSpinBox<float>)
+				.MinValue(-200000.f).MaxValue(200000.f).MinDesiredWidth(70.f)
+				.MinFractionalDigits(0).MaxFractionalDigits(2)
+				.Delta(10.f)
+				.Value_Lambda([this]() { return bHasSelection ? static_cast<float>(WorkingData.Transform.GetLocation().Y) : 0.f; })
+				.OnValueChanged_Lambda([this](float Value) { SetCenterAxis(1, Value); })
+			]
 		]
 		+ SHorizontalBox::Slot().FillWidth(1.f).Padding(2.f, 0.f)
 		[
-			SNew(SSpinBox<float>)
-			.MinValue(-1.0e7f).MaxValue(1.0e7f).MinDesiredWidth(70.f)
-			.Value_Lambda([this]() { return bHasSelection ? static_cast<float>(WorkingData.Transform.GetLocation().Z) : 0.f; })
-			.OnValueChanged_Lambda([this](float Value) { SetCenterAxis(2, Value); })
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.f, 0.f, 3.f, 0.f)
+			[
+				MakeAxisLabel(TEXT("Z"), FLinearColor(0.25f, 0.45f, 1.00f))
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.f)
+			[
+				SNew(SSpinBox<float>)
+				.MinValue(-200000.f).MaxValue(200000.f).MinDesiredWidth(70.f)
+				.MinFractionalDigits(0).MaxFractionalDigits(2)
+				.Delta(10.f)
+				.Value_Lambda([this]() { return bHasSelection ? static_cast<float>(WorkingData.Transform.GetLocation().Z) : 0.f; })
+				.OnValueChanged_Lambda([this](float Value) { SetCenterAxis(2, Value); })
+			]
 		];
 
-	TSharedRef<SWidget> TiltRow = SNew(SSpinBox<float>)
-		.MinValue(0.f).MaxValue(180.f).MinDesiredWidth(100.f)
-		.Value_Lambda([this]() { return EditingTiltDeg; })
-		.OnValueChanged_Lambda([this](float Value) { SetTiltDegrees(Value); });
-
-	TSharedRef<SWidget> AzimuthRow = SNew(SSpinBox<float>)
+	TSharedRef<SWidget> AngleXRow = SNew(SSpinBox<float>)
 		.MinValue(-180.f).MaxValue(180.f).MinDesiredWidth(100.f)
-		.Value_Lambda([this]() { return EditingAzimuthDeg; })
-		.OnValueChanged_Lambda([this](float Value) { SetAzimuthDegrees(Value); });
+		.MinFractionalDigits(0).MaxFractionalDigits(2)
+		.Value_Lambda([this]() { return EditingAngleXDeg; })
+		.OnValueChanged_Lambda([this](float Value) { SetAngleXDegrees(Value); });
+
+	TSharedRef<SWidget> AngleYRow = SNew(SSpinBox<float>)
+		.MinValue(-180.f).MaxValue(180.f).MinDesiredWidth(100.f)
+		.MinFractionalDigits(0).MaxFractionalDigits(2)
+		.Value_Lambda([this]() { return EditingAngleYDeg; })
+		.OnValueChanged_Lambda([this](float Value) { SetAngleYDegrees(Value); });
+
+	TSharedRef<SWidget> PhaseRow = SNew(SSpinBox<float>)
+		.MinValue(-180.f).MaxValue(180.f).MinDesiredWidth(100.f)
+		.MinFractionalDigits(0).MaxFractionalDigits(2)
+		.Value_Lambda([this]() { return EditingPhaseDeg; })
+		.OnValueChanged_Lambda([this](float Value) { SetPhaseDegrees(Value); });
 
 	TSharedRef<SWidget> OrbitRadiusRow = SNew(SSpinBox<float>)
-		.MinValue(1.f).MaxValue(1.0e7f).MinDesiredWidth(100.f)
+		.MinValue(1000.f).MaxValue(100000.f).MinDesiredWidth(100.f)
+		.MinFractionalDigits(0).MaxFractionalDigits(2)
+		.Delta(100.f)
 		.Value_Lambda([this]() { return bHasSelection ? WorkingData.Radius : 0.f; })
 		.OnValueChanged_Lambda([this](float Value) { SetOrbitRadius(Value); });
 
 	TSharedRef<SWidget> ServiceDistanceRow = SNew(SSpinBox<float>)
-		.MinValue(0.f).MaxValue(1.0e7f).MinDesiredWidth(100.f)
+		.MinValue(100.f).MaxValue(10000.f).MinDesiredWidth(100.f)
+		.MinFractionalDigits(0).MaxFractionalDigits(2)
+		.Delta(10.f)
 		.Value_Lambda([this]() { return bHasSelection ? WorkingData.ServiceDistance : 0.f; })
 		.OnValueChanged_Lambda([this](float Value) { SetServiceDistance(Value); });
 
 	TSharedRef<SWidget> SatelliteCountRow = SNew(SSpinBox<int32>)
-		.MinValue(0).MaxValue(10000).MinDesiredWidth(100.f)
+		.MinValue(1).MaxValue(1000).MinDesiredWidth(100.f)
 		.Value_Lambda([this]() { return bHasSelection ? WorkingData.SatelliteCount : 0; })
 		.OnValueChanged_Lambda([this](int32 Value) { SetSatelliteCount(Value); });
 
 	TSharedRef<SWidget> AngularVelocityRow = SNew(SSpinBox<float>)
-		.MinValue(-360.f).MaxValue(360.f).MinDesiredWidth(100.f)
+		.MinValue(1.f).MaxValue(100.f).MinDesiredWidth(100.f)
+		.MinFractionalDigits(0).MaxFractionalDigits(2)
+		.Delta(1.f)
 		.Value_Lambda([this]() { return bHasSelection ? WorkingData.AngularVelocity : 0.f; })
 		.OnValueChanged_Lambda([this](float Value) { SetAngularVelocity(Value); });
 
@@ -553,13 +623,15 @@ TSharedRef<SWidget> SOrbitEditorPanel::BuildParamSection()
 		];
 
 	return SNew(SVerticalBox)
-		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeParamRow(LOCTEXT("Center", "圆心偏移"), CenterRow) ]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeParamRow(LOCTEXT("Tilt", "平面倾角(°)"), TiltRow) ]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeParamRow(LOCTEXT("Azimuth", "平面方位(°)"), AzimuthRow) ]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeParamRow(LOCTEXT("OrbitRadius", "轨道半径"), OrbitRadiusRow) ]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeParamRow(LOCTEXT("ServiceDistance", "服务距离"), ServiceDistanceRow) ]
+		.IsEnabled_Lambda([this]() { return bHasSelection; })   // 无选中时整块禁用（灰显）
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeParamRow(LOCTEXT("Center", "圆心偏移 (cm)"), CenterRow) ]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeParamRow(LOCTEXT("AngleX", "绕 X 旋转(°)"), AngleXRow) ]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeParamRow(LOCTEXT("AngleY", "绕 Y 旋转(°)"), AngleYRow) ]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeParamRow(LOCTEXT("Phase", "轨道相位(°)"), PhaseRow) ]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeParamRow(LOCTEXT("OrbitRadius", "轨道半径 (cm)"), OrbitRadiusRow) ]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeParamRow(LOCTEXT("ServiceDistance", "服务距离 (cm)"), ServiceDistanceRow) ]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeParamRow(LOCTEXT("SatelliteCount", "卫星数量"), SatelliteCountRow) ]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeParamRow(LOCTEXT("AngularVelocity", "角速度"), AngularVelocityRow) ]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeParamRow(LOCTEXT("AngularVelocity", "角速度 (°/s)"), AngularVelocityRow) ]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeParamRow(LOCTEXT("Direction", "运行方向"), ClockwiseRow) ]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeParamRow(LOCTEXT("VisualColor", "视觉色"), BuildColorRow(true)) ]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)[ MakeParamRow(LOCTEXT("CoverageColor", "覆盖色"), BuildColorRow(false)) ];
@@ -567,27 +639,23 @@ TSharedRef<SWidget> SOrbitEditorPanel::BuildParamSection()
 
 TSharedRef<SWidget> SOrbitEditorPanel::BuildButtonSection()
 {
-	return SNew(SVerticalBox)
-		+ SVerticalBox::Slot().AutoHeight()
-		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().FillWidth(1.f)
-			[
-				SNew(SBox)   // 左侧撑开（按钮靠右）
-			]
-			+ SHorizontalBox::Slot().AutoWidth()
-			[
-				SNew(SButton)
-				.Text(LOCTEXT("Apply", "应用（重建卫星）"))
-				.OnClicked(this, &SOrbitEditorPanel::OnApplyClicked)
-			]
-		]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
+	// 水平盒：左侧提示（FillWidth → 有限宽度，窄时自动换行）+ 右侧应用按钮
+	// （行高由按钮撑起，小字号中文不会下溢出；Fill 槽约束保证文字不会横溢出）
+	return SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center).Padding(0.f, 0.f, 8.f, 0.f)
 		[
 			SNew(STextBlock)
 			.Text(LOCTEXT("Hint", "参数实时预览；应用后卫星位置将重置"))
-			.Font(FCoreStyle::GetDefaultFontStyle("Italic", 9))
-			.ColorAndOpacity(FSlateColor(FLinearColor(0.7f, 0.7f, 0.7f)))
+			// 不用斜体：中文无斜体字形时 Slate 走合成倾斜，度量与绘制不一致会导致文字溢出背景
+			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+			.ColorAndOpacity(FSlateColor(FLinearColor(0.6f, 0.6f, 0.6f)))
+			.AutoWrapText(true)   // 自动换行（在 Fill 槽的有限宽度内折行）
+		]
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+		[
+			SNew(SButton)
+			.Text(LOCTEXT("Apply", "应用（重建卫星）"))
+			.OnClicked(this, &SOrbitEditorPanel::OnApplyClicked)
 		];
 }
 
@@ -618,16 +686,23 @@ TSharedRef<SWidget> SOrbitEditorPanel::MakeOrbitRow(const FName Name)
 			]
 			+ SHorizontalBox::Slot().AutoWidth().Padding(4.f, 0.f).VAlign(VAlign_Center)
 			[
-				SNew(SBox).WidthOverride(16.f).HeightOverride(14.f)
+				// 纯色正方形（无边框；宽度 = 高度；显式 Fill 保证铺满）
+				SNew(SBox).WidthOverride(16.f).HeightOverride(16.f)
+				.HAlign(HAlign_Fill).VAlign(VAlign_Fill)
 				[
-					SNew(SColorBlock).Color(VisualColor)
+					SNew(SImage)
+					.Image(FCoreStyle::Get().GetBrush("WhiteBrush"))
+					.ColorAndOpacity(FSlateColor(VisualColor))
 				]
 			]
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 			[
-				SNew(SBox).WidthOverride(16.f).HeightOverride(14.f)
+				SNew(SBox).WidthOverride(16.f).HeightOverride(16.f)
+				.HAlign(HAlign_Fill).VAlign(VAlign_Fill)
 				[
-					SNew(SColorBlock).Color(CoverageColor)
+					SNew(SImage)
+					.Image(FCoreStyle::Get().GetBrush("WhiteBrush"))
+					.ColorAndOpacity(FSlateColor(CoverageColor))
 				]
 			]
 		];
@@ -635,54 +710,41 @@ TSharedRef<SWidget> SOrbitEditorPanel::MakeOrbitRow(const FName Name)
 
 TSharedRef<SWidget> SOrbitEditorPanel::BuildColorRow(const bool bVisual)
 {
-	TSharedRef<SHorizontalBox> Row = SNew(SHorizontalBox);
-
-	// 当前色块（点击打开取色器）
-	Row->AddSlot().AutoWidth().Padding(2.f, 0.f)
-	[
-		SNew(SButton)
-		.ContentPadding(0.f)
-		.ToolTipText(LOCTEXT("OpenColorPicker", "点击打开取色器"))
-		.OnClicked_Lambda([this, bVisual]() { OpenColorPicker(bVisual); return FReply::Handled(); })
+	// 正方形纯色块（宽 = 高；点击打开取色器）
+	// 外包 AutoWidth 槽：MakeParamRow 的内容槽为 FillWidth（会强制拉伸子控件——WidthOverride 会被忽略）
+	// 用 NoBorder 按钮样式：去掉按钮默认背景的边缘（否则色块两侧会露出深色边界）
+	return SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 		[
-			SNew(SBox).WidthOverride(30.f).HeightOverride(16.f)
+			SNew(SBox)
+			.WidthOverride(20.f)
+			.HeightOverride(20.f)
+			.HAlign(HAlign_Fill)
+			.VAlign(VAlign_Fill)
 			[
-				SNew(SColorBlock)
-				.Color_Lambda([this, bVisual]()
-				{
-					if (!bHasSelection)
-					{
-						return FLinearColor(0.4f, 0.4f, 0.4f);
-					}
-					return bVisual ? WorkingData.VisualColor : WorkingData.CoverageColor;
-				})
-			]
-		]
-	];
-
-	// 调色板快选
-	const int32 PresetCount = USatelliteManagerComponent::GetColorPresetCount();
-	for (int32 Index = 0; Index < PresetCount; ++Index)
-	{
-		const FLinearColor PresetColor = bVisual
-			? USatelliteManagerComponent::GetPresetVisualColor(Index)
-			: USatelliteManagerComponent::GetPresetCoverageColor(Index);
-
-		Row->AddSlot().AutoWidth().Padding(2.f, 0.f)
-		[
-			SNew(SButton)
-			.ContentPadding(0.f)
-			.OnClicked_Lambda([this, Index, bVisual]() { ApplyPresetColor(Index, bVisual); return FReply::Handled(); })
-			[
-				SNew(SBox).WidthOverride(20.f).HeightOverride(16.f)
+				SNew(SButton)
+				.ButtonStyle(FCoreStyle::Get(), "NoBorder")
+				.ContentPadding(0.f)
+				.ToolTipText(LOCTEXT("OpenColorPicker", "点击打开取色器"))
+				.OnClicked_Lambda([this, bVisual]() { OpenColorPicker(bVisual); return FReply::Handled(); })
 				[
-					SNew(SColorBlock).Color(PresetColor)
+					SNew(SImage)
+					.Image(FCoreStyle::Get().GetBrush("WhiteBrush"))
+					.ColorAndOpacity_Lambda([this, bVisual]()
+					{
+						if (!bHasSelection)
+						{
+							return FSlateColor(FLinearColor(0.4f, 0.4f, 0.4f));
+						}
+						return FSlateColor(bVisual ? WorkingData.VisualColor : WorkingData.CoverageColor);
+					})
 				]
 			]
+		]
+		+ SHorizontalBox::Slot().FillWidth(1.f)   // 右侧撑开（色块左对齐）
+		[
+			SNew(SBox)
 		];
-	}
-
-	return Row;
 }
 
 // ==================== UOrbitEditorWidget（UMG 包装） ====================

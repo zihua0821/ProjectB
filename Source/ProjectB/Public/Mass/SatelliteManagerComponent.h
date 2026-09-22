@@ -125,17 +125,6 @@ public:
 	/** 选点评分权重（EQS 迁移版） */
 	const FSatelliteScoringWeights& GetScoringWeights() const { return ScoringWeights; }
 
-	// ---- 调色板（面板/UMG 复用；与默认分配一致） ----
-
-	/** 调色板预设数量 */
-	static int32 GetColorPresetCount();
-
-	/** 调色板预设视觉色（Index 自动取模） */
-	static FLinearColor GetPresetVisualColor(const int32 Index);
-
-	/** 调色板预设覆盖色（Index 自动取模） */
-	static FLinearColor GetPresetCoverageColor(const int32 Index);
-
 	// ---- 轨道编辑接口（运行时数据编辑 → 可视化实时刷新 → ApplyOrbitChanges 重建卫星） ----
 
 	/** 获取运行时轨道数据（可编辑副本） */
@@ -167,9 +156,6 @@ public:
 private:
 	/** 构建运行时轨道数据（从 PlanetConfig->OrbitDefinitions 转换；空则兜底默认轨道） */
 	void BuildRuntimeOrbits();
-
-	/** 服务距离默认值（半格高 = 覆盖带半厚，与旧系统语义一致） */
-	float ComputeDefaultServiceDistance() const;
 
 	/** 为全部运行时轨道创建卫星（汇总实体与初始变换后统一注册渲染） */
 	void CreateAllSatellites();
