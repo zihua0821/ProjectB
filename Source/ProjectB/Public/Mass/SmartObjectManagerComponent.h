@@ -71,6 +71,13 @@ public:
 	/** 释放认领（MarkSlotAsFree） */
 	bool ReleaseClaim(const FSmartObjectClaimHandle& ClaimHandle) const;
 
+	/**
+	 * 认领是否仍归本句柄所有（所有权检查：抢占/失权检测）
+	 * 基于管理器账本（所有认领入口统一走本组件），不依赖引擎查询
+	 * @return true=本句柄仍是该 Slot 的当前认领者
+	 */
+	bool IsClaimValid(const FIntPoint Coords, const int32 SlotIndex, const FSmartObjectClaimHandle& ClaimHandle) const;
+
 	/** 指定坐标 Slot 是否启用（启用 = 对象存在，才参与认领协议） */
 	bool IsSlotEnabled(const FIntPoint Coords, const int32 SlotIndex) const;
 
@@ -117,6 +124,12 @@ private:
 
 	/** 坐标 → 句柄组 映射 */
 	TMap<FIntPoint, FCellSmartObjectEntry> CoordToEntry;
+
+	/**
+	 * 认领账本：每个 Slot 一本（索引 = SlotIndex：0=Plot, 1=Crop；坐标 → 当前认领句柄）
+	 * 抢占时被新句柄覆盖——旧持有者据此检测失权（IsClaimValid）
+	 */
+	mutable TArray<TMap<FIntPoint, FSmartObjectClaimHandle>> ClaimLedger;
 
 	/** 待注册坐标队列（分批处理） */
 	TArray<FIntPoint> PendingCoords;

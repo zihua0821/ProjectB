@@ -1,6 +1,5 @@
 // SatelliteMassFragments.h
-// 卫星 Mass 实体数据定义：轨道运动状态 fragment + 卫星标记
-// 注意：ESatelliteMoveState 从 OrbitMovementComponent.h 迁出至此（卫星数据层统一），旧组件改为 include 本头
+// 卫星 Mass 实体数据定义：轨道运动状态 fragment（状态 / 相位 / 位置覆盖）+ 卫星标记
 #pragma once
 
 #include "CoreMinimal.h"
@@ -15,13 +14,18 @@ class UCellManagerComponent;
 class USmartObjectManagerComponent;
 class USatelliteManagerComponent;
 
-/** 卫星移动状态枚举 */
+/**
+ * 卫星状态：六阶段统一状态（离轨作业方案 v1.0；唯一状态字段）
+ */
 UENUM(BlueprintType)
-enum class ESatelliteMoveState : uint8
+enum class ESatelliteState : uint8
 {
-	Idle             UMETA(DisplayName = "闲置"),
-	MovingToTarget   UMETA(DisplayName = "移动到目标"),
-	Paused           UMETA(DisplayName = "暂停")
+	Cruise        UMETA(DisplayName = "巡航"),
+	Depart        UMETA(DisplayName = "待发"),
+	Approach      UMETA(DisplayName = "离轨飞行"),
+	Work          UMETA(DisplayName = "悬停作业"),
+	AwaitReturn   UMETA(DisplayName = "待回"),
+	Return        UMETA(DisplayName = "回轨飞行")
 };
 
 /**
@@ -38,13 +42,9 @@ struct PROJECTB_API FMassOrbitFragment : public FMassFragment
 	UPROPERTY(VisibleAnywhere, Category = "Orbit")
 	FName OrbitName = NAME_None;
 
-	/** 当前相位角（度） */
+	/** 轨道相位角（度；始终按 ω 推进——巡航位置基准与回轨依据；唯一相位字段） */
 	UPROPERTY(VisibleAnywhere, Category = "Orbit")
-	float CurrentAngle = 0.0f;
-
-	/** 目标角度（度） */
-	UPROPERTY(VisibleAnywhere, Category = "Orbit")
-	float TargetAngle = 0.0f;
+	float VirtualPhase = 0.0f;
 
 	/** 角速度（度/秒） */
 	UPROPERTY(VisibleAnywhere, Category = "Orbit")
@@ -54,9 +54,19 @@ struct PROJECTB_API FMassOrbitFragment : public FMassFragment
 	UPROPERTY(VisibleAnywhere, Category = "Orbit")
 	bool bClockwise = false;
 
-	/** 移动状态 */
+	// ---- 离轨作业（方案 v1.0）：状态与位置覆盖 ----
+
+	/** 卫星状态（唯一状态字段；各任务在 EnterState 时写入） */
 	UPROPERTY(VisibleAnywhere, Category = "Orbit")
-	ESatelliteMoveState MoveState = ESatelliteMoveState::Idle;
+	ESatelliteState State = ESatelliteState::Cruise;
+
+	/** 位置覆盖标志（离轨/悬停作业期间为 true；渲染同步优先使用覆盖位置） */
+	UPROPERTY(VisibleAnywhere, Category = "Orbit")
+	bool bOverrideLocation = false;
+
+	/** 覆盖位置（世界/星球本地坐标；任务每帧写） */
+	UPROPERTY(VisibleAnywhere, Category = "Orbit")
+	FVector OverrideLocation = FVector::ZeroVector;
 };
 
 /** 卫星实体标记（空 Tag，用于处理器/查询过滤） */
@@ -145,5 +155,42 @@ struct PROJECTB_API FMassSatelliteTaskFragment : public FMassFragment
 	/** 目标操作类型（选点任务写入，执行任务读取；TEnumAsByte 包装 unscoped 枚举以满足 UHT 规则） */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
 	TEnumAsByte<EEditMode> TargetEditMode = EEditMode::None;
+
+	// ---- 离轨作业（方案 v1.0）：作业队列与飞行状态 ----
+
+	/** 作业队列（格内多操作；选点任务构建；标准 FIFO 出队，无索引） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	TArray<TEnumAsByte<EEditMode>> WorkQueue;
+
+	/**
+	 * 队列各操作的认领句柄（与 WorkQueue 一一对应；无需认领的项为 InvalidHandle）
+	 * 认领于选点时一次完成（同 Slot 的多项共享同一句柄）；逐项出队时同步移除
+	 */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	TArray<FSmartObjectClaimHandle> ClaimHandles;
+
+	/** 飞行起点快照（Fly 开始瞬间的位置） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	FVector PhaseStartLocation = FVector::ZeroVector;
+
+	/** 飞行终点（离轨=悬停点 / 回轨=入轨点；起飞时算好——路径参数一次算好） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	FVector PhaseEndLocation = FVector::ZeroVector;
+
+	/** 贝塞尔控制点 1（起飞时算好） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	FVector PhaseControlPoint1 = FVector::ZeroVector;
+
+	/** 贝塞尔控制点 2（起飞时算好） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	FVector PhaseControlPoint2 = FVector::ZeroVector;
+
+	/** 飞行已进行时间（秒） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	float PhaseElapsed = 0.0f;
+
+	/** 飞行总时长（秒；路径长度 / 轨道线速度） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	float PhaseDuration = 0.0f;
 };
 

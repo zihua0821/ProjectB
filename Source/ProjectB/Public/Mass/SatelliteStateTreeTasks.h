@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "MassStateTreeTypes.h"   // FMassStateTreeTaskBase
+#include "SmartObjectRuntime.h"    // FSmartObjectClaimHandle（认领句柄）
 #include "SatelliteStateTreeTasks.generated.h"
 
 /**
@@ -40,24 +41,95 @@ struct PROJECTB_API FSatelliteSelectTargetTask : public FMassStateTreeTaskBase
 };
 
 USTRUCT()
-struct FSatelliteMoveToTargetTaskInstanceData
+struct FSatelliteApproachTaskInstanceData
 {
 	GENERATED_BODY()
 };
 
 /**
- * 移动等待任务（MoveToTarget 状态）
- * 等待移动处理器到达目标（MoveState=Paused）
- * @return Succeeded=已到达；Running=移动中
+ * 离轨飞行任务（Approach 状态）
+ * EnterState：路径参数一次算好（起点/终点/控制点/时长；贝塞尔）→ 开启位置覆盖
+ * Tick：每帧曲线求值 → 写覆盖位置；到达检查所有权（失权 → Failed，供状态树跳 AwaitReturn）
+ * @return Succeeded=到达悬停点（且所有权有效）；Failed=失权/异常；Running=飞行中
+ * 注：替代旧名 Move To Target——状态树资产中的任务引用需重新指定
  */
-USTRUCT(meta = (DisplayName = "Satellite Move To Target"))
-struct PROJECTB_API FSatelliteMoveToTargetTask : public FMassStateTreeTaskBase
+USTRUCT(meta = (DisplayName = "Satellite Approach"))
+struct PROJECTB_API FSatelliteApproachTask : public FMassStateTreeTaskBase
 {
 	GENERATED_BODY()
 
-	using FInstanceDataType = FSatelliteMoveToTargetTaskInstanceData;
+	using FInstanceDataType = FSatelliteApproachTaskInstanceData;
 
 	virtual const UStruct* GetInstanceDataType() const override { return FInstanceDataType::StaticStruct(); }
+	virtual EStateTreeRunStatus EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const override;
+	virtual EStateTreeRunStatus Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const override;
+};
+
+USTRUCT()
+struct FSatelliteDepartWaitTaskInstanceData
+{
+	GENERATED_BODY()
+};
+
+/**
+ * 待发任务（Depart 状态）
+ * 等待“最近点”时机（相位方向与悬停点方位在轨道平面内对齐）→ Succeeded
+ * 每帧做所有权检查（Depart → Approach 转换点）：失权 → Failed（供状态树回 Cruise）
+ * 不控制运动（卫星照常巡航）
+ */
+USTRUCT(meta = (DisplayName = "Satellite Depart Wait"))
+struct PROJECTB_API FSatelliteDepartWaitTask : public FMassStateTreeTaskBase
+{
+	GENERATED_BODY()
+
+	using FInstanceDataType = FSatelliteDepartWaitTaskInstanceData;
+
+	virtual const UStruct* GetInstanceDataType() const override { return FInstanceDataType::StaticStruct(); }
+	virtual EStateTreeRunStatus Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const override;
+};
+
+USTRUCT()
+struct FSatelliteReturnWaitTaskInstanceData
+{
+	GENERATED_BODY()
+};
+
+/**
+ * 待回任务（AwaitReturn 状态）
+ * 保持悬停（位置覆盖由作业阶段持有）；等到"虚拟相位方向与悬停点方位对齐"（最近点）→ Succeeded
+ */
+USTRUCT(meta = (DisplayName = "Satellite Return Wait"))
+struct PROJECTB_API FSatelliteReturnWaitTask : public FMassStateTreeTaskBase
+{
+	GENERATED_BODY()
+
+	using FInstanceDataType = FSatelliteReturnWaitTaskInstanceData;
+
+	virtual const UStruct* GetInstanceDataType() const override { return FInstanceDataType::StaticStruct(); }
+	virtual EStateTreeRunStatus Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const override;
+};
+
+USTRUCT()
+struct FSatelliteReturnTaskInstanceData
+{
+	GENERATED_BODY()
+};
+
+/**
+ * 回轨飞行任务（Return 状态）
+ * EnterState：路径参数（起点=悬停点；终点=入轨点初值；控制点；时长估算）
+ * Tick：动态终点（每帧 = 虚拟相位点，保证入轨连续无跳变）→ 贝塞尔求值；
+ *       到达（Alpha≥1）：清位置覆盖 + State=Cruise → Succeeded
+ */
+USTRUCT(meta = (DisplayName = "Satellite Return"))
+struct PROJECTB_API FSatelliteReturnTask : public FMassStateTreeTaskBase
+{
+	GENERATED_BODY()
+
+	using FInstanceDataType = FSatelliteReturnTaskInstanceData;
+
+	virtual const UStruct* GetInstanceDataType() const override { return FInstanceDataType::StaticStruct(); }
+	virtual EStateTreeRunStatus EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const override;
 	virtual EStateTreeRunStatus Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const override;
 };
 
@@ -66,17 +138,21 @@ struct FSatelliteExecuteActionTaskInstanceData
 {
 	GENERATED_BODY()
 
-	/** 作业开始时间（秒） */
+	/** 当前项开始时间（秒） */
 	double ActionStartTime = 0.0;
 
-	/** 作业时长（秒；取自智能对象行为定义，缺省用默认值） */
+	/** 当前项作业时长（秒；取自该项认领的行为定义，缺省用默认值） */
 	float ActionDuration = 0.f;
+
+	/** 本次出勤认领句柄快照（去重；队列完成时统一释放） */
+	TArray<FSmartObjectClaimHandle> UniqueClaimHandles;
 };
 
 /**
- * 执行作业任务（Execute 状态）
- * EnterState：读行为定义 Duration（DA_FarmCell；无认领则用缺省）→ 记录开始时间 → Running（作业停留）
- * Tick：倒计时结束 → 执行操作（CellManager::ExecuteFarmAction）→ 释放认领 → 清理任务数据 → Succeeded
+ * 悬停作业任务（Work 状态）
+ * EnterState：写悬停点（位置覆盖）→ 快照认领句柄 → 开始首项（读行为时长）
+ * Tick：倒计时 → 执行队首操作 → 出队 → 队列空则释放全部认领、清理并 Succeeded；
+ *       否则所有权检查（失权 → Failed）后开始下一项
  */
 USTRUCT(meta = (DisplayName = "Satellite Execute Action"))
 struct PROJECTB_API FSatelliteExecuteActionTask : public FMassStateTreeTaskBase

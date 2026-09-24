@@ -52,8 +52,11 @@ void USatelliteRenderSyncProcessor::Execute(FMassEntityManager& EntityManager, F
 				continue;
 			}
 
-			// 角度 → 世界位置（与注册时同一公式）
-			const FVector WorldLocation = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(Shared.OrbitTransform, Shared.Radius, OrbitFragments[Index].CurrentAngle);
+			// 位置来源：离轨/悬停期间用任务写入的覆盖位置；否则由轨道角度算得
+			const FMassOrbitFragment& Orbit = OrbitFragments[Index];
+			const FVector WorldLocation = Orbit.bOverrideLocation
+				? Orbit.OverrideLocation
+				: UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(Shared.OrbitTransform, Shared.Radius, Orbit.VirtualPhase);
 			InstanceIds.Add(RenderFragments[Index].InstanceId);
 			NewTransforms.Add(FTransform(FRotator::ZeroRotator, WorldLocation, ScaleVector));
 		}

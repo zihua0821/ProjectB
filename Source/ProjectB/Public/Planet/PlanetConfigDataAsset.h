@@ -63,4 +63,11 @@ public:
 	meta = (DisplayName = "轨道定义列表"))
 	TArray<FOrbitDefinition> OrbitDefinitions;
 
+	// ==================== 卫星作业配置 ====================
+
+	// 悬停高度（cm；离轨作业时悬停点距球面的固定距离）
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Planet|Work",
+	meta = (DisplayName = "悬停高度(cm)", ClampMin = "0.0"))
+	float HoverHeight = 1000.0f;
+
 };

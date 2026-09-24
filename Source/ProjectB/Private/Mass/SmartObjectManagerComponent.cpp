@@ -29,6 +29,9 @@ void USmartObjectManagerComponent::Initialize(UCellManagerComponent* InCellManag
 		return;
 	}
 
+	// 认领账本：两个 Slot（0=Plot / 1=Crop）
+	ClaimLedger.SetNum(2);
+
 	// 收集全部坐标进入待注册队列
 	PendingCoords = CellManager->GetAllCoords();
 	PendingIndex = 0;
@@ -253,8 +256,15 @@ FSmartObjectClaimHandle USmartObjectManagerComponent::TryClaimSlot(const FIntPoi
 		return FSmartObjectClaimHandle::InvalidHandle;
 	}
 
-	// 认领失败（未启用/已被占用）时引擎返回无效句柄
-	return SmartObjectSubsystem->MarkSlotAsClaimed(SlotHandle, Priority, FConstStructView());
+	// 认领失败（未启用/已被同级或更高优先级占用）时引擎返回无效句柄
+	const FSmartObjectClaimHandle ClaimHandle = SmartObjectSubsystem->MarkSlotAsClaimed(SlotHandle, Priority, FConstStructView());
+
+	// 账本：成功则记录（抢占时新句柄覆盖旧值 → 旧持有者检测失权；账本未初始化/越界时跳过）
+	if (ClaimHandle.IsValid() && ClaimLedger.IsValidIndex(SlotIndex))
+	{
+		ClaimLedger[SlotIndex].Add(Coords, ClaimHandle);
+	}
+	return ClaimHandle;
 }
 
 bool USmartObjectManagerComponent::ReleaseClaim(const FSmartObjectClaimHandle& ClaimHandle) const
@@ -263,7 +273,30 @@ bool USmartObjectManagerComponent::ReleaseClaim(const FSmartObjectClaimHandle& C
 	{
 		return false;
 	}
+
+	// 账本清理：仅清除与句柄相等的项（避免误清已被新认领者覆盖的值）
+	for (int32 SlotIndex = 0; SlotIndex < ClaimLedger.Num(); ++SlotIndex)
+	{
+		for (auto It = ClaimLedger[SlotIndex].CreateIterator(); It; ++It)
+		{
+			if (It.Value() == ClaimHandle)
+			{
+				It.RemoveCurrent();
+			}
+		}
+	}
 	return SmartObjectSubsystem->MarkSlotAsFree(ClaimHandle);
+}
+
+bool USmartObjectManagerComponent::IsClaimValid(const FIntPoint Coords, const int32 SlotIndex, const FSmartObjectClaimHandle& ClaimHandle) const
+{
+	// 无效句柄或账本未就绪/越界：视为无需认领（调用方自行处理）
+	if (!ClaimHandle.IsValid() || !ClaimLedger.IsValidIndex(SlotIndex))
+	{
+		return false;
+	}
+	const FSmartObjectClaimHandle* Current = ClaimLedger[SlotIndex].Find(Coords);
+	return Current != nullptr && (*Current == ClaimHandle);
 }
 
 bool USmartObjectManagerComponent::IsSlotEnabled(const FIntPoint Coords, const int32 SlotIndex) const

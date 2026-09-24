@@ -72,4 +72,46 @@ public:
 	 * 选点系统 / 可视化 / 编辑预览共用此判定（唯一权威）
 	 */
 	static bool IsPointInOrbitCoverage(const FVector& Point, const FVector& OrbitCenter, const FVector& OrbitNormal, const float ServiceDistance);
+
+	// ==================== 离轨作业：路径函数（纯算法；方案见 docs/Mass/卫星离轨作业_需求方案.md v1.0） ====================
+
+	/*
+	 * 轨道悬停点（现算，不落存储）：格子中心球面点沿法线外移 HoverHeight
+	 * @param CellCenter 格子中心（球心为原点的本地坐标）
+	 * @param PlanetRadius 星球半径（cm）
+	 * @param HoverHeight 悬停高度（cm；来自 PlanetConfigDataAsset）
+	 */
+	static FVector ComputeOrbitHoverPoint(const FVector& CellCenter, const float PlanetRadius, const float HoverHeight);
+
+	/*
+	 * 轨道切线方向（卫星运动方向；与 ComputeOrbitWorldPosition 同一参数化）
+	 * @param bClockwise true=顺时针（角度递减，方向取反）
+	 */
+	static FVector ComputeOrbitTangent(const FTransform& OrbitTransform, const float AngleDeg, const bool bClockwise);
+
+	/*
+	 * 最近点判据：当前相位方向与目标方向在轨道平面内对齐（夹角 ≤ ToleranceDeg）
+	 * 此时“相位点 ↔ 目标”距离最小（每圈一次）——离轨/回轨的行动时机
+	 */
+	static bool IsAtNearestPhase(const FTransform& OrbitTransform, const float CurrentAngleDeg, const FVector& TargetLocation, const float ToleranceDeg = 2.0f);
+
+	/*
+	 * 三次贝塞尔求值（Alpha 内部经 smoothstep 缓动）
+	 */
+	static FVector EvaluateCubicBezier(const FVector& P0, const FVector& P1, const FVector& P2, const FVector& P3, const float Alpha);
+
+	/*
+	 * 轨道转场控制点组装（d = ControlFactor × |Start→End|）
+	 * 离轨（bOutbound=true）：P1 = 起点 + 轨道切向 × d；P2 = 终点 + 终点法线 × d（垂直下降）
+	 * 回轨（bOutbound=false）：P1 = 起点 + 起点法线 × d（垂直上升）；P2 = 终点 + 轨道切向 × d（切向入轨）
+	 */
+	static void BuildOrbitTransferControlPoints(const FVector& StartPoint, const FVector& EndPoint, const FVector& OrbitTangent,
+		const bool bOutbound, const float ControlFactor, FVector& OutP1, FVector& OutP2);
+
+	/*
+	 * 路径不穿球采样校验（含端点；纯算法兜底）
+	 * @return true=全程半径 ≥ MinRadius - Tolerance
+	 */
+	static bool ValidateTransferPath(const FVector& P0, const FVector& P1, const FVector& P2, const FVector& P3,
+		const float MinRadius, const int32 SampleCount = 16, const float Tolerance = 1.0f);
 };

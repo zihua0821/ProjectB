@@ -96,3 +96,92 @@ bool UPlanetBlueprintFunctionLibrary::IsPointInOrbitCoverage(const FVector& Poin
 {
 	return ComputeDistanceToOrbitPlane(Point, OrbitCenter, OrbitNormal) <= ServiceDistance;
 }
+
+// ==================== 离轨作业：路径函数（纯算法） ====================
+
+FVector UPlanetBlueprintFunctionLibrary::ComputeOrbitHoverPoint(const FVector& CellCenter, const float PlanetRadius, const float HoverHeight)
+{
+	// 球心为原点约定：法线方向 = 归一化位置；悬停点 = 球面点 + 法线 × 悬停高度
+	const FVector Radial = CellCenter.GetSafeNormal();
+	return Radial * (PlanetRadius + HoverHeight);
+}
+
+FVector UPlanetBlueprintFunctionLibrary::ComputeOrbitTangent(const FTransform& OrbitTransform, const float AngleDeg, const bool bClockwise)
+{
+	// 与 ComputeOrbitWorldPosition 同一参数化：局部 (R cosθ, R sinθ, 0)
+	// 单位切向（θ 增大方向）的局部形式 = (-sinθ, cosθ, 0)
+	const float RadAngle = FMath::DegreesToRadians(AngleDeg);
+	const FVector LocalTangent(-FMath::Sin(RadAngle), FMath::Cos(RadAngle), 0.0f);
+
+	// 顺时针 = 角度递减 → 运动方向取反
+	const float Direction = bClockwise ? -1.0f : 1.0f;
+	return OrbitTransform.TransformVectorNoScale(LocalTangent * Direction).GetSafeNormal();
+}
+
+bool UPlanetBlueprintFunctionLibrary::IsAtNearestPhase(const FTransform& OrbitTransform, const float CurrentAngleDeg, const FVector& TargetLocation, const float ToleranceDeg)
+{
+	const FVector OrbitCenter = OrbitTransform.GetLocation();
+	const FVector OrbitNormal = OrbitTransform.GetRotation().GetAxisZ();
+
+	// 当前相位方向（平面内单位径向）
+	const float RadAngle = FMath::DegreesToRadians(CurrentAngleDeg);
+	const FVector CurrentDir = OrbitTransform.TransformVectorNoScale(FVector(FMath::Cos(RadAngle), FMath::Sin(RadAngle), 0.0f)).GetSafeNormal();
+
+	// 目标方向投影到轨道平面
+	const FVector ToTarget = TargetLocation - OrbitCenter;
+	const FVector TargetDir = (ToTarget - FVector::DotProduct(ToTarget, OrbitNormal) * OrbitNormal).GetSafeNormal();
+
+	// 退化：目标在轨道轴上（投影为零）——任意相位等距，视为到达
+	if (TargetDir.IsNearlyZero())
+	{
+		return true;
+	}
+
+	const float CosAngle = FVector::DotProduct(CurrentDir, TargetDir);
+	return CosAngle >= FMath::Cos(FMath::DegreesToRadians(ToleranceDeg));
+}
+
+FVector UPlanetBlueprintFunctionLibrary::EvaluateCubicBezier(const FVector& P0, const FVector& P1, const FVector& P2, const FVector& P3, const float Alpha)
+{
+	const float T = FMath::Clamp(Alpha, 0.0f, 1.0f);
+	const float Smoothed = T * T * (3.0f - 2.0f * T);   // smoothstep 缓动
+	const float U = 1.0f - Smoothed;
+	return U * U * U * P0 + 3.0f * U * U * Smoothed * P1 + 3.0f * U * Smoothed * Smoothed * P2 + Smoothed * Smoothed * Smoothed * P3;
+}
+
+void UPlanetBlueprintFunctionLibrary::BuildOrbitTransferControlPoints(const FVector& StartPoint, const FVector& EndPoint, const FVector& OrbitTangent,
+	const bool bOutbound, const float ControlFactor, FVector& OutP1, FVector& OutP2)
+{
+	const float ControlDistance = FMath::Max(0.0f, ControlFactor) * FVector::Dist(StartPoint, EndPoint);
+	const FVector StartRadial = StartPoint.GetSafeNormal();   // 起点法线方向
+	const FVector EndRadial = EndPoint.GetSafeNormal();       // 终点法线方向
+
+	if (bOutbound)
+	{
+		// 离轨：出发沿轨道切向；到达沿终点法线垂直下降（从格子上方落下）
+		OutP1 = StartPoint + OrbitTangent * ControlDistance;
+		OutP2 = EndPoint + EndRadial * ControlDistance;
+	}
+	else
+	{
+		// 回轨：起点垂直上升；末端沿轨道切向切入（入轨切向对齐自然成立）
+		OutP1 = StartPoint + StartRadial * ControlDistance;
+		OutP2 = EndPoint + OrbitTangent * ControlDistance;
+	}
+}
+
+bool UPlanetBlueprintFunctionLibrary::ValidateTransferPath(const FVector& P0, const FVector& P1, const FVector& P2, const FVector& P3,
+	const float MinRadius, const int32 SampleCount, const float Tolerance)
+{
+	const int32 Steps = FMath::Max(2, SampleCount);
+	for (int32 Index = 0; Index <= Steps; ++Index)
+	{
+		const float Alpha = static_cast<float>(Index) / static_cast<float>(Steps);
+		const FVector Position = EvaluateCubicBezier(P0, P1, P2, P3, Alpha);
+		if (Position.Size() < MinRadius - Tolerance)
+		{
+			return false;
+		}
+	}
+	return true;
+}

@@ -9,7 +9,7 @@
 /**
  * 卫星渲染同步处理器
  * 每帧同步卫星实体状态到 ISM 渲染：
- * - 读 FMassOrbitFragment.CurrentAngle → 计算轨道世界位置 → BatchUpdateInstancesTransforms
+ * - 读 FMassOrbitFragment.VirtualPhase / 位置覆盖 → 计算世界位置 → BatchUpdateInstancesTransforms
  * - 轨道几何 / Mesh / 缩放来自 FMassSatelliteSharedFragment（ConstShared）
  * - 游戏线程执行（ISM 增删改仅限游戏线程，见 ISMManager 线程模型约定）
  */

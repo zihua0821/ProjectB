@@ -183,13 +183,11 @@ void USatelliteManagerComponent::CreateSatellitesForOrbit(const FRuntimeOrbitDat
 	{
 		FMassOrbitFragment& OrbitFragment = EntityManager.GetFragmentDataChecked<FMassOrbitFragment>(Entities[Index]);
 		OrbitFragment.OrbitName = Orbit.OrbitName;
-		OrbitFragment.CurrentAngle = 360.0f * static_cast<float>(Index) / static_cast<float>(Entities.Num());
-		OrbitFragment.TargetAngle = OrbitFragment.CurrentAngle;
+		OrbitFragment.VirtualPhase = 360.0f * static_cast<float>(Index) / static_cast<float>(Entities.Num());   // 均分相位
 		OrbitFragment.AngularVelocity = Orbit.AngularVelocity;
 		OrbitFragment.bClockwise = Orbit.bClockwise;
-		OrbitFragment.MoveState = ESatelliteMoveState::Idle;
 
-		const FVector WorldLocation = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(Orbit.Transform, Orbit.Radius, OrbitFragment.CurrentAngle);
+		const FVector WorldLocation = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(Orbit.Transform, Orbit.Radius, OrbitFragment.VirtualPhase);
 		OutTransforms.Add(FTransform(FRotator::ZeroRotator, WorldLocation, FVector(SatelliteScale)));
 	}
 

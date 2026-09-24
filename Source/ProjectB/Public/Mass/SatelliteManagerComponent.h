@@ -125,6 +125,9 @@ public:
 	/** 选点评分权重（EQS 迁移版） */
 	const FSatelliteScoringWeights& GetScoringWeights() const { return ScoringWeights; }
 
+	/** 贝塞尔控制点比例（只读；离轨/回轨任务读取） */
+	float GetTransferControlFactor() const { return TransferControlFactor; }
+
 	// ---- 轨道编辑接口（运行时数据编辑 → 可视化实时刷新 → ApplyOrbitChanges 重建卫星） ----
 
 	/** 获取运行时轨道数据（可编辑副本） */
@@ -210,6 +213,10 @@ private:
 	/** 卫星缩放倍率（应用于网格体） */
 	UPROPERTY(EditDefaultsOnly, Category = "Satellite", meta = (DisplayName = "卫星缩放", ClampMin = "0.01"))
 	float SatelliteScale = 10.0f;
+
+	/** 贝塞尔控制点比例 k（离轨/回轨转场：d = k × 起终点距离） */
+	UPROPERTY(EditDefaultsOnly, Category = "Satellite", meta = (DisplayName = "转场控制点比例", ClampMin = "0.05", ClampMax = "1.0"))
+	float TransferControlFactor = 0.35f;
 
 	// ---- 运行时 ----
 
