@@ -2,6 +2,9 @@
 #include "Mass/SmartObjectManagerComponent.h"
 
 #include "SmartObjectDefinition.h"
+#include "DrawDebugHelpers.h"                        // 槽位球调试可视化
+#include "Mass/SatelliteManagerComponent.h"        // FRuntimeOrbitData（轨道数据定义）
+#include "Planet/PlanetBlueprintFunctionLibrary.h" // ComputeOrbitWorldPosition（槽位位置）
 #include "SmartObjectSubsystem.h"
 #include "Crops/CropData.h"             // EEditMode（操作模式 → Slot 映射）
 #include "Farm/CellManagerComponent.h"
@@ -72,29 +75,34 @@ void USmartObjectManagerComponent::TickComponent(float DeltaTime, ELevelTick Tic
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	if (bRegistrationDone || !SmartObjectSubsystem || PendingCoords.Num() == 0)
+	if (!SmartObjectSubsystem)
 	{
 		return;
 	}
 
-	// 分批注册：每帧处理 BatchSize 个
-	const int32 EndIndex = FMath::Min(PendingIndex + BatchSize, PendingCoords.Num());
-	for (; PendingIndex < EndIndex; ++PendingIndex)
+	// 注册阶段：分批处理（每帧 BatchSize 个）
+	if (!bRegistrationDone && PendingCoords.Num() > 0)
 	{
-		if (RegisterCell(PendingCoords[PendingIndex]))
+		const int32 EndIndex = FMath::Min(PendingIndex + BatchSize, PendingCoords.Num());
+		for (; PendingIndex < EndIndex; ++PendingIndex)
 		{
-			++RegistrationSuccessCount;
+			if (RegisterCell(PendingCoords[PendingIndex]))
+			{
+				++RegistrationSuccessCount;
+			}
 		}
+
+		if (PendingIndex >= PendingCoords.Num())
+		{
+			bRegistrationDone = true;
+			UE_LOG(LogTemp, Log, TEXT("[SmartObjectManager] Registration done: %d/%d registered (%d failed)"),
+				RegistrationSuccessCount, PendingCoords.Num(), PendingCoords.Num() - RegistrationSuccessCount);
+		}
+		return;
 	}
 
-	if (PendingIndex >= PendingCoords.Num())
-	{
-		bRegistrationDone = true;
-		// 运行时停 Tick 必须用 SetTickFunctionEnable（改 bCanEverTick 只在注册时生效，不注销已注册 Tick）
-		SetComponentTickEnabled(false);
-		UE_LOG(LogTemp, Log, TEXT("[SmartObjectManager] Registration done: %d/%d registered (%d failed)"),
-			RegistrationSuccessCount, PendingCoords.Num(), PendingCoords.Num() - RegistrationSuccessCount);
-	}
+	// 注册完成阶段：驱动轨道槽位随相位旋转（智能对象实例变换同步）
+	UpdateOrbitSlots(DeltaTime);
 }
 
 bool USmartObjectManagerComponent::RegisterCell(const FIntPoint Coords)
@@ -308,6 +316,207 @@ bool USmartObjectManagerComponent::IsSlotEnabled(const FIntPoint Coords, const i
 	}
 	const FSmartObjectSlotView SlotView = SmartObjectSubsystem->GetSlotView(SlotHandle);
 	return SlotView.IsEnabled();
+}
+
+// ---- 轨道槽位（回轨槽位：与格子同构的智能对象实例） ----
+
+void USmartObjectManagerComponent::RegisterOrbitSlots(const TArray<FRuntimeOrbitData>& Orbits)
+{
+	if (!SmartObjectSubsystem || !OrbitSlotDefinition)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[SmartObjectManager] Orbit slots skipped: subsystem or OrbitSlotDefinition missing"));
+		return;
+	}
+
+	// 重建前清理旧表（旧实例由引擎生命周期管理，无需手动销毁）
+	OrbitSlots.Reset();
+
+	for (const FRuntimeOrbitData& Orbit : Orbits)
+	{
+		const int32 SlotCount = FMath::Max(0, Orbit.SatelliteCount);
+		if (SlotCount == 0)
+		{
+			continue;
+		}
+
+		FOrbitSlotEntry Entry;
+		// 轨道几何（槽位位置随相位推进：槽 i = 基准相位 + 360×i/N）
+		Entry.OrbitTransform = Orbit.Transform;
+		Entry.OrbitRadius = Orbit.Radius;
+		Entry.AngularVelocity = Orbit.AngularVelocity;
+		Entry.bClockwise = Orbit.bClockwise;
+		Entry.CurrentPhaseDeg = 0.f;   // 槽 0 起始相位（与卫星初始均分一致）
+		Entry.ObjectHandles.Reserve(SlotCount);
+		Entry.SlotWorldPositions.Reserve(SlotCount);
+		Entry.SlotHandles.Reserve(SlotCount);
+
+		for (int32 SlotIndex = 0; SlotIndex < SlotCount; ++SlotIndex)
+		{
+			// 槽位 = 均分相位的固定点（与卫星初始相位分配一致）
+			const float SlotPhaseDeg = 360.0f * static_cast<float>(SlotIndex) / static_cast<float>(SlotCount);
+			const FVector SlotWorldPosition = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(Orbit.Transform, Orbit.Radius, SlotPhaseDeg);
+			const FTransform SlotTransform(FRotator::ZeroRotator, SlotWorldPosition);
+
+			const FSmartObjectHandle ObjectHandle = SmartObjectSubsystem->CreateSmartObject(
+				*OrbitSlotDefinition, SlotTransform, FConstStructView());
+			if (!ObjectHandle.IsValid())
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[SmartObjectManager] Orbit slot create failed: %s[%d]"), *Orbit.OrbitName.ToString(), SlotIndex);
+				continue;
+			}
+
+			// 单 Slot 定义：微查询捕获 Slot 0
+			FSmartObjectRequest Request;
+			Request.QueryBox = FBox::BuildAABB(SlotWorldPosition, FVector(1.0f));
+			TArray<FSmartObjectRequestResult> Results;
+			FSmartObjectSlotHandle CapturedSlot;
+			if (SmartObjectSubsystem->FindSmartObjects(Request, Results))
+			{
+				for (const FSmartObjectRequestResult& Result : Results)
+				{
+					if (Result.SmartObjectHandle == ObjectHandle && Result.SlotHandle.GetSlotIndex() == 0)
+					{
+						CapturedSlot = Result.SlotHandle;
+						break;
+					}
+				}
+			}
+			if (!CapturedSlot.IsValid())
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[SmartObjectManager] Orbit slot capture failed: %s[%d]"), *Orbit.OrbitName.ToString(), SlotIndex);
+				continue;
+			}
+
+			Entry.ObjectHandles.Add(ObjectHandle);
+			Entry.SlotWorldPositions.Add(SlotWorldPosition);
+			Entry.SlotHandles.Add(CapturedSlot);
+		}
+
+		OrbitSlots.Add(Orbit.OrbitName, MoveTemp(Entry));
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[SmartObjectManager] Orbit slots registered: %d orbit(s)"), OrbitSlots.Num());
+}
+
+void USmartObjectManagerComponent::UpdateOrbitSlots(const float DeltaSeconds)
+{
+	if (!SmartObjectSubsystem || OrbitSlots.Num() == 0)
+	{
+		return;
+	}
+
+	for (TPair<FName, FOrbitSlotEntry>& Pair : OrbitSlots)
+	{
+		FOrbitSlotEntry& Entry = Pair.Value;
+		const int32 SlotCount = Entry.SlotHandles.Num();
+		if (SlotCount == 0)
+		{
+			continue;
+		}
+
+		// 相位推进（与卫星同速：槽位随轨道旋转）
+		Entry.CurrentPhaseDeg += (Entry.bClockwise ? -1.0f : 1.0f) * Entry.AngularVelocity * DeltaSeconds;
+		Entry.CurrentPhaseDeg = FMath::Fmod(Entry.CurrentPhaseDeg, 360.0f);
+		if (Entry.CurrentPhaseDeg < 0.0f)
+		{
+			Entry.CurrentPhaseDeg += 360.0f;
+		}
+
+		// 同步槽位世界位置（引擎智能对象实例位置不开放运行时修改，
+		// 槽位坐标由本组件内部缓存提供：近点判定 / 回轨终点 / 未来调试均取此缓存；
+		// 认领机制仅依赖句柄，不受影响）
+		for (int32 SlotIndex = 0; SlotIndex < SlotCount; ++SlotIndex)
+		{
+			const float SlotPhaseDeg = Entry.CurrentPhaseDeg + 360.0f * static_cast<float>(SlotIndex) / static_cast<float>(SlotCount);
+			const FVector SlotWorldPosition = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(Entry.OrbitTransform, Entry.OrbitRadius, SlotPhaseDeg);
+			if (Entry.SlotWorldPositions.IsValidIndex(SlotIndex))
+			{
+				Entry.SlotWorldPositions[SlotIndex] = SlotWorldPosition;
+			}
+
+			// ---- 调试可视化：槽位球（每帧刷新，单帧存活；与卫星同尺寸感）----
+			if (UWorld* World = GetWorld())
+			{
+				DrawDebugSphere(World, SlotWorldPosition, 60.f, 8, FColor::Cyan,
+					/*bPersistent=*/false, /*LifeTime=*/-1.f, /*DepthPriority=*/0, /*Thickness=*/0.f);
+			}
+		}
+	}
+}
+
+int32 USmartObjectManagerComponent::GetOrbitSlotCount(const FName OrbitName) const
+{
+	const FOrbitSlotEntry* Entry = OrbitSlots.Find(OrbitName);
+	return Entry ? Entry->SlotHandles.Num() : 0;
+}
+
+bool USmartObjectManagerComponent::GetOrbitSlotWorldPosition(const FName OrbitName, const int32 SlotIndex, FVector& OutWorldPosition) const
+{
+	const FOrbitSlotEntry* Entry = OrbitSlots.Find(OrbitName);
+	if (!Entry || !Entry->SlotWorldPositions.IsValidIndex(SlotIndex))
+	{
+		return false;
+	}
+	OutWorldPosition = Entry->SlotWorldPositions[SlotIndex];
+	return true;
+}
+
+bool USmartObjectManagerComponent::GetOrbitSlotPhase(const FName OrbitName, const int32 SlotIndex, float& OutPhaseDeg) const
+{
+	const FOrbitSlotEntry* Entry = OrbitSlots.Find(OrbitName);
+	if (!Entry || Entry->SlotHandles.Num() == 0 || SlotIndex < 0)
+	{
+		return false;
+	}
+	const int32 SlotCount = Entry->SlotHandles.Num();
+	if (SlotIndex >= SlotCount)
+	{
+		return false;
+	}
+	OutPhaseDeg = Entry->CurrentPhaseDeg + 360.0f * static_cast<float>(SlotIndex) / static_cast<float>(SlotCount);
+	return true;
+}
+
+bool USmartObjectManagerComponent::GetOrbitSlotWorldPositionByClaim(const FName OrbitName, const FSmartObjectClaimHandle& ClaimHandle, FVector& OutWorldPosition) const
+{
+	if (!ClaimHandle.IsValid())
+	{
+		return false;
+	}
+	const int32 SlotIndex = ResolveSlotIndexByClaim(OrbitName, ClaimHandle);
+	return GetOrbitSlotWorldPosition(OrbitName, SlotIndex, OutWorldPosition);
+}
+
+bool USmartObjectManagerComponent::GetOrbitSlotPhaseByClaim(const FName OrbitName, const FSmartObjectClaimHandle& ClaimHandle, float& OutPhaseDeg) const
+{
+	if (!ClaimHandle.IsValid())
+	{
+		return false;
+	}
+	const int32 SlotIndex = ResolveSlotIndexByClaim(OrbitName, ClaimHandle);
+	return GetOrbitSlotPhase(OrbitName, SlotIndex, OutPhaseDeg);
+}
+
+int32 USmartObjectManagerComponent::ResolveSlotIndexByClaim(const FName OrbitName, const FSmartObjectClaimHandle& ClaimHandle) const
+{
+	const FOrbitSlotEntry* Entry = OrbitSlots.Find(OrbitName);
+	if (!Entry || !ClaimHandle.SlotHandle.IsValid())
+	{
+		return -1;
+	}
+	// 反查：槽位句柄 → 轨道槽索引（每轨槽数 = 卫星数，量级极小，直接遍历）
+	return Entry->SlotHandles.IndexOfByKey(ClaimHandle.SlotHandle);
+}
+
+FSmartObjectClaimHandle USmartObjectManagerComponent::TryClaimOrbitSlot(const FName OrbitName, const int32 SlotIndex, const ESmartObjectClaimPriority Priority) const
+{
+	const FOrbitSlotEntry* Entry = OrbitSlots.Find(OrbitName);
+	if (!Entry || !Entry->SlotHandles.IsValidIndex(SlotIndex) || !SmartObjectSubsystem)
+	{
+		return FSmartObjectClaimHandle::InvalidHandle;
+	}
+	// 认领失败（已被占）时引擎返回无效句柄（槽位占用情况通过句柄有效性判断）
+	return SmartObjectSubsystem->MarkSlotAsClaimed(Entry->SlotHandles[SlotIndex], Priority, FConstStructView());
 }
 
 int32 USmartObjectManagerComponent::GetSlotIndexForEditMode(const EEditMode EditMode)

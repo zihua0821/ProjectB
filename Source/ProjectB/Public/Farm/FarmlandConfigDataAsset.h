@@ -212,6 +212,11 @@ public:
 			  meta = (DisplayName = "每次施肥肥力增加", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
 	float IncreasedFertilityWithEachFertilization = 0.6f;
 
+	// 收获后（Harvested 阶段）停留时长（秒）——期满后才允许重新播种（保证"收获后"阶段可见）
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Actions Configuration",
+			  meta = (DisplayName = "收获后重播停留时长(秒)", ClampMin = "0.0"))
+	float ReplantDelaySeconds = 5.0f;
+
 	// ============== 杂草扩散配置 ==============
 	
 	// 杂草扩散检测间隔（秒）

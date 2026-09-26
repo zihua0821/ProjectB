@@ -13,6 +13,7 @@
 class USmartObjectDefinition;
 class USmartObjectSubsystem;
 class UCellManagerComponent;
+struct FRuntimeOrbitData;
 
 /**
  * 智能对象管理组件
@@ -81,6 +82,37 @@ public:
 	/** 指定坐标 Slot 是否启用（启用 = 对象存在，才参与认领协议） */
 	bool IsSlotEnabled(const FIntPoint Coords, const int32 SlotIndex) const;
 
+	// ---- 轨道槽位（回轨槽位：与格子同构的智能对象实例） ----
+
+	/**
+	 * 注册轨道槽位（每轨 N = 卫星数；均分相位固定点）
+	 * 由卫星重建流程调用；重复调用先清理旧槽
+	 */
+	void RegisterOrbitSlots(const TArray<FRuntimeOrbitData>& Orbits);
+
+	/** 槽位数（未注册返回 0） */
+	int32 GetOrbitSlotCount(const FName OrbitName) const;
+
+	/** 槽位世界位置（按轨道名 + 槽索引） */
+	bool GetOrbitSlotWorldPosition(const FName OrbitName, const int32 SlotIndex, FVector& OutWorldPosition) const;
+
+	/** 槽位当前相位（度；= 基准相位 + 360×i/N，随轨道旋转——选槽判据用） */
+	bool GetOrbitSlotPhase(const FName OrbitName, const int32 SlotIndex, float& OutPhaseDeg) const;
+
+	// ---- 按【认领句柄】查询（已认领后的唯一查询入口；避免索引与句柄双字段不同步） ----
+
+	/** 按认领句柄查槽位世界位置 */
+	bool GetOrbitSlotWorldPositionByClaim(const FName OrbitName, const FSmartObjectClaimHandle& ClaimHandle, FVector& OutWorldPosition) const;
+
+	/** 按认领句柄查槽位相位（度） */
+	bool GetOrbitSlotPhaseByClaim(const FName OrbitName, const FSmartObjectClaimHandle& ClaimHandle, float& OutPhaseDeg) const;
+
+	/** 按认领句柄反查槽索引（调试/日志可读性用；未找到返回 -1） */
+	int32 ResolveSlotIndexByClaim(const FName OrbitName, const FSmartObjectClaimHandle& ClaimHandle) const;
+
+	/** 认领轨道槽（成功返回句柄；失败返回无效句柄） */
+	FSmartObjectClaimHandle TryClaimOrbitSlot(const FName OrbitName, const int32 SlotIndex, const ESmartObjectClaimPriority Priority) const;
+
 	/**
 	 * 操作模式 → 智能对象 Slot 索引映射
 	 * @return 0=Plot（地块操作）/ 1=Crop（作物操作）/ -1=不适用认领（None/Count 等）
@@ -114,6 +146,10 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "SmartObject")
 	TObjectPtr<USmartObjectDefinition> SmartObjectDefinition;
 
+	/** 轨道槽位定义资产（DA_OrbitSlot：单 Slot；与格子定义并列） */
+	UPROPERTY(EditDefaultsOnly, Category = "SmartObject")
+	TObjectPtr<USmartObjectDefinition> OrbitSlotDefinition;
+
 	// ---- 运行时 ----
 
 	UPROPERTY()
@@ -124,6 +160,28 @@ private:
 
 	/** 坐标 → 句柄组 映射 */
 	TMap<FIntPoint, FCellSmartObjectEntry> CoordToEntry;
+
+	/** 轨道槽位条目（每轨一份：轨道几何 + 槽位句柄/位置，索引对齐） */
+	struct FOrbitSlotEntry
+	{
+		// ---- 轨道几何（槽位位置随相位推进：槽 i 相位 = CurrentPhaseDeg + 360×i/N） ----
+		FTransform OrbitTransform;
+		float OrbitRadius = 0.f;
+		float AngularVelocity = 0.f;   // 度/秒（与卫星同源；槽位与卫星同速旋转）
+		bool bClockwise = false;
+		float CurrentPhaseDeg = 0.f;   // 槽 0 当前相位（随 ω 推进）
+
+		// ---- 智能对象实例 ----
+		TArray<FSmartObjectHandle> ObjectHandles;   // 供 UpdateSmartObject 用
+		TArray<FVector> SlotWorldPositions;
+		TArray<FSmartObjectSlotHandle> SlotHandles;
+	};
+
+	/** 轨道名 → 槽位条目 */
+	TMap<FName, FOrbitSlotEntry> OrbitSlots;
+
+	/** 槽位随相位更新（每帧推进相位并同步智能对象实例变换；不依赖槽位时开销可忽略） */
+	void UpdateOrbitSlots(const float DeltaSeconds);
 
 	/**
 	 * 认领账本：每个 Slot 一本（索引 = SlotIndex：0=Plot, 1=Crop；坐标 → 当前认领句柄）

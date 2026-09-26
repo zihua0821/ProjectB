@@ -6,6 +6,7 @@
 #include "MassEntitySubsystem.h"
 #include "MassStateTreeFragments.h"   // FMassStateTreeInstanceFragment / FMassStateTreeSharedFragment
 #include "Mass/SatelliteMassFragments.h"
+#include "Mass/SmartObjectManagerComponent.h"   // 轨道槽位注册/认领（智能对象）
 #include "Planet/PlanetActor.h"
 #include "Planet/PlanetBlueprintFunctionLibrary.h"   // ComputeOrbitWorldPosition（轨道几何，Planet 域）
 #include "Planet/PlanetConfigDataAsset.h"
@@ -64,7 +65,14 @@ void USatelliteManagerComponent::Initialize(APlanetActor* InPlanetActor)
 		return;
 	}
 
-	// 2. 为全部轨道创建卫星（含渲染实例注册）
+	// 2. 先注册轨道槽位（智能对象；卫星创建时做初始认领），再为全部轨道创建卫星（含渲染实例注册）
+	if (PlanetActor)
+	{
+		if (USmartObjectManagerComponent* SmartObjectManager = PlanetActor->GetSmartObjectManagerComponent())
+		{
+			SmartObjectManager->RegisterOrbitSlots(RuntimeOrbits);
+		}
+	}
 	CreateAllSatellites();
 
 	if (SatelliteMesh == nullptr)
@@ -129,6 +137,9 @@ void USatelliteManagerComponent::CreateAllSatellites()
 {
 	FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
 
+	// 注：槽位注册在 ApplyOrbitChanges（重建入口）与 Initialize 路径中负责；
+	//     卫星创建时仅做初始认领（依赖槽位已注册）
+
 	TArray<FMassEntityHandle> AllEntities;
 	TArray<FTransform> AllTransforms;
 
@@ -186,6 +197,16 @@ void USatelliteManagerComponent::CreateSatellitesForOrbit(const FRuntimeOrbitDat
 		OrbitFragment.VirtualPhase = 360.0f * static_cast<float>(Index) / static_cast<float>(Entities.Num());   // 均分相位
 		OrbitFragment.AngularVelocity = Orbit.AngularVelocity;
 		OrbitFragment.bClockwise = Orbit.bClockwise;
+
+		// 初始槽位认领（槽 Index = 卫星序；槽位由 SmartObjectManager 注册）
+		if (PlanetActor)
+		{
+			if (USmartObjectManagerComponent* SmartObjectManager = PlanetActor->GetSmartObjectManagerComponent())
+			{
+				OrbitFragment.SlotClaimHandle = SmartObjectManager->TryClaimOrbitSlot(Orbit.OrbitName, Index, ESmartObjectClaimPriority::Normal);
+				// 归属槽由句柄唯一标识（查询位置/相位一律走 GetOrbitSlot*ByClaim）
+			}
+		}
 
 		const FVector WorldLocation = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(Orbit.Transform, Orbit.Radius, OrbitFragment.VirtualPhase);
 		OutTransforms.Add(FTransform(FRotator::ZeroRotator, WorldLocation, FVector(SatelliteScale)));
@@ -283,6 +304,16 @@ void USatelliteManagerComponent::DestroyAllSatellites()
 
 void USatelliteManagerComponent::ApplyOrbitChanges()
 {
+	// ① 先重建轨道槽位（智能对象；轨道数据变更 → 槽位与卫星同步重建，先清旧槽）
+	if (PlanetActor)
+	{
+		if (USmartObjectManagerComponent* SmartObjectManager = PlanetActor->GetSmartObjectManagerComponent())
+		{
+			SmartObjectManager->RegisterOrbitSlots(RuntimeOrbits);
+		}
+	}
+
+	// ② 销毁旧卫星 → ③ 重建卫星（内部不再注册槽位）
 	DestroyAllSatellites();
 	CreateAllSatellites();
 

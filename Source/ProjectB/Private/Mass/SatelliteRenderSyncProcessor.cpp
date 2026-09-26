@@ -3,6 +3,7 @@
 
 #include "MassExecutionContext.h"
 #include "Mass/SatelliteMassFragments.h"
+#include "Mass/SmartObjectManagerComponent.h"                // 槽位世界位置（卫星轨道锚点）
 #include "Planet/PlanetBlueprintFunctionLibrary.h"   // ComputeOrbitWorldPosition（轨道几何，Planet 域）
 #include "Subsystem/ISMManager.h"
 
@@ -51,12 +52,22 @@ void USatelliteRenderSyncProcessor::Execute(FMassEntityManager& EntityManager, F
 			{
 				continue;
 			}
-
-			// 位置来源：离轨/悬停期间用任务写入的覆盖位置；否则由轨道角度算得
+		
+			// 位置来源（优先级）：① 离轨/悬停的覆盖位置；② 【归属槽】世界位置（槽位 = 轨道锚点，避免与相位推进器的恒定偏差）；③ 按相位现算（无槽回退）
 			const FMassOrbitFragment& Orbit = OrbitFragments[Index];
-			const FVector WorldLocation = Orbit.bOverrideLocation
-				? Orbit.OverrideLocation
-				: UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(Shared.OrbitTransform, Shared.Radius, Orbit.VirtualPhase);
+			FVector WorldLocation = Orbit.OverrideLocation;
+			if (!Orbit.bOverrideLocation)
+			{
+				WorldLocation = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(Shared.OrbitTransform, Shared.Radius, Orbit.VirtualPhase);
+				if (Shared.SmartObjectManager)
+				{
+					FVector SlotWorld;
+					if (Shared.SmartObjectManager->GetOrbitSlotWorldPositionByClaim(Orbit.OrbitName, Orbit.SlotClaimHandle, SlotWorld))
+					{
+						WorldLocation = SlotWorld;
+					}
+				}
+			}
 			InstanceIds.Add(RenderFragments[Index].InstanceId);
 			NewTransforms.Add(FTransform(FRotator::ZeroRotator, WorldLocation, ScaleVector));
 		}

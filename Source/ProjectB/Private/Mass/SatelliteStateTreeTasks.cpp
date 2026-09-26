@@ -1,7 +1,10 @@
 // SatelliteStateTreeTasks.cpp
 #include "Mass/SatelliteStateTreeTasks.h"
 
+#include "DrawDebugHelpers.h"
+
 #include "Farm/CellManagerComponent.h"
+#include "Farm/FarmlandConfigDataAsset.h"        // 收获后重播停留时长（全局配置）
 #include "Mass/CellMassFragments.h"              // FPlotStateFragment / FCropStateFragment（缺口判定）
 #include "Mass/FarmSmartObjectTypes.h"           // UFarmActionBehaviorBase（作业时长）
 #include "Mass/SatelliteManagerComponent.h"      // FSatelliteScoringWeights / USatelliteManagerComponent
@@ -13,14 +16,27 @@
 #include "Planet/PlanetBlueprintFunctionLibrary.h"
 #include "Planet/PlanetConfigDataAsset.h"
 #include "SmartObjectSubsystem.h"
+#include "Subsystem/GlobalConfigSubsystem.h"     // 全局配置（农场配置读取）
 
 namespace
 {
 	/** 卫星认领优先级（玩家 High 可抢占，见《智能对象架构与落地.md》7.5） */
 	constexpr ESmartObjectClaimPriority SatelliteClaimPriority = ESmartObjectClaimPriority::Normal;
 
+	/** 起飞时机：离轨提前量点的距离容差（cm；≈0.15°@R=55000，越小越不易"过早/过晚"） */
+	constexpr float DepartAlignToleranceCm = 150.0f;
+
 	/** 选点节流间隔（秒；仅巡航态生效，避免每帧遍历候选集） */
 	constexpr double SelectIntervalSeconds = 0.2;
+
+	/** 槽位筛选：允许的"落后"上限（度）——限重合 ~ 落后该角度内 */
+	constexpr float MaxSlotLagDeg = 45.0f;
+
+	/** 槽位筛选：允许的"超前"容差（度）——仅接受巧合重合，不接受槽位在前 */
+	constexpr float MaxSlotLeadDeg = 2.0f;
+
+	/** 起飞时机：槽位接近悬停点投影的容差（度） */
+	constexpr float TakeoffAlignToleranceDeg = 3.0f;
 
 	/** 作业时长缺省值（秒；认领句柄/行为定义缺失时使用） */
 	constexpr float DefaultActionDuration = 2.0f;
@@ -74,11 +90,11 @@ namespace
 	 * 注：暂不含"主动耕地"（耕地状态是活跃农田的前提）
 	 * @return true=存在缺口（OutGaps 按分数降序）
 	 */
-	bool CollectCellGaps(const FPlotStateFragment& PlotState, const FCropStateFragment* CropState, const FSatelliteScoringWeights& Weights, TArray<FCellGap>& OutGaps)
+	bool CollectCellGaps(const FPlotStateFragment& PlotState, const FCropStateFragment* CropState, const FCropGrowthTimerFragment* CropTimer, const float ReplantDelaySeconds, const FSatelliteScoringWeights& Weights, TArray<FCellGap>& OutGaps)
 	{
 		OutGaps.Reset();
 
-		// 作物缺口：成熟 → 收获；已收获 → 重播（PlantCrop 内部沿用格子已有作物的 CropID）
+		// 作物缺口：成熟 → 收获（收获后进入 Harvested 阶段，停留时长期满后才可重播）；已收获 → 重播
 		if (CropState != nullptr)
 		{
 			if (CropState->CropGrowthStage == ECropGrowthStage::Mature)
@@ -87,10 +103,14 @@ namespace
 			}
 			else if (CropState->CropGrowthStage == ECropGrowthStage::Harvested)
 			{
-				OutGaps.Add({ EEditMode::PlantCrop, Weights.ReplantWeight });
+				// 收获后停留时长（全局配置）期满才允许重播——保证"收获后"阶段可见
+				const float HarvestedElapsed = CropTimer ? CropTimer->CurrentStageGrowthTime : 0.f;
+				if (HarvestedElapsed >= ReplantDelaySeconds)
+				{
+					OutGaps.Add({ EEditMode::PlantCrop, Weights.ReplantWeight });
+				}
 			}
 		}
-
 		// 地块缺口：杂草 / 虫害（二值权重）
 		if (PlotState.StateData.HasState(EPlotState::WeedInfested))
 		{
@@ -169,10 +189,14 @@ namespace
 		return DefaultActionDuration;
 	}
 
-	/** 开始队列首项（重置计时与时长；需 WorkQueue 非空） */
-	void BeginQueueItem(const FMassSatelliteTaskFragment& Task, FSatelliteExecuteActionTaskInstanceData& InstanceData, const UWorld* World)
+	/**
+	 * 开始队列第 ItemIndex 项（重置计时与时长；句柄按"已消费数"索引读取）
+	 * 注：ClaimHandles 不再出队（作为出勤账本，保留至回轨到达统一释放），
+	 *     当前项句柄 = ClaimHandles[已消费数] = ClaimHandles[总长 − WorkQueue 剩余长度]
+	 */
+	void BeginQueueItem(const FMassSatelliteTaskFragment& Task, FSatelliteExecuteActionTaskInstanceData& InstanceData, const UWorld* World, const int32 ItemIndex)
 	{
-		const FSmartObjectClaimHandle ItemHandle = Task.ClaimHandles.Num() > 0 ? Task.ClaimHandles[0] : FSmartObjectClaimHandle::InvalidHandle;
+		const FSmartObjectClaimHandle ItemHandle = Task.ClaimHandles.IsValidIndex(ItemIndex) ? Task.ClaimHandles[ItemIndex] : FSmartObjectClaimHandle::InvalidHandle;
 		InstanceData.ActionDuration = ReadActionDuration(World, ItemHandle);
 		InstanceData.ActionStartTime = FPlatformTime::Seconds();
 	}
@@ -181,6 +205,31 @@ namespace
 	float AngularDistanceDegrees(const float FromAngle, const float ToAngle)
 	{
 		return FMath::Abs(FMath::FindDeltaAngleDegrees(FromAngle, ToAngle));
+	}
+
+	/**
+	 * 悬停点投影 → 槽位 的有向夹角（度；沿运动方向为正）
+	 * δ > 0：槽位在悬停点投影【前方】（未到）——回轨会形成追逐，不可用
+	 * δ = 0：重合（槽位正处悬停点正下方，最近）
+	 * δ < 0：槽位【落后】（刚过投影点）——可用
+	 */
+	float ComputeHoverToSlotSignedAngle(const FTransform& OrbitTransform, const FVector& HoverPoint, const FVector& SlotPoint, const bool bClockwise)
+	{
+		const FVector OrbitCenter = OrbitTransform.GetLocation();
+		const FVector OrbitNormal = OrbitTransform.GetRotation().GetAxisZ();
+		const FVector HoverToCenter = HoverPoint - OrbitCenter;
+		const FVector HoverDir = (HoverToCenter - FVector::DotProduct(HoverToCenter, OrbitNormal) * OrbitNormal).GetSafeNormal();
+		const FVector SlotToCenter = SlotPoint - OrbitCenter;
+		const FVector SlotDir = (SlotToCenter - FVector::DotProduct(SlotToCenter, OrbitNormal) * OrbitNormal).GetSafeNormal();
+		if (HoverDir.IsNearlyZero() || SlotDir.IsNearlyZero())
+		{
+			return 0.f;
+		}
+		const float CosA = FMath::Clamp(FVector::DotProduct(HoverDir, SlotDir), -1.f, 1.f);
+		const float SinA = FVector::DotProduct(FVector::CrossProduct(HoverDir, SlotDir), OrbitNormal);
+		const float AngleDeg = FMath::RadiansToDegrees(FMath::Atan2(SinA, CosA));
+		// 沿运动方向为正：顺时针（相位递减）时取反
+		return bClockwise ? -AngleDeg : AngleDeg;
 	}
 
 	/** 操作枚举名（日志用，如 "EEditMode::HarvestCrop"） */
@@ -231,6 +280,19 @@ EStateTreeRunStatus FSatelliteSelectTargetTask::Tick(FStateTreeExecutionContext&
 	}
 
 	const FSatelliteScoringWeights& Weights = SatelliteManager.GetScoringWeights();
+
+	// 收获后重播停留时长（全局农场配置；缺失时为 0——立即允许重播）
+	float ReplantDelaySeconds = 0.f;
+	if (const UWorld* World = Context.GetWorld())
+	{
+		if (const UGlobalConfigSubsystem* ConfigSub = World->GetSubsystem<UGlobalConfigSubsystem>())
+		{
+			if (const UFarmlandConfigDataAsset* FarmConfig = ConfigSub->GetFarmlandConfig())
+			{
+				ReplantDelaySeconds = FarmConfig->ReplantDelaySeconds;
+			}
+		}
+	}
 	const UPlanetConfigDataAsset& PlanetConfig = *Shared.PlanetConfig;
 	const FVector OrbitNormal = Shared.OrbitTransform.GetRotation().GetAxisZ();
 	const FVector OrbitCenter = Shared.OrbitTransform.GetLocation();
@@ -267,10 +329,11 @@ EStateTreeRunStatus FSatelliteSelectTargetTask::Tick(FStateTreeExecutionContext&
 			continue;
 		}
 		const FCropStateFragment* CropState = Data.EntityManager->GetFragmentDataPtr<FCropStateFragment>(CellEntity);
+		const FCropGrowthTimerFragment* CropTimer = Data.EntityManager->GetFragmentDataPtr<FCropGrowthTimerFragment>(CellEntity);
 
 		// 2.3 缺口收集（缺什么补什么；分数降序——首项为最高分）
 		TArray<FCellGap> Gaps;
-		if (!CollectCellGaps(*PlotState, CropState, Weights, Gaps))
+		if (!CollectCellGaps(*PlotState, CropState, CropTimer, ReplantDelaySeconds, Weights, Gaps))
 		{
 			continue;
 		}
@@ -308,12 +371,13 @@ EStateTreeRunStatus FSatelliteSelectTargetTask::Tick(FStateTreeExecutionContext&
 	}
 	const FPlotStateFragment* SelectedPlot = Data.EntityManager->GetFragmentDataPtr<FPlotStateFragment>(SelectedEntity);
 	const FCropStateFragment* SelectedCrop = Data.EntityManager->GetFragmentDataPtr<FCropStateFragment>(SelectedEntity);
+	const FCropGrowthTimerFragment* SelectedCropTimer = Data.EntityManager->GetFragmentDataPtr<FCropGrowthTimerFragment>(SelectedEntity);
 	if (SelectedPlot == nullptr)
 	{
 		return EStateTreeRunStatus::Running;
 	}
 	TArray<FCellGap> SelectedGaps;
-	if (!CollectCellGaps(*SelectedPlot, SelectedCrop, Weights, SelectedGaps))
+	if (!CollectCellGaps(*SelectedPlot, SelectedCrop, SelectedCropTimer, ReplantDelaySeconds, Weights, SelectedGaps))
 	{
 		// 缺口已消失（本轮被他人完成）：下一轮节流重选
 		return EStateTreeRunStatus::Running;
@@ -411,12 +475,45 @@ EStateTreeRunStatus FSatelliteDepartWaitTask::Tick(FStateTreeExecutionContext& C
 	const FVector HoverPoint = UPlanetBlueprintFunctionLibrary::ComputeOrbitHoverPoint(
 		CellTransform.GetLocation(), Shared.PlanetConfig->Radius, Shared.PlanetConfig->HoverHeight);
 
-	// 时机到 → 出发（不控制运动：卫星照常巡航）
-	return UPlanetBlueprintFunctionLibrary::IsAtNearestPhase(Shared.OrbitTransform, Orbit.VirtualPhase, HoverPoint, /*容差=*/2.0f)
+	// 时机判据（方案 2）：等"当前方位 = θ_hover − ω·T·dir"（精确提前量）
+	// —— 与 Approach 起飞起点同一公式，保证起飞瞬间无位置跳变
+	// 时机（与 Approach/Return 同参数：T = ΔR / v_r）
+	const float RadialSpeed = FMath::Max(Shared.SatelliteManager ? Shared.SatelliteManager->GetRadialTransferSpeed() : 2000.0f, 1.0f);
+	const float TravelDirection = Orbit.bClockwise ? -1.0f : 1.0f;
+
+	// 悬停点分解 + 合成跨度（与 Approach 同公式：含垂直分量）
+	float ThetaHoverDeg = 0.0f;
+	float RadiusHoverInPlane = 0.0f;
+	float VerticalHover = 0.0f;
+	UPlanetBlueprintFunctionLibrary::DecomposeToOrbitPlane(Shared.OrbitTransform, HoverPoint, ThetaHoverDeg, RadiusHoverInPlane, VerticalHover);
+	const float RadSpan = FMath::Sqrt(FMath::Square(RadiusHoverInPlane - Shared.Radius) + FMath::Square(VerticalHover));
+	const float Duration = FMath::Max(RadSpan / RadialSpeed, 0.1f);
+	const float ThetaStartDeg = ThetaHoverDeg - Orbit.AngularVelocity * Duration * TravelDirection;
+
+	// 提前量点的世界位置（轨迹起点）
+	const FVector StartPointWorld = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(
+		Shared.OrbitTransform, Shared.Radius, ThetaStartDeg);
+
+	// 判据（关键）：用卫星的【显示位置】与提前量点的距离
+	// —— 方案 B 下显示位置 = 归属槽世界点（不是账面相位点），只有判它才能保证起飞无位置跳变
+	FVector DisplayLocation = StartPointWorld;
+	if (Shared.SmartObjectManager->GetOrbitSlotWorldPositionByClaim(Orbit.OrbitName, Orbit.SlotClaimHandle, DisplayLocation))
+	{
+		// 用归属槽世界点（与渲染同源）
+	}
+	else
+	{
+		// 回退：无槽时用账面相位点
+		DisplayLocation = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(
+			Shared.OrbitTransform, Shared.Radius, Orbit.VirtualPhase);
+	}
+
+	const float DistToStart = FVector::Dist(DisplayLocation, StartPointWorld);
+
+	return (DistToStart <= DepartAlignToleranceCm)
 		? EStateTreeRunStatus::Succeeded
 		: EStateTreeRunStatus::Running;
 }
-
 EStateTreeRunStatus FSatelliteReturnWaitTask::Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const
 {
 	const FSattelliteTaskData Data = GetSatelliteTaskData(Context);
@@ -426,17 +523,99 @@ EStateTreeRunStatus FSatelliteReturnWaitTask::Tick(FStateTreeExecutionContext& C
 		return EStateTreeRunStatus::Failed;
 	}
 	const FMassSatelliteSharedFragment& Shared = *Data.Shared;
-	const FMassOrbitFragment& Orbit = *Data.Orbit;
+	FMassOrbitFragment& Orbit = *Data.Orbit;
+	FMassSatelliteTaskFragment& Task = *Data.Task;
+	FSatelliteReturnWaitTaskInstanceData& InstanceData = Context.GetInstanceData(*this);
 
+	if (!Shared.SmartObjectManager || !Shared.SatelliteManager || !Shared.PlanetConfig)
+	{
+		return EStateTreeRunStatus::Failed;
+	}
 	// 保持悬停（位置覆盖由作业阶段持有）
 	if (!Orbit.bOverrideLocation)
 	{
-		// 异常：无悬停位置（不应发生）——直接回轨
 		return EStateTreeRunStatus::Succeeded;
 	}
 
-	// 等到"虚拟相位方向与悬停点方位对齐"（最近点）→ 回轨
-	return UPlanetBlueprintFunctionLibrary::IsAtNearestPhase(Shared.OrbitTransform, Orbit.VirtualPhase, Orbit.OverrideLocation, /*容差=*/2.0f)
+	// 选槽（节流 0.2s）：空槽 → 三条件（不反向 / 相位差 ≥ MinPhaseGap）→ 按顺向相位差升序逐个认领
+	// 选中后：句柄写 SlotClaimHandle，槽位点写 PhaseEndLocation（供近点判定与回轨终点复用）
+	const double Now = FPlatformTime::Seconds();
+	if (!Orbit.SlotClaimHandle.IsValid() && Now - InstanceData.LastSelectTime >= SelectIntervalSeconds)
+	{
+		InstanceData.LastSelectTime = Now;
+
+		const int32 SlotCount = Shared.SmartObjectManager->GetOrbitSlotCount(Orbit.OrbitName);
+
+		// 收集候选（顺向相位差 = 沿 ω 方向从当前相位到槽相位的角度）
+		struct FSlotCandidate
+		{
+			int32 SlotIndex = -1;
+			float SlotDeltaDeg = 0.f;   // 悬停点投影→槽位 的有向夹角（沿运动方向为正）
+		};
+		TArray<FSlotCandidate> Candidates;
+		Candidates.Reserve(SlotCount);
+		for (int32 SlotIndex = 0; SlotIndex < SlotCount; ++SlotIndex)
+		{
+			// 槽位世界点
+			FVector SlotWorld;
+			if (!Shared.SmartObjectManager->GetOrbitSlotWorldPosition(Orbit.OrbitName, SlotIndex, SlotWorld))
+			{
+				continue;
+			}
+			// 槽位相位（当前方案 2 下不再参与路径构造；保留查询以兼容槽位索引校验）
+			float SlotPhaseDeg = 0.f;
+			if (!Shared.SmartObjectManager->GetOrbitSlotPhase(Orbit.OrbitName, SlotIndex, SlotPhaseDeg))
+			{
+				continue;
+			}
+
+			// 可用性：悬停点投影 → 槽位 的有向夹角 δ（沿运动方向为正）
+			// 仅接受"重合 ~ 落后 MaxSlotLagDeg"（δ ∈ [−45°, +2°]）；槽位在前（δ>0）会形成追逐 → 排除
+			const float SlotDeltaDeg = ComputeHoverToSlotSignedAngle(
+				Shared.OrbitTransform, Orbit.OverrideLocation, SlotWorld, Orbit.bClockwise);
+			if (SlotDeltaDeg > MaxSlotLeadDeg || SlotDeltaDeg < -MaxSlotLagDeg)
+			{
+				continue;
+			}
+
+			Candidates.Add({ SlotIndex, SlotDeltaDeg });
+		}
+		// 按"离重合的远近"升序（越接近重合越优先——即槽位离悬停点越近）
+		Candidates.Sort([](const FSlotCandidate& A, const FSlotCandidate& B) { return FMath::Abs(A.SlotDeltaDeg) < FMath::Abs(B.SlotDeltaDeg); });
+
+		// 逐个尝试认领（空槽 = 认领成功；失败顺延下一候选）
+		for (const FSlotCandidate& Candidate : Candidates)
+		{
+			const FSmartObjectClaimHandle ClaimHandle = Shared.SmartObjectManager->TryClaimOrbitSlot(
+				Orbit.OrbitName, Candidate.SlotIndex, SatelliteClaimPriority);
+			if (ClaimHandle.IsValid())
+			{
+				Orbit.SlotClaimHandle = ClaimHandle;
+				// 槽位世界位置写入飞行终点（起飞时机判定/回轨终点共用）
+				Shared.SmartObjectManager->GetOrbitSlotWorldPosition(Orbit.OrbitName, Candidate.SlotIndex, Task.PhaseEndLocation);
+				UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] ReturnWait: slot %d selected (delta=%.1f°)"),
+					Data.Entity.Index, Candidate.SlotIndex, Candidate.SlotDeltaDeg);
+				break;
+			}
+		}
+	}
+
+	// 未选中：继续等待（相位在动，下个节流窗口重试；诊断在函数开头无条件输出）
+	if (!Orbit.SlotClaimHandle.IsValid())
+	{
+		return EStateTreeRunStatus::Running;
+	}
+
+	// 等到"槽位【实时】转到悬停点投影处"（δ ≈ 0）→ 起飞
+	// 注意：必须用槽位的当前世界位置（槽位在公转），不能用选槽时的快照点
+	FVector SlotWorldNow;
+	if (!Shared.SmartObjectManager->GetOrbitSlotWorldPositionByClaim(Orbit.OrbitName, Orbit.SlotClaimHandle, SlotWorldNow))
+	{
+		return EStateTreeRunStatus::Running;
+	}
+	const float SlotDeltaNow = ComputeHoverToSlotSignedAngle(
+		Shared.OrbitTransform, Orbit.OverrideLocation, SlotWorldNow, Orbit.bClockwise);
+	return (FMath::Abs(SlotDeltaNow) <= TakeoffAlignToleranceDeg)
 		? EStateTreeRunStatus::Succeeded
 		: EStateTreeRunStatus::Running;
 }
@@ -453,35 +632,82 @@ EStateTreeRunStatus FSatelliteReturnTask::EnterState(FStateTreeExecutionContext&
 	FMassOrbitFragment& Orbit = *Data.Orbit;
 	FMassSatelliteTaskFragment& Task = *Data.Task;
 
-	if (!Shared.SatelliteManager || !Orbit.bOverrideLocation)
+	if (!Shared.SatelliteManager || !Shared.PlanetConfig || !Orbit.bOverrideLocation)
 	{
 		return EStateTreeRunStatus::Failed;
 	}
 
-	// 起飞：起点 = 悬停点（当前位置）；终点初值 = 当前虚拟相位点；控制点（回轨：起点法线上升 / 终点切向切入）
+	// 起点 = 悬停点；落点 = θ_hover + ω·T·dir（切向同步，天然对准；无需预测）
 	const FVector StartPoint = Orbit.OverrideLocation;
-	const FVector InitialEnd = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(Shared.OrbitTransform, Shared.Radius, Orbit.VirtualPhase);
-	const FVector OrbitTangent = UPlanetBlueprintFunctionLibrary::ComputeOrbitTangent(Shared.OrbitTransform, Orbit.VirtualPhase, Orbit.bClockwise);
-	FVector ControlPoint1;
-	FVector ControlPoint2;
-	UPlanetBlueprintFunctionLibrary::BuildOrbitTransferControlPoints(
-		StartPoint, InitialEnd, OrbitTangent, /*bOutbound=*/false, Shared.SatelliteManager->GetTransferControlFactor(), ControlPoint1, ControlPoint2);
+	if (!Orbit.SlotClaimHandle.IsValid())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] Return: no slot claimed. Entity[%d]"), Data.Entity.Index);
+		return EStateTreeRunStatus::Failed;
+	}
 
-	// 时长：路径近似长度 / 轨道线速度（v = ω(rad/s) × R）
-	const float PathLength = FVector::Dist(StartPoint, ControlPoint1) + FVector::Dist(ControlPoint1, ControlPoint2) + FVector::Dist(ControlPoint2, InitialEnd);
-	const float LinearSpeed = FMath::Abs(FMath::DegreesToRadians(Orbit.AngularVelocity)) * Shared.Radius;
+	// 时长 T = ΔR / v_r（单参数，配置于卫星管理组件；与离轨共用）
+	const float RadiusOrbit = Shared.Radius;
+	const float RadialSpeed = FMath::Max(Shared.SatelliteManager->GetRadialTransferSpeed(), 1.0f);
+	const float TravelDirection = Orbit.bClockwise ? -1.0f : 1.0f;
+
+	// 权威点分解（悬停点 → 平面内方位/半径 + 垂直偏移；垂直分量不可省）
+	float ThetaHoverDeg = 0.0f;
+	float RadiusHoverInPlane = 0.0f;
+	float VerticalHover = 0.0f;
+	UPlanetBlueprintFunctionLibrary::DecomposeToOrbitPlane(Shared.OrbitTransform, StartPoint, ThetaHoverDeg, RadiusHoverInPlane, VerticalHover);
+
+	// 时长：径向合成跨度（平面内 + 垂直）/ 径向速度
+	const float RadSpan = FMath::Sqrt(FMath::Square(RadiusOrbit - RadiusHoverInPlane) + FMath::Square(VerticalHover));
+	const float Duration = FMath::Max(RadSpan / RadialSpeed, 0.1f);
+
+	// 切向推进量 = ω·T·dir + δ0（δ0 补偿）
+	// —— 槽位与卫星同速，起飞时刻的偏差 δ0 会被"冻结"到落点；
+	//    用 δ0 补偿后：落点 = 槽位到达时的相位 → 完全重合
+	float ThetaDeltaDeg = Orbit.AngularVelocity * Duration * TravelDirection;
+	if (Orbit.SlotClaimHandle.IsValid())
+	{
+		float SlotPhaseDeg = 0.f;
+		if (Shared.SmartObjectManager->GetOrbitSlotPhaseByClaim(Orbit.OrbitName, Orbit.SlotClaimHandle, SlotPhaseDeg))
+		{
+			// 槽位相对悬停点投影方位的偏差（沿运动方向为正；归一到 [−180,180]）
+			const float SlotOffsetDeg = FMath::FindDeltaAngleDegrees(ThetaHoverDeg, SlotPhaseDeg) * TravelDirection;
+			ThetaDeltaDeg += SlotOffsetDeg;
+		}
+	}
+
 	Task.PhaseStartLocation = StartPoint;
-	Task.PhaseEndLocation = InitialEnd;   // 初值（Tick 中动态跟随虚拟相位点）
-	Task.PhaseControlPoint1 = ControlPoint1;
-	Task.PhaseControlPoint2 = ControlPoint2;
+	Task.PhaseThetaStartDeg = ThetaHoverDeg;
+	Task.PhaseThetaDeltaDeg = ThetaDeltaDeg;
+	Task.PhaseRadiusStart = RadiusHoverInPlane;
+	Task.PhaseRadiusEnd = RadiusOrbit;
+	Task.PhaseVerticalStart = VerticalHover;
+	Task.PhaseVerticalEnd = 0.0f;
+	Task.PhaseEndLocation = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(
+		Shared.OrbitTransform, RadiusOrbit, ThetaHoverDeg + ThetaDeltaDeg);
 	Task.PhaseElapsed = 0.f;
-	Task.PhaseDuration = (LinearSpeed > KINDA_SMALL_NUMBER) ? (PathLength / LinearSpeed) : 1.0f;
+	Task.PhaseDuration = Duration;
 
 	Orbit.State = ESatelliteState::Return;
 	// 位置覆盖保持（飞行位置由本任务写入）
 
 	UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] Return start → orbit (phase=%.1f°), duration=%.2fs"),
 		Data.Entity.Index, Orbit.VirtualPhase, Task.PhaseDuration);
+
+	// 路径点调试（参数方程采样：青）
+	if (UWorld* World = Context.GetWorld())
+	{
+		constexpr int32 PathSampleCount = 80;   // 采样密度（间距 ≈ 弧长/80 ≈ 50cm）
+		for (int32 SampleIndex = 0; SampleIndex <= PathSampleCount; ++SampleIndex)
+		{
+			const float SampleAlpha = static_cast<float>(SampleIndex) / static_cast<float>(PathSampleCount);
+			const float SampleTheta = Task.PhaseThetaStartDeg + Task.PhaseThetaDeltaDeg * SampleAlpha;
+			const float SampleRadius = FMath::Lerp(Task.PhaseRadiusStart, Task.PhaseRadiusEnd, SampleAlpha);
+			const float SampleVertical = FMath::Lerp(Task.PhaseVerticalStart, Task.PhaseVerticalEnd, SampleAlpha);
+			const FVector PathPoint = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(
+				Shared.OrbitTransform, SampleRadius, SampleTheta) + Shared.OrbitTransform.GetRotation().GetAxisZ() * SampleVertical;
+			DrawDebugSphere(World, PathPoint, 25.f, 6, FColor::Cyan, /*bPersistent=*/false, /*LifeTime=*/10.f, /*DepthPriority=*/0, /*Thickness=*/0.f);
+		}
+	}
 
 	return EStateTreeRunStatus::Running;
 }
@@ -501,29 +727,56 @@ EStateTreeRunStatus FSatelliteReturnTask::Tick(FStateTreeExecutionContext& Conte
 	Task.PhaseElapsed += DeltaTime;
 	const float Alpha = (Task.PhaseDuration > KINDA_SMALL_NUMBER) ? (Task.PhaseElapsed / Task.PhaseDuration) : 1.f;
 
-	// 动态终点：虚拟相位点（实时）——保证到达时与轨道位置连续（无跳变）
-	const FVector DynamicEnd = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(Shared.OrbitTransform, Shared.Radius, Orbit.VirtualPhase);
-	const FVector OrbitTangent = UPlanetBlueprintFunctionLibrary::ComputeOrbitTangent(Shared.OrbitTransform, Orbit.VirtualPhase, Orbit.bClockwise);
-	FVector ControlPoint1;
-	FVector ControlPoint2;
-	UPlanetBlueprintFunctionLibrary::BuildOrbitTransferControlPoints(
-		Task.PhaseStartLocation, DynamicEnd, OrbitTangent, /*bOutbound=*/false,
-		Shared.SatelliteManager ? Shared.SatelliteManager->GetTransferControlFactor() : 0.35f, ControlPoint1, ControlPoint2);
-
 	if (Alpha >= 1.f)
 	{
-		// 到达：位置交还轨道（= 虚拟相位点，与覆盖值连续）→ 恢复巡航
+		// 到达：位置 = 落点（与槽位/虚拟相位一致）→ 清覆盖（无瞬移）
+		Orbit.OverrideLocation = Task.PhaseEndLocation;
 		Orbit.bOverrideLocation = false;
+
 		Orbit.State = ESatelliteState::Cruise;
 		Task.PhaseElapsed = 0.f;
 		Task.PhaseDuration = 0.f;
+		// 释放格子认领（唯一释放点：真实回轨到达；同句柄去重）
+		if (Shared.SmartObjectManager)
+		{
+			TArray<FSmartObjectClaimHandle> UniqueHandles;
+			for (const FSmartObjectClaimHandle& ItemHandle : Task.ClaimHandles)
+			{
+				if (ItemHandle.IsValid() && !UniqueHandles.Contains(ItemHandle))
+				{
+					UniqueHandles.Add(ItemHandle);
+					Shared.SmartObjectManager->ReleaseClaim(ItemHandle);
+				}
+			}
+		}
+		Task.ClaimHandles.Reset();
+		Task.ClaimHandle = FSmartObjectClaimHandle::InvalidHandle;
 
-		UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] Return complete (phase=%.1f°)"), Data.Entity.Index, Orbit.VirtualPhase);
+		UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] Return complete (phase=%.1f°)"),
+			Data.Entity.Index, Orbit.VirtualPhase);
+
+		// 归位（防止"清覆盖后位置跳变"）：
+		// ① 账面相位与槽位对齐（VirtualPhase := 槽位相位）——保证无槽回退时也不跳
+		// ② 【保留】归属槽认领句柄（SlotClaimHandle）——渲染锚点继续用槽位点，不回退到相位点
+		if (Shared.SmartObjectManager)
+		{
+			float SlotPhaseDeg = 0.f;
+			if (Shared.SmartObjectManager->GetOrbitSlotPhaseByClaim(Orbit.OrbitName, Orbit.SlotClaimHandle, SlotPhaseDeg))
+			{
+				Orbit.VirtualPhase = SlotPhaseDeg;
+			}
+		}
 		return EStateTreeRunStatus::Succeeded;
 	}
 
-	Orbit.OverrideLocation = UPlanetBlueprintFunctionLibrary::EvaluateCubicBezier(
-		Task.PhaseStartLocation, ControlPoint1, ControlPoint2, DynamicEnd, Alpha);
+	// 极坐标参数方程（含垂直分量）：θ 同步推进 + 平面内半径线性插值 + 法线偏移线性插值
+	const float ThetaDeg = Task.PhaseThetaStartDeg + Task.PhaseThetaDeltaDeg * Alpha;
+	const float RadiusNow = FMath::Lerp(Task.PhaseRadiusStart, Task.PhaseRadiusEnd, Alpha);
+	const float VerticalNow = FMath::Lerp(Task.PhaseVerticalStart, Task.PhaseVerticalEnd, Alpha);
+	const FVector PlanePoint = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(
+		Shared.OrbitTransform, RadiusNow, ThetaDeg);
+	Orbit.OverrideLocation = PlanePoint + Shared.OrbitTransform.GetRotation().GetAxisZ() * VerticalNow;
+
 	return EStateTreeRunStatus::Running;
 }
 
@@ -548,46 +801,85 @@ EStateTreeRunStatus FSatelliteApproachTask::EnterState(FStateTreeExecutionContex
 		return EStateTreeRunStatus::Failed;
 	}
 
-	// 起飞：路径参数一次算好（起点=当前轨道位置 / 终点=悬停点 / 控制点 / 时长）
+	// 起飞：极坐标参数方程参数（方案 2：切向同步 ω + 径向匀速 v_r；一次算好）
 	FTransform CellTransform;
 	if (!Shared.CellManager->GetCellWorldTransform(Task.TargetCoord, CellTransform))
 	{
 		return EStateTreeRunStatus::Failed;
 	}
-	const FVector StartPoint = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(Shared.OrbitTransform, Shared.Radius, Orbit.VirtualPhase);
 	const FVector EndPoint = UPlanetBlueprintFunctionLibrary::ComputeOrbitHoverPoint(
 		CellTransform.GetLocation(), Shared.PlanetConfig->Radius, Shared.PlanetConfig->HoverHeight);
-	const FVector OrbitTangent = UPlanetBlueprintFunctionLibrary::ComputeOrbitTangent(Shared.OrbitTransform, Orbit.VirtualPhase, Orbit.bClockwise);
 
-	FVector ControlPoint1;
-	FVector ControlPoint2;
-	UPlanetBlueprintFunctionLibrary::BuildOrbitTransferControlPoints(
-		StartPoint, EndPoint, OrbitTangent, /*bOutbound=*/true, Shared.SatelliteManager->GetTransferControlFactor(), ControlPoint1, ControlPoint2);
+	// 时长 T = ΔR / v_r（单参数，配置于卫星管理组件；离轨/回轨共用）
+	const float RadiusOrbit = Shared.Radius;
+	const float RadialSpeed = FMath::Max(Shared.SatelliteManager ? Shared.SatelliteManager->GetRadialTransferSpeed() : 2000.0f, 1.0f);
+	const float TravelDirection = Orbit.bClockwise ? -1.0f : 1.0f;
 
-	// 时长：路径近似长度 / 轨道线速度（v = ω(rad/s) × R）
-	const float PathLength = FVector::Dist(StartPoint, ControlPoint1) + FVector::Dist(ControlPoint1, ControlPoint2) + FVector::Dist(ControlPoint2, EndPoint);
-	const float LinearSpeed = FMath::Abs(FMath::DegreesToRadians(Orbit.AngularVelocity)) * Shared.Radius;
-	Task.PhaseStartLocation = StartPoint;
-	Task.PhaseEndLocation = EndPoint;
-	Task.PhaseControlPoint1 = ControlPoint1;
-	Task.PhaseControlPoint2 = ControlPoint2;
-	Task.PhaseElapsed = 0.f;
-	Task.PhaseDuration = (LinearSpeed > KINDA_SMALL_NUMBER) ? (PathLength / LinearSpeed) : 1.0f;
-
-	// 不穿球校验（纯算法兜底：失败仅告警，不阻止）
-	const float HoverLayerRadius = Shared.PlanetConfig->Radius + Shared.PlanetConfig->HoverHeight;
-	if (!UPlanetBlueprintFunctionLibrary::ValidateTransferPath(StartPoint, ControlPoint1, ControlPoint2, EndPoint, HoverLayerRadius))
+	// 起点位置（关键）：取卫星【显示位置】——从哪儿起就从哪儿算，保证起飞帧零跳变
+	FVector DisplayLocation;
+	if (Shared.SmartObjectManager->GetOrbitSlotWorldPositionByClaim(Orbit.OrbitName, Orbit.SlotClaimHandle, DisplayLocation))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] Approach: transfer path may intersect planet (cell %d, %d)"), Task.TargetCoord.X, Task.TargetCoord.Y);
+		// 用归属槽世界点（与渲染同源）
+	}
+	else
+	{
+		DisplayLocation = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(
+			Shared.OrbitTransform, RadiusOrbit, Orbit.VirtualPhase);
+	}
+
+	// 权威点分解（悬停点 → 平面内方位/半径 + 垂直偏移；垂直分量不可省：服务距离可能远大于平面）
+	float ThetaHoverDeg = 0.0f;
+	float RadiusHoverInPlane = 0.0f;
+	float VerticalHover = 0.0f;
+	UPlanetBlueprintFunctionLibrary::DecomposeToOrbitPlane(Shared.OrbitTransform, EndPoint, ThetaHoverDeg, RadiusHoverInPlane, VerticalHover);
+
+	float ThetaStartDeg = 0.0f;
+	float RadiusStartInPlane = RadiusOrbit;
+	float VerticalStart = 0.0f;
+	UPlanetBlueprintFunctionLibrary::DecomposeToOrbitPlane(Shared.OrbitTransform, DisplayLocation, ThetaStartDeg, RadiusStartInPlane, VerticalStart);
+
+	// 时长：径向合成跨度（平面内分量 + 垂直分量）/ 径向速度
+	const float RadSpan = FMath::Sqrt(FMath::Square(RadiusHoverInPlane - RadiusStartInPlane) + FMath::Square(VerticalHover - VerticalStart));
+	const float Duration = FMath::Max(RadSpan / RadialSpeed, 0.1f);
+
+	Task.PhaseStartLocation = DisplayLocation;
+	Task.PhaseEndLocation = EndPoint;
+	Task.PhaseThetaStartDeg = ThetaStartDeg;
+	Task.PhaseThetaDeltaDeg = Orbit.AngularVelocity * Duration * TravelDirection;
+	Task.PhaseRadiusStart = RadiusStartInPlane;
+	Task.PhaseRadiusEnd = RadiusHoverInPlane;
+	Task.PhaseVerticalStart = VerticalStart;
+	Task.PhaseVerticalEnd = VerticalHover;
+	Task.PhaseElapsed = 0.f;
+	Task.PhaseDuration = Duration;
+
+	// 让槽（释放槽位归属；回轨时重新认领空槽）
+	if (Shared.SmartObjectManager && Orbit.SlotClaimHandle.IsValid())
+	{
+		Shared.SmartObjectManager->ReleaseClaim(Orbit.SlotClaimHandle);
+		Orbit.SlotClaimHandle = FSmartObjectClaimHandle::InvalidHandle;
 	}
 
 	// 开启位置覆盖（离轨期间位置由任务写入）
 	Orbit.State = ESatelliteState::Approach;
 	Orbit.bOverrideLocation = true;
-	Orbit.OverrideLocation = StartPoint;
+	Orbit.OverrideLocation = Task.PhaseStartLocation;
 
-	UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] Approach start → hover (%.0f, %.0f, %.0f), duration=%.2fs"),
-		Data.Entity.Index, EndPoint.X, EndPoint.Y, EndPoint.Z, Task.PhaseDuration);
+	// 路径点调试（参数方程采样：黄）
+	if (UWorld* World = Context.GetWorld())
+	{
+		constexpr int32 PathSampleCount = 80;   // 采样密度（间距 ≈ 弧长/80 ≈ 50cm）
+		for (int32 SampleIndex = 0; SampleIndex <= PathSampleCount; ++SampleIndex)
+		{
+			const float SampleAlpha = static_cast<float>(SampleIndex) / static_cast<float>(PathSampleCount);
+			const float SampleTheta = Task.PhaseThetaStartDeg + Task.PhaseThetaDeltaDeg * SampleAlpha;
+			const float SampleRadius = FMath::Lerp(Task.PhaseRadiusStart, Task.PhaseRadiusEnd, SampleAlpha);
+			const float SampleVertical = FMath::Lerp(Task.PhaseVerticalStart, Task.PhaseVerticalEnd, SampleAlpha);
+			const FVector PathPoint = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(
+				Shared.OrbitTransform, SampleRadius, SampleTheta) + Shared.OrbitTransform.GetRotation().GetAxisZ() * SampleVertical;
+			DrawDebugSphere(World, PathPoint, 25.f, 6, FColor::Yellow, /*bPersistent=*/false, /*LifeTime=*/10.f, /*DepthPriority=*/0, /*Thickness=*/0.f);
+		}
+	}
 
 	return EStateTreeRunStatus::Running;
 }
@@ -604,13 +896,20 @@ EStateTreeRunStatus FSatelliteApproachTask::Tick(FStateTreeExecutionContext& Con
 	FMassOrbitFragment& Orbit = *Data.Orbit;
 	FMassSatelliteTaskFragment& Task = *Data.Task;
 
-	// 飞行推进（路径参数已一次算好；每帧仅曲线求值）
+	// 飞行推进（参数已一次算好；每帧仅参数方程求值）
 	Task.PhaseElapsed += DeltaTime;
 	const float Alpha = (Task.PhaseDuration > KINDA_SMALL_NUMBER) ? (Task.PhaseElapsed / Task.PhaseDuration) : 1.f;
 	if (Alpha < 1.f)
 	{
-		Orbit.OverrideLocation = UPlanetBlueprintFunctionLibrary::EvaluateCubicBezier(
-			Task.PhaseStartLocation, Task.PhaseControlPoint1, Task.PhaseControlPoint2, Task.PhaseEndLocation, Alpha);
+		// 极坐标参数方程（含垂直分量）：θ 同步推进 + 平面内半径线性插值 + 法线偏移线性插值
+		const float ThetaDeg = Task.PhaseThetaStartDeg + Task.PhaseThetaDeltaDeg * Alpha;
+		const float RadiusNow = FMath::Lerp(Task.PhaseRadiusStart, Task.PhaseRadiusEnd, Alpha);
+		const float VerticalNow = FMath::Lerp(Task.PhaseVerticalStart, Task.PhaseVerticalEnd, Alpha);
+		const FVector PlanePoint = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(
+			Shared.OrbitTransform, RadiusNow, ThetaDeg);
+		const FVector OrbitNormal = Shared.OrbitTransform.GetRotation().GetAxisZ();
+		Orbit.OverrideLocation = PlanePoint + OrbitNormal * VerticalNow;
+
 		return EStateTreeRunStatus::Running;
 	}
 
@@ -665,19 +964,10 @@ EStateTreeRunStatus FSatelliteExecuteActionTask::EnterState(FStateTreeExecutionC
 	}
 	Orbit.State = ESatelliteState::Work;
 
-	// 认领句柄快照（去重；队列完成时统一释放）
 	FSatelliteExecuteActionTaskInstanceData& InstanceData = Context.GetInstanceData(*this);
-	InstanceData.UniqueClaimHandles.Reset();
-	for (const FSmartObjectClaimHandle& ItemHandle : Task.ClaimHandles)
-	{
-		if (ItemHandle.IsValid() && !InstanceData.UniqueClaimHandles.Contains(ItemHandle))
-		{
-			InstanceData.UniqueClaimHandles.Add(ItemHandle);
-		}
-	}
 
-	// 开始首项（读该项行为时长）
-	BeginQueueItem(Task, InstanceData, Context.GetWorld());
+	// 开始首项（读该项行为时长；此时已消费数 = 0）
+	BeginQueueItem(Task, InstanceData, Context.GetWorld(), 0);
 
 	UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] work start at cell (%d, %d), items=%d, first=%s duration=%.2fs"),
 		Data.Entity.Index, Task.TargetCoord.X, Task.TargetCoord.Y, Task.WorkQueue.Num(),
@@ -712,24 +1002,15 @@ EStateTreeRunStatus FSatelliteExecuteActionTask::Tick(FStateTreeExecutionContext
 		Data.Entity.Index, *GetEditModeName(CurrentEditMode), Task.TargetCoord.X, Task.TargetCoord.Y,
 		Task.WorkQueue.Num() - 1);
 
-	// 出队（FIFO：队列与句柄数组同步移除首项）
+	// 出队（FIFO：只消耗操作队列；句柄不清——全量保留作为"出勤账本"，回轨到达时统一释放）
 	Task.WorkQueue.RemoveAt(0);
-	if (Task.ClaimHandles.Num() > 0)
-	{
-		Task.ClaimHandles.RemoveAt(0);
-	}
 
-	// 队列完成：释放全部认领（去重）→ 清理 → 恢复巡航（过渡：即时回轨；完整回轨动画待后续步骤）
+	// 队列完成：不释放格子认领（保留至真实回轨到达，期间对他星保持互斥）→ 进入待回
 	if (Task.WorkQueue.Num() == 0)
 	{
-		for (const FSmartObjectClaimHandle& ItemHandle : InstanceData.UniqueClaimHandles)
-		{
-			Shared.SmartObjectManager->ReleaseClaim(ItemHandle);
-		}
 		UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] work complete at cell (%d, %d)"),
 			Data.Entity.Index, Task.TargetCoord.X, Task.TargetCoord.Y);
-
-		Task.ClaimHandles.Reset();
+	
 		Task.ClaimHandle = FSmartObjectClaimHandle::InvalidHandle;
 		Task.TargetCoord = FIntPoint(-1, -1);
 		Task.TargetEditMode = EEditMode::None;
@@ -739,15 +1020,17 @@ EStateTreeRunStatus FSatelliteExecuteActionTask::Tick(FStateTreeExecutionContext
 	}
 
 	// 还有下一项：所有权检查（失权 → 取消任务）后开始下一项
+	// 已消费数 = 总句柄数 − 剩余队列长度（当前项 = WorkQueue[0] ↔ ClaimHandles[已消费数]）
+	const int32 ConsumedCount = Task.ClaimHandles.Num() - Task.WorkQueue.Num();
+	const FSmartObjectClaimHandle HeadHandle = Task.ClaimHandles.IsValidIndex(ConsumedCount) ? Task.ClaimHandles[ConsumedCount] : FSmartObjectClaimHandle::InvalidHandle;
 	const int32 HeadSlotIndex = USmartObjectManagerComponent::GetSlotIndexForEditMode(Task.WorkQueue[0]);
 	if (HeadSlotIndex >= 0)
 	{
-		const FSmartObjectClaimHandle HeadHandle = Task.ClaimHandles.Num() > 0 ? Task.ClaimHandles[0] : FSmartObjectClaimHandle::InvalidHandle;
 		if (!Shared.SmartObjectManager->IsClaimValid(Task.TargetCoord, HeadSlotIndex, HeadHandle))
 		{
 			return HandleOwnershipLost(Data, TEXT("Work"));
 		}
 	}
-	BeginQueueItem(Task, InstanceData, Context.GetWorld());
+	BeginQueueItem(Task, InstanceData, Context.GetWorld(), ConsumedCount);
 	return EStateTreeRunStatus::Running;
 }

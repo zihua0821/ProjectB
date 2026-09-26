@@ -64,6 +64,14 @@ struct PROJECTB_API FMassOrbitFragment : public FMassFragment
 	UPROPERTY(VisibleAnywhere, Category = "Orbit")
 	bool bOverrideLocation = false;
 
+	/**
+	 * 轨道槽位归属（槽位 = 智能对象实例；与格子同构）
+	 * 有效 = 持有该槽；无效 = 无槽（离轨中/未分配）
+	 * 注：已认领后的槽位查询一律用本句柄（GetOrbitSlot*ByClaim），不再维护"槽索引"字段，避免双字段不同步
+	 */
+	UPROPERTY(VisibleAnywhere, Category = "Orbit")
+	FSmartObjectClaimHandle SlotClaimHandle;
+
 	/** 覆盖位置（世界/星球本地坐标；任务每帧写） */
 	UPROPERTY(VisibleAnywhere, Category = "Orbit")
 	FVector OverrideLocation = FVector::ZeroVector;
@@ -164,7 +172,9 @@ struct PROJECTB_API FMassSatelliteTaskFragment : public FMassFragment
 
 	/**
 	 * 队列各操作的认领句柄（与 WorkQueue 一一对应；无需认领的项为 InvalidHandle）
-	 * 认领于选点时一次完成（同 Slot 的多项共享同一句柄）；逐项出队时同步移除
+	 * 认领于选点时一次完成（同 Slot 的多项共享同一句柄）；
+	 * 【全量保留】——出队只消耗 WorkQueue，本数组作为“出勤账本”保留至真实回轨到达统一释放
+	 * （当前项句柄 = ClaimHandles[已消费数]；已消费数 = 总长 − WorkQueue 剩余长度）
 	 */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
 	TArray<FSmartObjectClaimHandle> ClaimHandles;
@@ -192,5 +202,31 @@ struct PROJECTB_API FMassSatelliteTaskFragment : public FMassFragment
 	/** 飞行总时长（秒；路径长度 / 轨道线速度） */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
 	float PhaseDuration = 0.0f;
+
+	// ---- 转场轨迹参数（方案 2：切向同步 + 径向匀速；极坐标参数方程）----
+
+	/** 起始方位角（度；轨道局部） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	float PhaseThetaStartDeg = 0.0f;
+
+	/** 切向推进量（度；回轨=+ω·T，离轨=−ω·T，含方向） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	float PhaseThetaDeltaDeg = 0.0f;
+
+	/** 起始半径（cm；平面内） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	float PhaseRadiusStart = 0.0f;
+
+	/** 终止半径（cm；平面内） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	float PhaseRadiusEnd = 0.0f;
+
+	/** 平面上方偏移起点（cm；沿轨道法线；离轨=0 / 回轨=d_hover） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	float PhaseVerticalStart = 0.0f;
+
+	/** 平面上方偏移终点（cm；沿轨道法线；离轨=d_hover / 回轨=0） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	float PhaseVerticalEnd = 0.0f;
 };
 

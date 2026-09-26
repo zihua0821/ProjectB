@@ -48,10 +48,9 @@ struct FSatelliteApproachTaskInstanceData
 
 /**
  * 离轨飞行任务（Approach 状态）
- * EnterState：路径参数一次算好（起点/终点/控制点/时长；贝塞尔）→ 开启位置覆盖
- * Tick：每帧曲线求值 → 写覆盖位置；到达检查所有权（失权 → Failed，供状态树跳 AwaitReturn）
+ * EnterState：轨迹参数一次算好（起点/落点方位/平面内半径与法线偏移/时长）→ 开启位置覆盖 + 让槽
+ * Tick：每帧参数方程求值（含垂直分量）→ 写覆盖位置；到达检查所有权（失权 → Failed）
  * @return Succeeded=到达悬停点（且所有权有效）；Failed=失权/异常；Running=飞行中
- * 注：替代旧名 Move To Target——状态树资产中的任务引用需重新指定
  */
 USTRUCT(meta = (DisplayName = "Satellite Approach"))
 struct PROJECTB_API FSatelliteApproachTask : public FMassStateTreeTaskBase
@@ -92,11 +91,21 @@ USTRUCT()
 struct FSatelliteReturnWaitTaskInstanceData
 {
 	GENERATED_BODY()
+
+	/** 上次选槽时间（秒；选槽节流，避免每帧遍历槽位） */
+	double LastSelectTime = 0.0;
+};
+
+USTRUCT()
+struct FSatelliteReturnTaskInstanceData
+{
+	GENERATED_BODY()
 };
 
 /**
  * 待回任务（AwaitReturn 状态）
- * 保持悬停（位置覆盖由作业阶段持有）；等到"虚拟相位方向与悬停点方位对齐"（最近点）→ Succeeded
+ * 保持悬停（位置覆盖由作业阶段持有）；按规则选"最近可用空槽"（智能对象认领）
+ * → 等到"虚拟相位方向与目标槽位对齐"（近点）→ Succeeded
  */
 USTRUCT(meta = (DisplayName = "Satellite Return Wait"))
 struct PROJECTB_API FSatelliteReturnWaitTask : public FMassStateTreeTaskBase
@@ -109,17 +118,10 @@ struct PROJECTB_API FSatelliteReturnWaitTask : public FMassStateTreeTaskBase
 	virtual EStateTreeRunStatus Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const override;
 };
 
-USTRUCT()
-struct FSatelliteReturnTaskInstanceData
-{
-	GENERATED_BODY()
-};
-
 /**
  * 回轨飞行任务（Return 状态）
- * EnterState：路径参数（起点=悬停点；终点=入轨点初值；控制点；时长估算）
- * Tick：动态终点（每帧 = 虚拟相位点，保证入轨连续无跳变）→ 贝塞尔求值；
- *       到达（Alpha≥1）：清位置覆盖 + State=Cruise → Succeeded
+ * EnterState：起点=悬停点（权威）；落点 = 槽位相位 + ω·T（含 δ0 补偿）；垂直偏移按需插值
+ * Tick：参数方程求值 → 写覆盖；到达（Alpha≥1）：写落点 + 清覆盖 + 账面相位对齐槽位 → Succeeded
  */
 USTRUCT(meta = (DisplayName = "Satellite Return"))
 struct PROJECTB_API FSatelliteReturnTask : public FMassStateTreeTaskBase
@@ -143,9 +145,6 @@ struct FSatelliteExecuteActionTaskInstanceData
 
 	/** 当前项作业时长（秒；取自该项认领的行为定义，缺省用默认值） */
 	float ActionDuration = 0.f;
-
-	/** 本次出勤认领句柄快照（去重；队列完成时统一释放） */
-	TArray<FSmartObjectClaimHandle> UniqueClaimHandles;
 };
 
 /**

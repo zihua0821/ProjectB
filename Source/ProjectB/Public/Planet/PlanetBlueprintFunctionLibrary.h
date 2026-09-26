@@ -84,6 +84,15 @@ public:
 	static FVector ComputeOrbitHoverPoint(const FVector& CellCenter, const float PlanetRadius, const float HoverHeight);
 
 	/*
+	 * 空间点 → 轨道平面分解（离轨/回轨轨迹的"平面内 + 垂直"两分量基础）
+	 *   OutThetaDeg  平面内方位（度；轨道局部 atan2）
+	 *   OutRadius    平面内半径（cm）
+	 *   OutVertical  沿轨道法线的偏移量（cm；有符号）
+	 * 用途：悬停点作权威点 → 拆出（方位/半径/垂直）→ 轨迹按两分量插值 → 端点精确命中悬停点
+	 */
+	static void DecomposeToOrbitPlane(const FTransform& OrbitTransform, const FVector& Point, float& OutThetaDeg, float& OutRadius, float& OutVertical);
+
+	/*
 	 * 轨道切线方向（卫星运动方向；与 ComputeOrbitWorldPosition 同一参数化）
 	 * @param bClockwise true=顺时针（角度递减，方向取反）
 	 */

@@ -128,6 +128,9 @@ public:
 	/** 贝塞尔控制点比例（只读；离轨/回轨任务读取） */
 	float GetTransferControlFactor() const { return TransferControlFactor; }
 
+	/** 转场径向速度（只读；T = |R_orb − R_hover| / 此值；离轨/回轨共用） */
+	float GetRadialTransferSpeed() const { return RadialTransferSpeed; }
+
 	// ---- 轨道编辑接口（运行时数据编辑 → 可视化实时刷新 → ApplyOrbitChanges 重建卫星） ----
 
 	/** 获取运行时轨道数据（可编辑副本） */
@@ -217,6 +220,10 @@ private:
 	/** 贝塞尔控制点比例 k（离轨/回轨转场：d = k × 起终点距离） */
 	UPROPERTY(EditDefaultsOnly, Category = "Satellite", meta = (DisplayName = "转场控制点比例", ClampMin = "0.05", ClampMax = "1.0"))
 	float TransferControlFactor = 0.35f;
+
+	/** 转场径向速度（cm/s；时长 T = |R_orb − R_hover| / 此值；离轨/回轨共用） */
+	UPROPERTY(EditDefaultsOnly, Category = "Satellite", meta = (DisplayName = "转场径向速度", ClampMin = "1.0"))
+	float RadialTransferSpeed = 2000.0f;
 
 	// ---- 运行时 ----
 

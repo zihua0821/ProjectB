@@ -1,4 +1,4 @@
-﻿#include "Mass/CropGrowthProcessor.h"
+#include "Mass/CropGrowthProcessor.h"
 #include "MassEntityManager.h"
 #include "MassExecutionContext.h"
 #include "Mass/CellMassFragments.h"
@@ -65,9 +65,12 @@ void UCropGrowthProcessor::Execute(FMassEntityManager& EntityManager, FMassExecu
                 InContext.Defer().RemoveFragment<FCropQualityFragment>(Entity);
                 continue;
             }
-            // 1. 已收获不再处理
+            // 1. 已收获：Harvested 阶段计时（停留时长达到后，由选点侧允许重播）
             if (CropState.CropGrowthStage == ECropGrowthStage::Harvested)
+            {
+                Timer.CurrentStageGrowthTime += DeltaTime;
                 continue;
+            }
 
             // 3. 种子阶段特殊处理：同时缺水缺肥 → 不更新、不生长
             const bool bNeedsWater = !PlotState.StateData.HasState(EPlotState::Watered);

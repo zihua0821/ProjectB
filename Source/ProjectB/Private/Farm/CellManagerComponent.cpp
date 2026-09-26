@@ -991,6 +991,8 @@ bool UCellManagerComponent::HarvestCrop(FIntPoint Coords)
     // 将作物状态改为已收获（渲染处理器会自动处理 Mesh 切换）
     CropState->CropGrowthStage = ECropGrowthStage::Harvested;
     CropState->CropStateData.RemoveState(ECropState::ReadyForHarvest);
+    // 重置阶段计时：Harvested 停留时长从此刻起算（重播延迟期满才可播种）
+    Timer->CurrentStageGrowthTime = 0.0f;
 	
     return true;
 }

@@ -106,6 +106,15 @@ FVector UPlanetBlueprintFunctionLibrary::ComputeOrbitHoverPoint(const FVector& C
 	return Radial * (PlanetRadius + HoverHeight);
 }
 
+void UPlanetBlueprintFunctionLibrary::DecomposeToOrbitPlane(const FTransform& OrbitTransform, const FVector& Point, float& OutThetaDeg, float& OutRadius, float& OutVertical)
+{
+	// 转到轨道局部：局部 XY 平面即轨道平面，局部 Z 即法线方向
+	const FVector LocalPoint = OrbitTransform.InverseTransformPosition(Point);
+	OutVertical = LocalPoint.Z;
+	OutRadius = FVector(LocalPoint.X, LocalPoint.Y, 0.0f).Size();
+	OutThetaDeg = FMath::RadiansToDegrees(FMath::Atan2(LocalPoint.Y, LocalPoint.X));
+}
+
 FVector UPlanetBlueprintFunctionLibrary::ComputeOrbitTangent(const FTransform& OrbitTransform, const float AngleDeg, const bool bClockwise)
 {
 	// 与 ComputeOrbitWorldPosition 同一参数化：局部 (R cosθ, R sinθ, 0)
@@ -152,7 +161,13 @@ FVector UPlanetBlueprintFunctionLibrary::EvaluateCubicBezier(const FVector& P0, 
 void UPlanetBlueprintFunctionLibrary::BuildOrbitTransferControlPoints(const FVector& StartPoint, const FVector& EndPoint, const FVector& OrbitTangent,
 	const bool bOutbound, const float ControlFactor, FVector& OutP1, FVector& OutP2)
 {
-	const float ControlDistance = FMath::Max(0.0f, ControlFactor) * FVector::Dist(StartPoint, EndPoint);
+	// 控制点偏移封顶：不超过"起点与终点的高度差"（即离轨/回轨的径向跨度，通常 = 悬停高度）
+	// 背景：d = k × |P0→P3| 在"远距离转场"时会变得极大（如 80000×0.35=28000）
+	//       → 控制点被甩出球外很远 → 曲线绕大弧甚至穿球；封顶后曲线只能"贴面滑落"
+	const float Distance = FVector::Dist(StartPoint, EndPoint);
+	const float HeightSpan = FMath::Abs(StartPoint.Size() - EndPoint.Size());
+	const float MaxOffset = (HeightSpan > KINDA_SMALL_NUMBER) ? HeightSpan : 1000.0f;
+	const float ControlDistance = FMath::Min(FMath::Max(0.0f, ControlFactor) * Distance, MaxOffset);
 	const FVector StartRadial = StartPoint.GetSafeNormal();   // 起点法线方向
 	const FVector EndRadial = EndPoint.GetSafeNormal();       // 终点法线方向
 
