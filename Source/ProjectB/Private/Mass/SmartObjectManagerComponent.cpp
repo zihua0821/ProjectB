@@ -101,8 +101,8 @@ void USmartObjectManagerComponent::TickComponent(float DeltaTime, ELevelTick Tic
 		return;
 	}
 
-	// 注册完成阶段：驱动轨道槽位随相位旋转（智能对象实例变换同步）
-	UpdateOrbitSlots(DeltaTime);
+	// 注：注册完成后槽位推进不在本组件 Tick 内做——由 SatelliteOrbitMovementProcessor 在 Mass 帧序内驱动
+	//（先槽后星、同帧同序：渲染同步处理器随后读到同帧槽缓存，消除恒定错位）
 }
 
 bool USmartObjectManagerComponent::RegisterCell(const FIntPoint Coords)
@@ -320,7 +320,7 @@ bool USmartObjectManagerComponent::IsSlotEnabled(const FIntPoint Coords, const i
 
 // ---- 轨道槽位（回轨槽位：与格子同构的智能对象实例） ----
 
-void USmartObjectManagerComponent::RegisterOrbitSlots(const TArray<FRuntimeOrbitData>& Orbits)
+void USmartObjectManagerComponent::RegisterOrbitSlots(const TArray<FRuntimeOrbitData>& Orbits, const int32 SlotMultiplier)
 {
 	if (!SmartObjectSubsystem || !OrbitSlotDefinition)
 	{
@@ -331,9 +331,12 @@ void USmartObjectManagerComponent::RegisterOrbitSlots(const TArray<FRuntimeOrbit
 	// 重建前清理旧表（旧实例由引擎生命周期管理，无需手动销毁）
 	OrbitSlots.Reset();
 
+	// 槽位倍数（槽数 = 卫星数 × 倍数；全局决策的候选自由度）
+	const int32 SafeMultiplier = FMath::Max(1, SlotMultiplier);
+
 	for (const FRuntimeOrbitData& Orbit : Orbits)
 	{
-		const int32 SlotCount = FMath::Max(0, Orbit.SatelliteCount);
+		const int32 SlotCount = FMath::Max(0, Orbit.SatelliteCount) * SafeMultiplier;
 		if (SlotCount == 0)
 		{
 			continue;
@@ -345,7 +348,7 @@ void USmartObjectManagerComponent::RegisterOrbitSlots(const TArray<FRuntimeOrbit
 		Entry.OrbitRadius = Orbit.Radius;
 		Entry.AngularVelocity = Orbit.AngularVelocity;
 		Entry.bClockwise = Orbit.bClockwise;
-		Entry.CurrentPhaseDeg = 0.f;   // 槽 0 起始相位（与卫星初始均分一致）
+		Entry.CurrentPhaseDeg = 0.f;   // 槽 0 起始相位（星 i 认领槽 i×K → 相位恰好均分）
 		Entry.ObjectHandles.Reserve(SlotCount);
 		Entry.SlotWorldPositions.Reserve(SlotCount);
 		Entry.SlotHandles.Reserve(SlotCount);
@@ -517,6 +520,12 @@ FSmartObjectClaimHandle USmartObjectManagerComponent::TryClaimOrbitSlot(const FN
 	}
 	// 认领失败（已被占）时引擎返回无效句柄（槽位占用情况通过句柄有效性判断）
 	return SmartObjectSubsystem->MarkSlotAsClaimed(Entry->SlotHandles[SlotIndex], Priority, FConstStructView());
+}
+
+bool USmartObjectManagerComponent::IsSlotClaimed(const FIntPoint Coords, const int32 SlotIndex) const
+{
+	// 账本 = 当前认领者（所有认领入口统一走本组件）——识别"幽灵认领"（持有者不会来服务）
+	return ClaimLedger.IsValidIndex(SlotIndex) && ClaimLedger[SlotIndex].Contains(Coords);
 }
 
 int32 USmartObjectManagerComponent::GetSlotIndexForEditMode(const EEditMode EditMode)

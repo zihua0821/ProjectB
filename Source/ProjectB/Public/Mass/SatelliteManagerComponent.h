@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "MassEntityTypes.h"
+#include "Mass/OrbitPlanningTypes.h"       // 轨道全局规划：快照/计划结构
 #include "Planet/OrbitManagerComponent.h"   // FOrbitDefinition
 #include "SatelliteManagerComponent.generated.h"
 
@@ -159,6 +160,11 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Satellite|Orbit")
 	FOnRuntimeOrbitChanged OnRuntimeOrbitChanged;
 
+	/** 规划层：滚动节拍入口（抄账 → 求解 → 发单）——由 USatelliteOrbitPlanProcessor 在 Mass 帧序内驱动 */
+	void TickOrbitPlanning();
+
+protected:
+
 private:
 	/** 构建运行时轨道数据（从 PlanetConfig->OrbitDefinitions 转换；空则兜底默认轨道） */
 	void BuildRuntimeOrbits();
@@ -174,6 +180,17 @@ private:
 
 	/** 销毁全部卫星（渲染实例 + 实体） */
 	void DestroyAllSatellites();
+
+	// ---- 轨道全局规划（群体决策；滚动节拍：抄账 → 求解 → 发单） ----
+
+	/** 抄账：采集全部卫星的规划快照（按轨道分组；同一帧一口气读完） */
+	void CollectOrbitSnapshots(TArray<FOrbitSnapshot>& OutSnapshots);
+
+	/** 求解（纯函数：只读快照与参数、无状态、确定性——同一快照必得同一计划；每轨独立） */
+	static void BuildOrbitPlan(const FOrbitSnapshot& Snapshot, const FOrbitPlanParams& Params, FOrbitPlan& OutPlan);
+
+	/** 发单：认领目标槽并写回句柄（失败/已占位者跳过；下轮快照自然复核） */
+	void DispatchOrbitPlan(const FOrbitPlan& Plan);
 
 	/** CellManager 意图委托回调：Crop Slot（1）启停 → 维护活跃农田集合 */
 	void HandleCellSlotStateChanged(const FIntPoint Coords, const int32 SlotIndex, const bool bEnabled);
@@ -225,6 +242,26 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Satellite", meta = (DisplayName = "转场径向速度", ClampMin = "1.0"))
 	float RadialTransferSpeed = 2000.0f;
 
+	/** 轨道槽位倍数（槽数 = 卫星数 × 此值；全局决策的候选自由度） */
+	UPROPERTY(EditDefaultsOnly, Category = "Satellite", meta = (DisplayName = "轨道槽位倍数", ClampMin = "1", ClampMax = "20"))
+	int32 OrbitSlotMultiplier = 5;
+
+	/** 规划节拍间隔（秒；滚动决策频率——不等待执行完成，在途按目标槽计） */
+	UPROPERTY(EditDefaultsOnly, Category = "Satellite", meta = (DisplayName = "规划节拍间隔", ClampMin = "0.1"))
+	float OrbitPlanIntervalSeconds = 1.0f;
+
+	/** 等待角上限（度；排座过滤——候选槽需在此角内转到悬停投影；与位移上限统一 45°） */
+	UPROPERTY(EditDefaultsOnly, Category = "Satellite", meta = (DisplayName = "等待角上限", ClampMin = "1.0", ClampMax = "360.0"))
+	float OrbitPlanWaitAngleLimitDeg = 45.0f;
+
+	/** 整理触发线（最小相邻间距 < 均匀间距 × 此比例 才启动均匀化；0.6 = 六成） */
+	UPROPERTY(EditDefaultsOnly, Category = "Satellite", meta = (DisplayName = "整理触发线", ClampMin = "0.1", ClampMax = "1.0"))
+	float OrbitPlanRebalanceRatio = 0.6f;
+
+	/** 均匀化独立节流（秒；每 N 秒一个整理窗口——落座阶段①仍按规划节拍滚动） */
+	UPROPERTY(EditDefaultsOnly, Category = "Satellite", meta = (DisplayName = "均匀化节流", ClampMin = "0.1"))
+	float OrbitRebalanceIntervalSeconds = 5.0f;
+
 	// ---- 运行时 ----
 
 	UPROPERTY()
@@ -232,6 +269,12 @@ private:
 
 	/** 已创建的卫星实体（全部轨道汇总） */
 	TArray<FMassEntityHandle> SatelliteEntities;
+
+	/** 上次规划时间（秒；节拍节流） */
+	double LastOrbitPlanTime = 0.0;
+
+	/** 上次进入均匀化窗口的时间（秒；阶段②独立节流） */
+	double LastRebalanceTime = 0.0;
 
 	/** 运行时轨道数据（Initialize 构建；编辑系统修改后 ApplyOrbitChanges 生效到卫星） */
 	TArray<FRuntimeOrbitData> RuntimeOrbits;

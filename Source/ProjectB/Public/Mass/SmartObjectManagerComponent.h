@@ -72,6 +72,9 @@ public:
 	/** 释放认领（MarkSlotAsFree） */
 	bool ReleaseClaim(const FSmartObjectClaimHandle& ClaimHandle) const;
 
+	/** 指定坐标 Slot 是否已被任何星认领（账本查询；扫描端排除"正在被服务"的格子，防幽灵认领吸引） */
+	bool IsSlotClaimed(const FIntPoint Coords, const int32 SlotIndex) const;
+
 	/**
 	 * 认领是否仍归本句柄所有（所有权检查：抢占/失权检测）
 	 * 基于管理器账本（所有认领入口统一走本组件），不依赖引擎查询
@@ -85,10 +88,10 @@ public:
 	// ---- 轨道槽位（回轨槽位：与格子同构的智能对象实例） ----
 
 	/**
-	 * 注册轨道槽位（每轨 N = 卫星数；均分相位固定点）
+	 * 注册轨道槽位（每轨 N = 卫星数 × SlotMultiplier；均分相位固定点）
 	 * 由卫星重建流程调用；重复调用先清理旧槽
 	 */
-	void RegisterOrbitSlots(const TArray<FRuntimeOrbitData>& Orbits);
+	void RegisterOrbitSlots(const TArray<FRuntimeOrbitData>& Orbits, const int32 SlotMultiplier);
 
 	/** 槽位数（未注册返回 0） */
 	int32 GetOrbitSlotCount(const FName OrbitName) const;
@@ -112,6 +115,9 @@ public:
 
 	/** 认领轨道槽（成功返回句柄；失败返回无效句柄） */
 	FSmartObjectClaimHandle TryClaimOrbitSlot(const FName OrbitName, const int32 SlotIndex, const ESmartObjectClaimPriority Priority) const;
+
+	/** 槽位随相位更新（由 SatelliteOrbitMovementProcessor 在 Mass 帧序内驱动：先槽后星，渲染同步读到同帧缓存） */
+	void UpdateOrbitSlots(const float DeltaSeconds);
 
 	/**
 	 * 操作模式 → 智能对象 Slot 索引映射
@@ -179,9 +185,6 @@ private:
 
 	/** 轨道名 → 槽位条目 */
 	TMap<FName, FOrbitSlotEntry> OrbitSlots;
-
-	/** 槽位随相位更新（每帧推进相位并同步智能对象实例变换；不依赖槽位时开销可忽略） */
-	void UpdateOrbitSlots(const float DeltaSeconds);
 
 	/**
 	 * 认领账本：每个 Slot 一本（索引 = SlotIndex：0=Plot, 1=Crop；坐标 → 当前认领句柄）

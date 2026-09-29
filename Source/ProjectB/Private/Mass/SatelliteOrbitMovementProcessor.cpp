@@ -3,6 +3,7 @@
 
 #include "MassExecutionContext.h"
 #include "Mass/SatelliteMassFragments.h"
+#include "Mass/SmartObjectManagerComponent.h"   // UpdateOrbitSlots（槽位推进——先槽后星，同帧同序）
 
 namespace
 {
@@ -44,14 +45,28 @@ USatelliteOrbitMovementProcessor::USatelliteOrbitMovementProcessor()
 void USatelliteOrbitMovementProcessor::ConfigureQueries()
 {
 	EntityQuery.AddRequirement<FMassOrbitFragment>(EMassFragmentAccess::ReadWrite);
+	EntityQuery.AddConstSharedRequirement<FMassSatelliteSharedFragment>();   // 取 SmartObjectManager（驱动槽位推进）
 }
 
 void USatelliteOrbitMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	const float DeltaTime = Context.GetDeltaTimeSeconds();
 
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [DeltaTime](FMassExecutionContext& ChunkContext)
+	// 槽位相位推进【先槽后星】：与卫星同帧同序——渲染同步处理器随后读到同帧槽缓存，消除"卫星滞后一帧相位"的恒定错位
+	//（此前由 SmartObjectManagerComponent 的组件 Tick 驱动，与 Mass 帧序先后不定）
+	bool bSlotsUpdated = false;
+	EntityQuery.ForEachEntityChunk(EntityManager, Context, [DeltaTime, &bSlotsUpdated](FMassExecutionContext& ChunkContext)
 	{
+		if (!bSlotsUpdated)
+		{
+			bSlotsUpdated = true;   // 槽推进为全局行为：仅首个 chunk 执行一次
+			const FMassSatelliteSharedFragment& Shared = ChunkContext.GetConstSharedFragment<FMassSatelliteSharedFragment>();
+			if (Shared.SmartObjectManager)
+			{
+				Shared.SmartObjectManager->UpdateOrbitSlots(DeltaTime);
+			}
+		}
+
 		const TArrayView<FMassOrbitFragment> OrbitFragments = ChunkContext.GetMutableFragmentView<FMassOrbitFragment>();
 		const int32 NumEntities = ChunkContext.GetNumEntities();
 

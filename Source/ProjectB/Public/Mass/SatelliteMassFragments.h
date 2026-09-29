@@ -25,7 +25,8 @@ enum class ESatelliteState : uint8
 	Approach      UMETA(DisplayName = "离轨飞行"),
 	Work          UMETA(DisplayName = "悬停作业"),
 	AwaitReturn   UMETA(DisplayName = "待回"),
-	Return        UMETA(DisplayName = "回轨飞行")
+	Return        UMETA(DisplayName = "回轨飞行"),
+	Drift         UMETA(DisplayName = "漂移")
 };
 
 /**
@@ -71,6 +72,10 @@ struct PROJECTB_API FMassOrbitFragment : public FMassFragment
 	 */
 	UPROPERTY(VisibleAnywhere, Category = "Orbit")
 	FSmartObjectClaimHandle SlotClaimHandle;
+
+	/** 漂移请求（规划器发单：巡航检查任务消费后转 Drift；消费即清） */
+	UPROPERTY(VisibleAnywhere, Category = "Orbit")
+	bool bDriftRequested = false;
 
 	/** 覆盖位置（世界/星球本地坐标；任务每帧写） */
 	UPROPERTY(VisibleAnywhere, Category = "Orbit")
@@ -228,5 +233,9 @@ struct PROJECTB_API FMassSatelliteTaskFragment : public FMassFragment
 	/** 平面上方偏移终点（cm；沿轨道法线；离轨=d_hover / 回轨=0） */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
 	float PhaseVerticalEnd = 0.0f;
+
+	/** 漂移中断时刻（秒；中断→Depart 送达探针——DepartWait 首帧记录延迟并清零；0=无中断） */
+	UPROPERTY(VisibleAnywhere, Category = "Satellite")
+	double DriftInterruptTimeSeconds = 0.0;
 };
 
