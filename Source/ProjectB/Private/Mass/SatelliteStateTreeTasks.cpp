@@ -1044,8 +1044,8 @@ EStateTreeRunStatus FSatelliteExecuteActionTask::EnterState(FStateTreeExecutionC
 	// 开始首项（读该项行为时长；此时已消费数 = 0）
 	BeginQueueItem(Task, InstanceData, Context.GetWorld(), 0);
 
-	UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] work start at cell (%d, %d), items=%d, first=%s duration=%.2fs"),
-		Data.Entity.Index, Task.TargetCoord.X, Task.TargetCoord.Y, Task.WorkQueue.Num(),
+	UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] work start at cell (%d, %d) (%s), items=%d, first=%s duration=%.2fs"),
+		Data.Entity.Index, Task.TargetCoord.X, Task.TargetCoord.Y, *Orbit.OrbitName.ToString(), Task.WorkQueue.Num(),
 		*GetEditModeName(Task.WorkQueue[0]), InstanceData.ActionDuration);
 
 	return EStateTreeRunStatus::Running;
