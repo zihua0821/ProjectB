@@ -152,9 +152,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Satellite|Orbit")
 	void RemoveOrbit(const FName OrbitName);
 
-	/** 应用轨道变更：重建全部卫星实体（销毁 + 按运行时数据重建） */
+	/** 应用轨道变更：重建全部卫星实体（逐轨按轨重建；正式路径均按轨，此入口供调试） */
 	UFUNCTION(BlueprintCallable, Category = "Satellite|Orbit")
 	void ApplyOrbitChanges();
+
+	/** 按轨重建：只重建指定轨道的卫星与槽位（其他轨道零触碰——编辑交互正式路径） */
+	UFUNCTION(BlueprintCallable, Category = "Satellite|Orbit")
+	void ApplyOrbitChangesForOrbit(const FName OrbitName);
 
 	/** 轨道数据变化广播（可视化组件订阅） */
 	UPROPERTY(BlueprintAssignable, Category = "Satellite|Orbit")
@@ -162,6 +166,9 @@ public:
 
 	/** 规划层：滚动节拍入口（抄账 → 求解 → 发单）——由 USatelliteOrbitPlanProcessor 在 Mass 帧序内驱动 */
 	void TickOrbitPlanning();
+
+	/** 重置全部卫星的 StateTree 时间基准（选定暂停恢复时调用：暂停窗口不计入任务 AdjustedDeltaTime，防"恢复瞬移到目标"） */
+	void ResetSatelliteStateTreeTimeBase();
 
 protected:
 
@@ -178,8 +185,8 @@ private:
 	/** 注册卫星渲染实例（ISM 单桶路径）并回写 InstanceId */
 	void RegisterRenderInstances(const TArray<FMassEntityHandle>& Entities, const TArray<FTransform>& Transforms);
 
-	/** 销毁全部卫星（渲染实例 + 实体） */
-	void DestroyAllSatellites();
+	/** 销毁指定轨道的卫星（渲染实例 + 实体；含归还一切认领——其他轨道保留） */
+	void DestroySatellitesForOrbit(const FName OrbitName);
 
 	// ---- 轨道全局规划（群体决策；滚动节拍：抄账 → 求解 → 发单） ----
 
@@ -212,7 +219,7 @@ private:
 
 	/** 卫星数量 */
 	UPROPERTY(EditDefaultsOnly, Category = "Satellite", meta = (ClampMin = "1", ClampMax = "10000"))
-	int32 SatelliteCount = 3;
+	int32 SatelliteCount = 10;
 
 	/** 角速度（度/秒） */
 	UPROPERTY(EditDefaultsOnly, Category = "Satellite")

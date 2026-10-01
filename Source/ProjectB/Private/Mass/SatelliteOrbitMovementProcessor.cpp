@@ -4,6 +4,7 @@
 #include "MassExecutionContext.h"
 #include "Mass/SatelliteMassFragments.h"
 #include "Mass/SmartObjectManagerComponent.h"   // UpdateOrbitSlots（槽位推进——先槽后星，同帧同序）
+#include "Simulation/SimulationControlSubsystem.h"   // 选定暂停（白名单挂载）
 
 namespace
 {
@@ -50,6 +51,9 @@ void USatelliteOrbitMovementProcessor::ConfigureQueries()
 
 void USatelliteOrbitMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+	// 选定暂停（白名单）：编辑模式中冻结槽推进与卫星相位
+	SIMULATION_PAUSE_RETURN(Context.GetWorld());
+
 	const float DeltaTime = Context.GetDeltaTimeSeconds();
 
 	// 槽位相位推进【先槽后星】：与卫星同帧同序——渲染同步处理器随后读到同帧槽缓存，消除"卫星滞后一帧相位"的恒定错位

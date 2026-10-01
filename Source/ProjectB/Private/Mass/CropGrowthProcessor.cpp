@@ -6,6 +6,7 @@
 #include "Farm/FarmlandConfigDataAsset.h"
 #include "Crops/CropData.h"
 #include "Engine/DataTable.h"
+#include "Simulation/SimulationControlSubsystem.h"   // 选定暂停（白名单挂载）
 
 UCropGrowthProcessor::UCropGrowthProcessor()
 {
@@ -25,6 +26,9 @@ void UCropGrowthProcessor::ConfigureQueries()
 
 void UCropGrowthProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+    // 选定暂停（白名单）：编辑模式中冻结作物生长（管理面板语义）
+    SIMULATION_PAUSE_RETURN(EntityManager.GetWorld());
+
     const UWorld* World = EntityManager.GetWorld();
     if (!World) return;
 

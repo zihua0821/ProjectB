@@ -17,6 +17,7 @@
 #include "MassEntitySubsystem.h"
 #include "Planet/PlanetActor.h"
 #include "ProjectB/Public/TimeSync/TimeSyncComponent.h"
+#include "Simulation/SimulationControlSubsystem.h"   // 选定暂停（编辑模式进/出）
 
 ABasePlayerController::ABasePlayerController()
 {
@@ -247,6 +248,15 @@ void ABasePlayerController::EnterOrbitEditMode()
 		}
 	}
 
+	// 选定暂停：冻结"世界演化"链（白名单自检生效）；玩家自由飞行/编辑可视化不受影响
+	if (UWorld* World = GetWorld())
+	{
+		if (USimulationControlSubsystem* SimControl = World->GetSubsystem<USimulationControlSubsystem>())
+		{
+			SimControl->SetSimulationPaused(true);
+		}
+	}
+
 	UE_LOG(LogTemp, Log, TEXT("[Player] Orbit edit mode ENTERED"));
 }
 
@@ -264,6 +274,20 @@ void ABasePlayerController::ExitOrbitEditMode()
 		if (UOrbitCoverageVisualComponent* Visual = Planet->GetOrbitCoverageVisualComponent())
 		{
 			Visual->SetVisualizationEnabled(false);
+		}
+	}
+
+	// 恢复运行：先重置 StateTree 时间基准（暂停窗口不计入任务 dt——防"恢复即瞬移到目标"）
+	if (USatelliteManagerComponent* Manager = ResolveSatelliteManager())
+	{
+		Manager->ResetSatelliteStateTreeTimeBase();
+	}
+	// 解除选定暂停（世界演化链恢复）
+	if (UWorld* World = GetWorld())
+	{
+		if (USimulationControlSubsystem* SimControl = World->GetSubsystem<USimulationControlSubsystem>())
+		{
+			SimControl->SetSimulationPaused(false);
 		}
 	}
 
@@ -354,14 +378,6 @@ void ABasePlayerController::OrbitSetNormal(float X, float Y, float Z)
 	}
 }
 
-void ABasePlayerController::OrbitApplyChanges()
-{
-	if (USatelliteManagerComponent* Manager = ResolveSatelliteManager())
-	{
-		Manager->ApplyOrbitChanges();   // 销毁 + 按运行时数据重建卫星
-	}
-}
-
 USatelliteManagerComponent* ABasePlayerController::ResolveSatelliteManager() const
 {
 	APlanetActor* Planet = Cast<APlanetActor>(UGameplayStatics::GetActorOfClass(GetWorld(), APlanetActor::StaticClass()));
@@ -423,11 +439,11 @@ void ABasePlayerController::DeleteOrbit(const FName OrbitName) const
 	}
 }
 
-void ABasePlayerController::ApplyOrbitChangesToSatellites() const
+void ABasePlayerController::CommitOrbitChanges(const FName OrbitName) const
 {
 	if (USatelliteManagerComponent* Manager = ResolveSatelliteManager())
 	{
-		Manager->ApplyOrbitChanges();
+		Manager->ApplyOrbitChangesForOrbit(OrbitName);   // 只重建该轨（选定暂停中执行，安全）
 	}
 }
 

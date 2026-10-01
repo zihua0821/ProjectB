@@ -96,10 +96,6 @@ protected:
 	UFUNCTION(Exec)
 	void OrbitSetNormal(float X, float Y, float Z);
 
-	/** 应用轨道变更（重建卫星实体）：OrbitApplyChanges */
-	UFUNCTION(Exec)
-	void OrbitApplyChanges();
-
 	// ---- UMG 轨道编辑面板接口（BlueprintCallable；内部转发到 SatelliteManager） ----
 
 	/** 全部轨道名（面板列表用） */
@@ -122,9 +118,9 @@ protected:
 	UFUNCTION(BlueprintCallable, Category = "OrbitEdit")
 	void DeleteOrbit(FName OrbitName) const;
 
-	/** 应用轨道变更：重建全部卫星实体 */
+	/** 提交编辑变更（参数控件的回车/失焦落定）：只重建指定轨道——所见即所得 */
 	UFUNCTION(BlueprintCallable, Category = "OrbitEdit")
-	void ApplyOrbitChangesToSatellites() const;
+	void CommitOrbitChanges(FName OrbitName) const;
 
 	/** 显示/隐藏轨道编辑面板（控制台命令）：OrbitShowEditor */
 	UFUNCTION(Exec)

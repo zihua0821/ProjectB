@@ -4,6 +4,7 @@
 #include "MassExecutionContext.h"
 #include "Mass/SatelliteMassFragments.h"
 #include "Mass/SatelliteManagerComponent.h"
+#include "Simulation/SimulationControlSubsystem.h"   // 选定暂停（白名单挂载）
 
 USatelliteOrbitPlanProcessor::USatelliteOrbitPlanProcessor()
 	: EntityQuery(*this)
@@ -22,6 +23,9 @@ void USatelliteOrbitPlanProcessor::ConfigureQueries()
 
 void USatelliteOrbitPlanProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+	// 选定暂停（白名单）：编辑模式中冻结规划（不发单、不整理）
+	SIMULATION_PAUSE_RETURN(Context.GetWorld());
+
 	// 规划为全局行为：仅首个 chunk 触发一次（1s 节流在 TickOrbitPlanning 内部）
 	bool bPlanned = false;
 	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&bPlanned](FMassExecutionContext& ChunkContext)

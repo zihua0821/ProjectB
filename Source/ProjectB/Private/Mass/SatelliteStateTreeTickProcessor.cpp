@@ -5,6 +5,7 @@
 #include "MassSignalSubsystem.h"
 #include "MassStateTreeTypes.h"     // UE::Mass::Signals::NewStateTreeTaskRequired
 #include "Mass/SatelliteMassFragments.h"
+#include "Simulation/SimulationControlSubsystem.h"   // 选定暂停（白名单挂载）
 
 USatelliteStateTreeTickProcessor::USatelliteStateTreeTickProcessor()
 	: EntityQuery(*this)
@@ -23,6 +24,9 @@ void USatelliteStateTreeTickProcessor::ConfigureQueries()
 
 void USatelliteStateTreeTickProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+	// 选定暂停（白名单）：编辑模式中冻结心跳——行为总闸（状态树全静）
+	SIMULATION_PAUSE_RETURN(Context.GetWorld());
+
 	// 收集全部卫星实体（chunk 并行，加锁合并；卫星数量少，开销可忽略）
 	TArray<FMassEntityHandle> SatelliteEntities;
 	FCriticalSection CollectLock;

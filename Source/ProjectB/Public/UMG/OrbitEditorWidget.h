@@ -51,6 +51,9 @@ private:
 	/** 编辑副本（控件真值源；变更实时推送到运行时数据） */
 	FRuntimeOrbitData WorkingData;
 
+	/** 拖动节流重建：最近一次重建时刻（Slate 秒） */
+	double LastThrottledRebuildTime = 0.0;
+
 	/** 是否有有效选中 */
 	bool bHasSelection = false;
 
@@ -78,6 +81,12 @@ private:
 	/** 推送编辑副本到运行时数据（实时预览） */
 	void PushWorkingDataToManager();
 
+	/** 提交落定（参数控件的回车/失焦）：触发实时重建——所见即所得 */
+	void CommitOrbitChanges();
+
+	/** 拖动中"节流重建"请求（值变化时调用；最多 0.2s 一次；松手/回车的提交回调做最终落实） */
+	void RequestThrottledRebuild();
+
 	/** 由三自由度（绕 X / 绕 Y / 相位）构造轨道朝向四元数（与 SelectOrbit 反算互逆） */
 	FQuat MakeOrbitRotation() const;
 
@@ -98,7 +107,6 @@ private:
 
 	FReply OnAddOrbitClicked();
 	FReply OnDeleteOrbitClicked();
-	FReply OnApplyClicked();
 	FReply OnCloseClicked();
 	void OpenColorPicker(const bool bVisual);
 

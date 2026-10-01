@@ -352,6 +352,12 @@ void USatelliteManagerComponent::CreateSatellitesForOrbit(const FRuntimeOrbitDat
 			{
 				OrbitFragment.SlotClaimHandle = SmartObjectManager->TryClaimOrbitSlot(Orbit.OrbitName, Index * OrbitSlotMultiplier, ESmartObjectClaimPriority::Normal);
 				// 归属槽由句柄唯一标识（查询位置/相位一律走 GetOrbitSlot*ByClaim）
+				// 异常可见：同次重建中槽位全新 → 认领必然成功；失败 = 槽注册不完整（"无槽星"信号）
+				if (!OrbitFragment.SlotClaimHandle.IsValid())
+				{
+					UE_LOG(LogTemp, Warning, TEXT("[SatelliteManager] Initial slot claim failed: orbit '%s', star index %d (slot registration incomplete?)"),
+						*Orbit.OrbitName.ToString(), Index);
+				}
 			}
 		}
 
@@ -409,7 +415,7 @@ void USatelliteManagerComponent::RegisterRenderInstances(const TArray<FMassEntit
 	}
 }
 
-void USatelliteManagerComponent::DestroyAllSatellites()
+void USatelliteManagerComponent::DestroySatellitesForOrbit(const FName OrbitName)
 {
 	if (SatelliteEntities.Num() == 0)
 	{
@@ -423,14 +429,67 @@ void USatelliteManagerComponent::DestroyAllSatellites()
 	}
 	FMassEntityManager& EntityManager = World->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
 
-	// 1. 移除渲染实例（收集稳定句柄 → 批量移除）
-	if (SatelliteMesh)
+	// 筛选：目标轨 → 待毁；其余 → 保留（其他轨道零触碰——星、槽、句柄全部原样）
+	TArray<FMassEntityHandle> ToDestroy;
+	TArray<FMassEntityHandle> ToKeep;
+	ToDestroy.Reserve(SatelliteEntities.Num());
+	ToKeep.Reserve(SatelliteEntities.Num());
+	for (const FMassEntityHandle& Entity : SatelliteEntities)
+	{
+		const FMassOrbitFragment* OrbitFragment = EntityManager.GetFragmentDataPtr<FMassOrbitFragment>(Entity);
+		if (OrbitFragment && OrbitFragment->OrbitName == OrbitName)
+		{
+			ToDestroy.Add(Entity);
+		}
+		else
+		{
+			ToKeep.Add(Entity);
+		}
+	}
+
+	// 1. 归还一切认领（认领是"借"，销毁前必"还"）：
+	//    · 格子认领：Task 全量账本（同 Slot 多项共享的重复句柄——星内去重）
+	//    · 轨道槽认领：SlotClaimHandle
+	//    保证重建后"账本 / 引擎 / 槽位"三处无残留（否则格子永久不可用、槽位幽灵占用）
+	if (ToDestroy.Num() > 0 && PlanetActor)
+	{
+		if (USmartObjectManagerComponent* SmartObjectManager = PlanetActor->GetSmartObjectManagerComponent())
+		{
+			for (const FMassEntityHandle& Entity : ToDestroy)
+			{
+				if (const FMassSatelliteTaskFragment* TaskFragment = EntityManager.GetFragmentDataPtr<FMassSatelliteTaskFragment>(Entity))
+				{
+					// 星内去重：同 Slot 多项共享同一句柄——重复释放会被引擎拒绝并报 Error
+					// （账本清理幂等，但引擎 MarkSlotAsFree 对已 Free 的槽不幂等）
+					TArray<FSmartObjectClaimHandle> ReleasedHandles;
+					for (const FSmartObjectClaimHandle& ClaimHandle : TaskFragment->ClaimHandles)
+					{
+						if (ClaimHandle.IsValid() && !ReleasedHandles.Contains(ClaimHandle))
+						{
+							ReleasedHandles.Add(ClaimHandle);
+							SmartObjectManager->ReleaseClaim(ClaimHandle);
+						}
+					}
+				}
+				if (const FMassOrbitFragment* OrbitFragment = EntityManager.GetFragmentDataPtr<FMassOrbitFragment>(Entity))
+				{
+					if (OrbitFragment->SlotClaimHandle.IsValid())
+					{
+						SmartObjectManager->ReleaseClaim(OrbitFragment->SlotClaimHandle);
+					}
+				}
+			}
+		}
+	}
+
+	// 2. 移除渲染实例（收集稳定句柄 → 批量移除）
+	if (ToDestroy.Num() > 0 && SatelliteMesh)
 	{
 		if (UISMManager* ISMManager = World->GetSubsystem<UISMManager>())
 		{
 			TArray<FGlobalInstanceId> InstanceIds;
-			InstanceIds.Reserve(SatelliteEntities.Num());
-			for (const FMassEntityHandle& Entity : SatelliteEntities)
+			InstanceIds.Reserve(ToDestroy.Num());
+			for (const FMassEntityHandle& Entity : ToDestroy)
 			{
 				if (const FSatelliteRenderFragment* RenderFragment = EntityManager.GetFragmentDataPtr<FSatelliteRenderFragment>(Entity))
 				{
@@ -444,28 +503,88 @@ void USatelliteManagerComponent::DestroyAllSatellites()
 		}
 	}
 
-	// 2. 销毁实体
-	EntityManager.BatchDestroyEntities(SatelliteEntities);
-	SatelliteEntities.Reset();
+	// 3. 销毁实体（保留其余）
+	if (ToDestroy.Num() > 0)
+	{
+		EntityManager.BatchDestroyEntities(ToDestroy);
+	}
+	SatelliteEntities = MoveTemp(ToKeep);
 }
 
 void USatelliteManagerComponent::ApplyOrbitChanges()
 {
-	// ① 先重建轨道槽位（智能对象；轨道数据变更 → 槽位与卫星同步重建，先清旧槽）
-	if (PlanetActor)
+	// 全量重建 = 逐轨"按轨重建"（语义：所有轨道重置；正式编辑路径均走按轨接口——此入口供调试）
+	for (const FRuntimeOrbitData& Orbit : RuntimeOrbits)
 	{
-		if (USmartObjectManagerComponent* SmartObjectManager = PlanetActor->GetSmartObjectManagerComponent())
-		{
-			SmartObjectManager->RegisterOrbitSlots(RuntimeOrbits, OrbitSlotMultiplier);
-		}
+		ApplyOrbitChangesForOrbit(Orbit.OrbitName);
 	}
-
-	// ② 销毁旧卫星 → ③ 重建卫星（内部不再注册槽位）
-	DestroyAllSatellites();
-	CreateAllSatellites();
 
 	UE_LOG(LogTemp, Log, TEXT("[SatelliteManager] Applied orbit changes: %d satellites on %d orbit(s)"),
 		SatelliteEntities.Num(), RuntimeOrbits.Num());
+}
+
+void USatelliteManagerComponent::ApplyOrbitChangesForOrbit(const FName OrbitName)
+{
+	if (!PlanetActor)
+	{
+		return;
+	}
+	const FRuntimeOrbitData* OrbitData = RuntimeOrbits.FindByPredicate(
+		[OrbitName](const FRuntimeOrbitData& Data) { return Data.OrbitName == OrbitName; });
+	if (OrbitData == nullptr)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[SatelliteManager] ApplyOrbitChangesForOrbit: orbit '%s' not found"), *OrbitName.ToString());
+		return;
+	}
+
+	// ① 销毁该轨旧卫星（含"归还一切认领"——先撤人再拆设施：归还发生在旧槽实例仍存活时，释放真实生效）
+	DestroySatellitesForOrbit(OrbitName);
+
+	// ② 重建该轨槽位（销毁旧实例 → 建新槽——供初始认领；其他轨道零触碰）
+	USmartObjectManagerComponent* SmartObjectManager = PlanetActor->GetSmartObjectManagerComponent();
+	if (SmartObjectManager == nullptr)
+	{
+		return;
+	}
+	SmartObjectManager->RegisterSingleOrbitSlots(*OrbitData, OrbitSlotMultiplier);
+
+	// ③ 重建该轨卫星（初始认领新槽）+ 渲染实例 + 入列
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+	FMassEntityManager& EntityManager = World->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+	TArray<FMassEntityHandle> NewEntities;
+	TArray<FTransform> NewTransforms;
+	CreateSatellitesForOrbit(*OrbitData, EntityManager, NewEntities, NewTransforms);
+	RegisterRenderInstances(NewEntities, NewTransforms);
+	SatelliteEntities.Append(NewEntities);
+
+	UE_LOG(LogTemp, Log, TEXT("[SatelliteManager] Orbit '%s' rebuilt: %d satellites (total %d)"),
+		*OrbitName.ToString(), NewEntities.Num(), SatelliteEntities.Num());
+}
+
+void USatelliteManagerComponent::ResetSatelliteStateTreeTimeBase()
+{
+	UWorld* World = GetWorld();
+	if (!World || SatelliteEntities.Num() == 0)
+	{
+		return;
+	}
+	FMassEntityManager& EntityManager = World->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+	const double NowSeconds = World->GetTimeSeconds();
+
+	// StateTree 任务 dt = 当前墙钟 − LastUpdateTimeInSeconds（引擎的时间补偿设计）：
+	// 选定暂停期间心跳停发（无 tick），若不重置，恢复后第一帧的 dt = 整个暂停窗口
+	// → 任务 PhaseElapsed 跃增 → Alpha 越过 1 → "恢复即瞬移到目标"。重置基准即可抹掉暂停窗口。
+	for (const FMassEntityHandle& Entity : SatelliteEntities)
+	{
+		if (FMassStateTreeInstanceFragment* StateTreeFragment = EntityManager.GetFragmentDataPtr<FMassStateTreeInstanceFragment>(Entity))
+		{
+			StateTreeFragment->LastUpdateTimeInSeconds = NowSeconds;
+		}
+	}
 }
 
 bool USatelliteManagerComponent::UpdateOrbitData(const FName OrbitName, const FRuntimeOrbitData& NewData)
@@ -509,7 +628,7 @@ bool USatelliteManagerComponent::AddOrbit(const FRuntimeOrbitData& NewOrbit)
 	}
 
 	RuntimeOrbits.Add(SanitizedOrbit);
-	ApplyOrbitChanges();
+	ApplyOrbitChangesForOrbit(SanitizedOrbit.OrbitName);   // 只建新轨（槽 + 星）；其他轨道零触碰
 	OnRuntimeOrbitChanged.Broadcast(NewOrbit.OrbitName);
 	return true;
 }
@@ -524,7 +643,15 @@ void USatelliteManagerComponent::RemoveOrbit(const FName OrbitName)
 		return;
 	}
 
-	ApplyOrbitChanges();
+	// 只销毁该轨：卫星（含归还认领）+ 槽位；其他轨道零触碰
+	DestroySatellitesForOrbit(OrbitName);
+	if (PlanetActor)
+	{
+		if (USmartObjectManagerComponent* SmartObjectManager = PlanetActor->GetSmartObjectManagerComponent())
+		{
+			SmartObjectManager->UnregisterOrbitSlots(OrbitName);
+		}
+	}
 	OnRuntimeOrbitChanged.Broadcast(OrbitName);
 }
 

@@ -216,6 +216,33 @@ void SOrbitEditorPanel::PushWorkingDataToManager()
 	}
 }
 
+void SOrbitEditorPanel::CommitOrbitChanges()
+{
+	// 提交落定（回车/失焦/拖动节流）→ 只重建【当前选中轨道】：所见即所得（选定暂停中执行，安全）
+	if (!bHasSelection)
+	{
+		return;
+	}
+	if (ABasePlayerController* PC = Controller.Get())
+	{
+		PC->CommitOrbitChanges(WorkingData.OrbitName);
+	}
+}
+
+void SOrbitEditorPanel::RequestThrottledRebuild()
+{
+	// 拖动中"节流重建"：最少间隔 0.2s——拖动时也能看到卫星近似实时更新
+	// （松手的 OnValueCommitted 提交回调做最终落实；打字不触发值变化回调，无此路径）
+	constexpr double ThrottledRebuildIntervalSeconds = 0.2;
+	const double Now = FSlateApplication::Get().GetCurrentTime();
+	if (Now - LastThrottledRebuildTime < ThrottledRebuildIntervalSeconds)
+	{
+		return;
+	}
+	LastThrottledRebuildTime = Now;
+	CommitOrbitChanges();
+}
+
 FQuat SOrbitEditorPanel::MakeOrbitRotation() const
 {
 	// 平面朝向：先绕 X 再绕 Y（正交两倾斜角）；相位：绕旋转后的本地 Z（= 平面法线）自转
@@ -397,15 +424,6 @@ FReply SOrbitEditorPanel::OnDeleteOrbitClicked()
 	return FReply::Handled();
 }
 
-FReply SOrbitEditorPanel::OnApplyClicked()
-{
-	if (ABasePlayerController* PC = Controller.Get())
-	{
-		PC->ApplyOrbitChangesToSatellites();   // 重建卫星实体
-	}
-	return FReply::Handled();
-}
-
 FReply SOrbitEditorPanel::OnCloseClicked()
 {
 	// 优先交给宿主（UMG 包装等）；未绑定时回退到控制器（Viewport 模式）
@@ -533,7 +551,8 @@ TSharedRef<SWidget> SOrbitEditorPanel::BuildParamSection()
 				.MinFractionalDigits(0).MaxFractionalDigits(2)
 				.Delta(10.f)
 				.Value_Lambda([this]() { return bHasSelection ? static_cast<float>(WorkingData.Transform.GetLocation().X) : 0.f; })
-				.OnValueChanged_Lambda([this](float Value) { SetCenterAxis(0, Value); })
+				.OnValueChanged_Lambda([this](float Value) { SetCenterAxis(0, Value); RequestThrottledRebuild(); })
+				.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetCenterAxis(0, Value); CommitOrbitChanges(); })
 			]
 		]
 		+ SHorizontalBox::Slot().FillWidth(1.f).Padding(2.f, 0.f)
@@ -550,7 +569,8 @@ TSharedRef<SWidget> SOrbitEditorPanel::BuildParamSection()
 				.MinFractionalDigits(0).MaxFractionalDigits(2)
 				.Delta(10.f)
 				.Value_Lambda([this]() { return bHasSelection ? static_cast<float>(WorkingData.Transform.GetLocation().Y) : 0.f; })
-				.OnValueChanged_Lambda([this](float Value) { SetCenterAxis(1, Value); })
+				.OnValueChanged_Lambda([this](float Value) { SetCenterAxis(1, Value); RequestThrottledRebuild(); })
+				.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetCenterAxis(1, Value); CommitOrbitChanges(); })
 			]
 		]
 		+ SHorizontalBox::Slot().FillWidth(1.f).Padding(2.f, 0.f)
@@ -567,7 +587,8 @@ TSharedRef<SWidget> SOrbitEditorPanel::BuildParamSection()
 				.MinFractionalDigits(0).MaxFractionalDigits(2)
 				.Delta(10.f)
 				.Value_Lambda([this]() { return bHasSelection ? static_cast<float>(WorkingData.Transform.GetLocation().Z) : 0.f; })
-				.OnValueChanged_Lambda([this](float Value) { SetCenterAxis(2, Value); })
+				.OnValueChanged_Lambda([this](float Value) { SetCenterAxis(2, Value); RequestThrottledRebuild(); })
+				.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetCenterAxis(2, Value); CommitOrbitChanges(); })
 			]
 		];
 
@@ -575,49 +596,56 @@ TSharedRef<SWidget> SOrbitEditorPanel::BuildParamSection()
 		.MinValue(-180.f).MaxValue(180.f).MinDesiredWidth(100.f)
 		.MinFractionalDigits(0).MaxFractionalDigits(2)
 		.Value_Lambda([this]() { return EditingAngleXDeg; })
-		.OnValueChanged_Lambda([this](float Value) { SetAngleXDegrees(Value); });
+		.OnValueChanged_Lambda([this](float Value) { SetAngleXDegrees(Value); RequestThrottledRebuild(); })
+		.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetAngleXDegrees(Value); CommitOrbitChanges(); });
 
 	TSharedRef<SWidget> AngleYRow = SNew(SSpinBox<float>)
 		.MinValue(-180.f).MaxValue(180.f).MinDesiredWidth(100.f)
 		.MinFractionalDigits(0).MaxFractionalDigits(2)
 		.Value_Lambda([this]() { return EditingAngleYDeg; })
-		.OnValueChanged_Lambda([this](float Value) { SetAngleYDegrees(Value); });
+		.OnValueChanged_Lambda([this](float Value) { SetAngleYDegrees(Value); RequestThrottledRebuild(); })
+		.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetAngleYDegrees(Value); CommitOrbitChanges(); });
 
 	TSharedRef<SWidget> PhaseRow = SNew(SSpinBox<float>)
 		.MinValue(-180.f).MaxValue(180.f).MinDesiredWidth(100.f)
 		.MinFractionalDigits(0).MaxFractionalDigits(2)
 		.Value_Lambda([this]() { return EditingPhaseDeg; })
-		.OnValueChanged_Lambda([this](float Value) { SetPhaseDegrees(Value); });
+		.OnValueChanged_Lambda([this](float Value) { SetPhaseDegrees(Value); RequestThrottledRebuild(); })
+		.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetPhaseDegrees(Value); CommitOrbitChanges(); });
 
 	TSharedRef<SWidget> OrbitRadiusRow = SNew(SSpinBox<float>)
 		.MinValue(1000.f).MaxValue(100000.f).MinDesiredWidth(100.f)
 		.MinFractionalDigits(0).MaxFractionalDigits(2)
 		.Delta(100.f)
 		.Value_Lambda([this]() { return bHasSelection ? WorkingData.Radius : 0.f; })
-		.OnValueChanged_Lambda([this](float Value) { SetOrbitRadius(Value); });
+		.OnValueChanged_Lambda([this](float Value) { SetOrbitRadius(Value); RequestThrottledRebuild(); })
+		.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetOrbitRadius(Value); CommitOrbitChanges(); });
 
 	TSharedRef<SWidget> ServiceDistanceRow = SNew(SSpinBox<float>)
-		.MinValue(100.f).MaxValue(10000.f).MinDesiredWidth(100.f)
+		.MinValue(100.f).MaxValue(5000.f).MinDesiredWidth(100.f)
 		.MinFractionalDigits(0).MaxFractionalDigits(2)
 		.Delta(10.f)
 		.Value_Lambda([this]() { return bHasSelection ? WorkingData.ServiceDistance : 0.f; })
-		.OnValueChanged_Lambda([this](float Value) { SetServiceDistance(Value); });
+		.OnValueChanged_Lambda([this](float Value) { SetServiceDistance(Value); RequestThrottledRebuild(); })
+		.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetServiceDistance(Value); CommitOrbitChanges(); });
 
 	TSharedRef<SWidget> SatelliteCountRow = SNew(SSpinBox<int32>)
-		.MinValue(1).MaxValue(1000).MinDesiredWidth(100.f)
+		.MinValue(1).MaxValue(50).MinDesiredWidth(100.f)
 		.Value_Lambda([this]() { return bHasSelection ? WorkingData.SatelliteCount : 0; })
-		.OnValueChanged_Lambda([this](int32 Value) { SetSatelliteCount(Value); });
+		.OnValueChanged_Lambda([this](int32 Value) { SetSatelliteCount(Value); RequestThrottledRebuild(); })
+		.OnValueCommitted_Lambda([this](int32 Value, ETextCommit::Type) { SetSatelliteCount(Value); CommitOrbitChanges(); });
 
 	TSharedRef<SWidget> AngularVelocityRow = SNew(SSpinBox<float>)
 		.MinValue(1.f).MaxValue(100.f).MinDesiredWidth(100.f)
 		.MinFractionalDigits(0).MaxFractionalDigits(2)
 		.Delta(1.f)
 		.Value_Lambda([this]() { return bHasSelection ? WorkingData.AngularVelocity : 0.f; })
-		.OnValueChanged_Lambda([this](float Value) { SetAngularVelocity(Value); });
+		.OnValueChanged_Lambda([this](float Value) { SetAngularVelocity(Value); RequestThrottledRebuild(); })
+		.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetAngularVelocity(Value); CommitOrbitChanges(); });
 
 	TSharedRef<SWidget> ClockwiseRow = SNew(SCheckBox)
 		.IsChecked_Lambda([this]() { return (bHasSelection && WorkingData.bClockwise) ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-		.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState) { SetClockwise(NewState == ECheckBoxState::Checked); })
+		.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState) { SetClockwise(NewState == ECheckBoxState::Checked); CommitOrbitChanges(); })
 		[
 			SNew(STextBlock).Text(LOCTEXT("Clockwise", "顺时针"))
 		];
@@ -645,17 +673,11 @@ TSharedRef<SWidget> SOrbitEditorPanel::BuildButtonSection()
 		+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center).Padding(0.f, 0.f, 8.f, 0.f)
 		[
 			SNew(STextBlock)
-			.Text(LOCTEXT("Hint", "参数实时预览；应用后卫星位置将重置"))
+			.Text(LOCTEXT("Hint", "参数实时预览；回车/失焦后实时重建（所见即所得）"))
 			// 不用斜体：中文无斜体字形时 Slate 走合成倾斜，度量与绘制不一致会导致文字溢出背景
 			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
 			.ColorAndOpacity(FSlateColor(FLinearColor(0.6f, 0.6f, 0.6f)))
 			.AutoWrapText(true)   // 自动换行（在 Fill 槽的有限宽度内折行）
-		]
-		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-		[
-			SNew(SButton)
-			.Text(LOCTEXT("Apply", "应用（重建卫星）"))
-			.OnClicked(this, &SOrbitEditorPanel::OnApplyClicked)
 		];
 }
 

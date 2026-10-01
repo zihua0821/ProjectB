@@ -328,77 +328,106 @@ void USmartObjectManagerComponent::RegisterOrbitSlots(const TArray<FRuntimeOrbit
 		return;
 	}
 
-	// 重建前清理旧表（旧实例由引擎生命周期管理，无需手动销毁）
-	OrbitSlots.Reset();
-
-	// 槽位倍数（槽数 = 卫星数 × 倍数；全局决策的候选自由度）
-	const int32 SafeMultiplier = FMath::Max(1, SlotMultiplier);
-
+	// 全量注册 = 逐轨单轨注册（Initialize 路径；单轨版自带"先销毁该轨旧实例"——不影响其他轨道）
 	for (const FRuntimeOrbitData& Orbit : Orbits)
 	{
-		const int32 SlotCount = FMath::Max(0, Orbit.SatelliteCount) * SafeMultiplier;
-		if (SlotCount == 0)
-		{
-			continue;
-		}
-
-		FOrbitSlotEntry Entry;
-		// 轨道几何（槽位位置随相位推进：槽 i = 基准相位 + 360×i/N）
-		Entry.OrbitTransform = Orbit.Transform;
-		Entry.OrbitRadius = Orbit.Radius;
-		Entry.AngularVelocity = Orbit.AngularVelocity;
-		Entry.bClockwise = Orbit.bClockwise;
-		Entry.CurrentPhaseDeg = 0.f;   // 槽 0 起始相位（星 i 认领槽 i×K → 相位恰好均分）
-		Entry.ObjectHandles.Reserve(SlotCount);
-		Entry.SlotWorldPositions.Reserve(SlotCount);
-		Entry.SlotHandles.Reserve(SlotCount);
-
-		for (int32 SlotIndex = 0; SlotIndex < SlotCount; ++SlotIndex)
-		{
-			// 槽位 = 均分相位的固定点（与卫星初始相位分配一致）
-			const float SlotPhaseDeg = 360.0f * static_cast<float>(SlotIndex) / static_cast<float>(SlotCount);
-			const FVector SlotWorldPosition = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(Orbit.Transform, Orbit.Radius, SlotPhaseDeg);
-			const FTransform SlotTransform(FRotator::ZeroRotator, SlotWorldPosition);
-
-			const FSmartObjectHandle ObjectHandle = SmartObjectSubsystem->CreateSmartObject(
-				*OrbitSlotDefinition, SlotTransform, FConstStructView());
-			if (!ObjectHandle.IsValid())
-			{
-				UE_LOG(LogTemp, Warning, TEXT("[SmartObjectManager] Orbit slot create failed: %s[%d]"), *Orbit.OrbitName.ToString(), SlotIndex);
-				continue;
-			}
-
-			// 单 Slot 定义：微查询捕获 Slot 0
-			FSmartObjectRequest Request;
-			Request.QueryBox = FBox::BuildAABB(SlotWorldPosition, FVector(1.0f));
-			TArray<FSmartObjectRequestResult> Results;
-			FSmartObjectSlotHandle CapturedSlot;
-			if (SmartObjectSubsystem->FindSmartObjects(Request, Results))
-			{
-				for (const FSmartObjectRequestResult& Result : Results)
-				{
-					if (Result.SmartObjectHandle == ObjectHandle && Result.SlotHandle.GetSlotIndex() == 0)
-					{
-						CapturedSlot = Result.SlotHandle;
-						break;
-					}
-				}
-			}
-			if (!CapturedSlot.IsValid())
-			{
-				UE_LOG(LogTemp, Warning, TEXT("[SmartObjectManager] Orbit slot capture failed: %s[%d]"), *Orbit.OrbitName.ToString(), SlotIndex);
-				continue;
-			}
-
-			Entry.ObjectHandles.Add(ObjectHandle);
-			Entry.SlotWorldPositions.Add(SlotWorldPosition);
-			Entry.SlotHandles.Add(CapturedSlot);
-		}
-
-		OrbitSlots.Add(Orbit.OrbitName, MoveTemp(Entry));
+		RegisterSingleOrbitSlots(Orbit, SlotMultiplier);
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("[SmartObjectManager] Orbit slots registered: %d orbit(s)"), OrbitSlots.Num());
+}
+
+void USmartObjectManagerComponent::RegisterSingleOrbitSlots(const FRuntimeOrbitData& Orbit, const int32 SlotMultiplier)
+{
+	if (!SmartObjectSubsystem || !OrbitSlotDefinition)
+	{
+		return;
+	}
+
+	// 先清该轨旧槽（销毁实例 + 移条目；其他轨道的槽与句柄不受影响）
+	UnregisterOrbitSlots(Orbit.OrbitName);
+
+	const int32 SafeMultiplier = FMath::Max(1, SlotMultiplier);
+	const int32 SlotCount = FMath::Max(0, Orbit.SatelliteCount) * SafeMultiplier;
+	if (SlotCount == 0)
+	{
+		return;
+	}
+
+	FOrbitSlotEntry Entry;
+	// 轨道几何（槽位位置随相位推进：槽 i = 基准相位 + 360×i/N）
+	Entry.OrbitTransform = Orbit.Transform;
+	Entry.OrbitRadius = Orbit.Radius;
+	Entry.AngularVelocity = Orbit.AngularVelocity;
+	Entry.bClockwise = Orbit.bClockwise;
+	Entry.CurrentPhaseDeg = 0.f;   // 槽 0 起始相位（星 i 认领槽 i×K → 相位恰好均分）
+	Entry.ObjectHandles.Reserve(SlotCount);
+	Entry.SlotWorldPositions.Reserve(SlotCount);
+	Entry.SlotHandles.Reserve(SlotCount);
+
+	for (int32 SlotIndex = 0; SlotIndex < SlotCount; ++SlotIndex)
+	{
+		// 槽位 = 均分相位的固定点（与卫星初始相位分配一致）
+		const float SlotPhaseDeg = 360.0f * static_cast<float>(SlotIndex) / static_cast<float>(SlotCount);
+		const FVector SlotWorldPosition = UPlanetBlueprintFunctionLibrary::ComputeOrbitWorldPosition(Orbit.Transform, Orbit.Radius, SlotPhaseDeg);
+		const FTransform SlotTransform(FRotator::ZeroRotator, SlotWorldPosition);
+
+		const FSmartObjectHandle ObjectHandle = SmartObjectSubsystem->CreateSmartObject(
+			*OrbitSlotDefinition, SlotTransform, FConstStructView());
+		if (!ObjectHandle.IsValid())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[SmartObjectManager] Orbit slot create failed: %s[%d]"), *Orbit.OrbitName.ToString(), SlotIndex);
+			continue;
+		}
+
+		// 单 Slot 定义：微查询捕获 Slot 0
+		FSmartObjectRequest Request;
+		Request.QueryBox = FBox::BuildAABB(SlotWorldPosition, FVector(1.0f));
+		TArray<FSmartObjectRequestResult> Results;
+		FSmartObjectSlotHandle CapturedSlot;
+		if (SmartObjectSubsystem->FindSmartObjects(Request, Results))
+		{
+			for (const FSmartObjectRequestResult& Result : Results)
+			{
+				if (Result.SmartObjectHandle == ObjectHandle && Result.SlotHandle.GetSlotIndex() == 0)
+				{
+					CapturedSlot = Result.SlotHandle;
+					break;
+				}
+			}
+		}
+		if (!CapturedSlot.IsValid())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[SmartObjectManager] Orbit slot capture failed: %s[%d]"), *Orbit.OrbitName.ToString(), SlotIndex);
+			continue;
+		}
+
+		Entry.ObjectHandles.Add(ObjectHandle);
+		Entry.SlotWorldPositions.Add(SlotWorldPosition);
+		Entry.SlotHandles.Add(CapturedSlot);
+	}
+
+	OrbitSlots.Add(Orbit.OrbitName, MoveTemp(Entry));
+}
+
+void USmartObjectManagerComponent::UnregisterOrbitSlots(const FName OrbitName)
+{
+	if (!SmartObjectSubsystem)
+	{
+		return;
+	}
+	if (const FOrbitSlotEntry* OldEntry = OrbitSlots.Find(OrbitName))
+	{
+		// 资源生命周期：实例不随条目移除消失——必须显式销毁（旧认领由卫星销毁链路先行归还）
+		for (const FSmartObjectHandle& ObjectHandle : OldEntry->ObjectHandles)
+		{
+			if (ObjectHandle.IsValid())
+			{
+				SmartObjectSubsystem->DestroySmartObject(ObjectHandle);
+			}
+		}
+		OrbitSlots.Remove(OrbitName);
+	}
 }
 
 void USmartObjectManagerComponent::UpdateOrbitSlots(const float DeltaSeconds)

@@ -93,6 +93,12 @@ public:
 	 */
 	void RegisterOrbitSlots(const TArray<FRuntimeOrbitData>& Orbits, const int32 SlotMultiplier);
 
+	/** 注册单条轨道的槽位（重建/新增共用：先销毁该轨旧实例再建新；不影响其他轨道） */
+	void RegisterSingleOrbitSlots(const FRuntimeOrbitData& Orbit, const int32 SlotMultiplier);
+
+	/** 注销单条轨道的槽位（删除轨道用：销毁该轨全部实例并移除条目；不影响其他轨道） */
+	void UnregisterOrbitSlots(const FName OrbitName);
+
 	/** 槽位数（未注册返回 0） */
 	int32 GetOrbitSlotCount(const FName OrbitName) const;
 
