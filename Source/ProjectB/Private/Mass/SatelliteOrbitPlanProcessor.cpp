@@ -12,8 +12,10 @@ USatelliteOrbitPlanProcessor::USatelliteOrbitPlanProcessor()
 	// 注册到默认处理阶段自动调用（与项目现有处理器一致）
 	bAutoRegisterWithProcessingPhases = true;
 	ExecutionFlags = static_cast<int32>(EProcessorExecutionFlags::All);
-	// 帧序：规划（抄账/发单）→ 槽推进 → 卫星推进 → 渲染同步——顺序显式固定
-	ExecutionOrder.ExecuteBefore.Add(TEXT("SatelliteOrbitMovement"));
+	// 线程说明（T2 核实）：保持 worker——访问面 = 只读稳定数据（fragment / 运行时轨道数据）+
+	// 引擎允许的 Subsystem 调用 + 两个仅供本处理器自用的节流时间戳（单写者单读者），无并行风险
+	// 帧序：SatellitePlan → SatelliteSlot → SatelliteMovement → SatelliteRender（顺序由后继处理器声明）
+	ExecutionOrder.ExecuteInGroup = TEXT("SatellitePlan");
 }
 
 void USatelliteOrbitPlanProcessor::ConfigureQueries()

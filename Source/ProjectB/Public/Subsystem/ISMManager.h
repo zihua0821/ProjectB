@@ -19,10 +19,14 @@ class APlayerController; // 前向声明（画面调试列表输入/绘制回调
 #define INSTANCES_PER_BUCKET 2048
 
 /**
- * 用于唯一标识一种 ISM 组件配置的键。
- * 基于 SoftObjectPath（软引用路径）而非 UStaticMesh* 裸指针：
- * 资产重定向（Move/Rename）后路径仍正确匹配，TMap 键稳定；
- * 同时提供 UStaticMesh* 隐式构造，调用方无需手动转路径。
+ * 用于唯一标识一个 ISM 桶组的键：(Mesh, GroupKey)——双维度分桶模型。
+ * - 维度一（空间分桶）：组内按球面网格分桶；依据 = GridCoords（见 BatchAddInstances），空 = 不启用；
+ * - 维度二（逻辑分桶）：本键的 GroupKey——逻辑组键（0 = 默认组；卫星 = 轨道序号 + 1），
+ *   每组独立 ISM 组件；逻辑键是【逻辑固定属性】（轨道），卫星永不跨组迁移（无迁移成本/句柄代际风险）；
+ * - 两维度正交：逻辑组 × 组内空间桶可组合。
+ * - 基于 SoftObjectPath（软引用路径）而非 UStaticMesh* 裸指针：
+ *   资产重定向（Move/Rename）后路径仍正确匹配，TMap 键稳定；
+ *   同时提供 UStaticMesh* 隐式构造，调用方无需手动转路径。
  */
 USTRUCT(BlueprintType)
 struct FISMMeshKey
@@ -31,18 +35,25 @@ struct FISMMeshKey
     
     UPROPERTY()
     FSoftObjectPath MeshPath;
+
+    /** 逻辑组键（逻辑分桶依据）：0 = 默认组；卫星 = 轨道序号 + 1 */
+    UPROPERTY()
+    int32 GroupKey = 0;
     
     FISMMeshKey() = default;
-    explicit FISMMeshKey(const FSoftObjectPath& InMeshPath) : MeshPath(InMeshPath) {}
-    explicit FISMMeshKey(UStaticMesh* InMesh) : MeshPath(FSoftObjectPath(InMesh)) {}
-    bool operator==(const FISMMeshKey& Other) const { return MeshPath == Other.MeshPath; }
+    explicit FISMMeshKey(const FSoftObjectPath& InMeshPath, const int32 InGroupKey = 0)
+        : MeshPath(InMeshPath), GroupKey(InGroupKey) {}
+    explicit FISMMeshKey(UStaticMesh* InMesh, const int32 InGroupKey = 0)
+        : MeshPath(FSoftObjectPath(InMesh)), GroupKey(InGroupKey) {}
+    bool operator==(const FISMMeshKey& Other) const { return MeshPath == Other.MeshPath && GroupKey == Other.GroupKey; }
 };
 
-FORCEINLINE uint32 GetTypeHash(const FISMMeshKey& Key) { return GetTypeHash(Key.MeshPath); }
+FORCEINLINE uint32 GetTypeHash(const FISMMeshKey& Key) { return HashCombine(GetTypeHash(Key.MeshPath), GetTypeHash(Key.GroupKey)); }
 
 /**
- * 全局唯一的 ISM 实例句柄：(BucketIndex, LocalId)
- * - BucketIndex：桶索引（单桶模式恒为 0），对外屏蔽"实例在哪个组件"的细节；
+ * 全局唯一的 ISM 实例句柄：(GroupKey, BucketIndex, LocalId)
+ * - GroupKey：逻辑组键（0 = 默认组；卫星 = 轨道序号 + 1）——增删改接口据“句柄自解析”定位组件组；
+ * - BucketIndex：桶索引（单桶模式恒为 0），对外屏蔽“实例在哪个组件”的细节；
  * - LocalId：引擎稳定物理实例 ID（FPrimitiveInstanceId，非数组下标），
  *   实例增删导致物理索引重排时仍保持有效——外部只需持有本句柄即可增删改，
  *   无需关心实例在组件数组中的位置。
@@ -53,6 +64,10 @@ struct FGlobalInstanceId
 {
     GENERATED_BODY()
 
+    /** 逻辑组键（0 = 默认组；卫星 = 轨道序号 + 1）——增删改接口根据本字段定位桶组 */
+    UPROPERTY()
+    int32 GroupKey = 0;
+
     UPROPERTY()
     int32 BucketIndex = INDEX_NONE;
 
@@ -61,12 +76,14 @@ struct FGlobalInstanceId
     FGlobalInstanceId() = default;
     FGlobalInstanceId(const int32 InBucketIndex, const FPrimitiveInstanceId InId)
         : BucketIndex(InBucketIndex), LocalId(InId) {}
+    FGlobalInstanceId(const int32 InGroupKey, const int32 InBucketIndex, const FPrimitiveInstanceId InId)
+        : GroupKey(InGroupKey), BucketIndex(InBucketIndex), LocalId(InId) {}
 
     bool IsValid() const { return BucketIndex != INDEX_NONE && LocalId.IsValid(); }
-    bool operator==(const FGlobalInstanceId& Other) const { return BucketIndex == Other.BucketIndex && LocalId == Other.LocalId; }
+    bool operator==(const FGlobalInstanceId& Other) const { return GroupKey == Other.GroupKey && BucketIndex == Other.BucketIndex && LocalId == Other.LocalId; }
 };
 
-FORCEINLINE uint32 GetTypeHash(const FGlobalInstanceId& Key) { return HashCombine(GetTypeHash(Key.BucketIndex), GetTypeHash(Key.LocalId.Id)); }
+FORCEINLINE uint32 GetTypeHash(const FGlobalInstanceId& Key) { return HashCombine(HashCombine(GetTypeHash(Key.GroupKey), GetTypeHash(Key.BucketIndex)), GetTypeHash(Key.LocalId.Id)); }
 
 /**
  * ISM 组件创建参数：透传给 UISMManager 创建桶组件（CreateISMComponent）。
@@ -165,6 +182,8 @@ struct FISMBucketGroup
  * - 组件管理：按 StaticMesh 自动创建/复用 ISM 组件（懒创建，空桶不预先分配）
  * - 空间分桶：内置球面映射（FISMSphereBucketConfig 数据注入，分桶输入 = 格子坐标，
  *   块大小按 InstancesPerBucket 推导 → 桶数自适应网格规模）
+ * - 逻辑分桶：逻辑组键（GroupKey）划分独立组件组（0 = 默认组；卫星 = 轨道序号 + 1）——
+ *   与空间分桶正交：逻辑组 × 组内空间桶可组合（组内单桶 = bDisableBuckets 或未配置球面分桶或空 GridCoords）
  * - 批量操作：批量添加/移除/设置 CustomData（引擎 5.4+ ById API 原生增量路径，无开关属性）
  * - 增量更新：UpdateInstanceTransform / SetCustomDataValueById 单实例 O(1) 更新
  * - 空桶事件驱动停用：Remove 归零即停用（SetHiddenInGame），重新 Add 自动复活，组件常驻复用
@@ -212,16 +231,18 @@ public:
      * @param BucketIndex   桶索引
      * @param NumCustomDataFloats   每实例 CustomData 数量
      * @param Params        组件创建参数
+     * @param GroupKey      逻辑组键（0 = 默认组；卫星 = 轨道序号 + 1）
      */
-    UInstancedStaticMeshComponent* GetOrCreateBucket(UStaticMesh* Mesh, int32 BucketIndex, int32 NumCustomDataFloats, const FISMComponentParams& Params);
+    UInstancedStaticMeshComponent* GetOrCreateBucket(UStaticMesh* Mesh, int32 BucketIndex, int32 NumCustomDataFloats, const FISMComponentParams& Params, const int32 GroupKey = 0);
     /**
      * 只获取指定索引的桶组件（不创建；越界/不存在返回 nullptr）。首桶传 BucketIndex=0。
      * 线程约束：仅限游戏线程调用（不做派发）——无锁读与游戏线程写操作并发即数据竞争，
      * 且返回组件的增量用法亦要求游戏线程；跨线程需求请在游戏线程取指针后自行缓存。
      * @param Mesh          静态网格
      * @param BucketIndex   桶索引
+     * @param GroupKey      逻辑组键（0 = 默认组；卫星 = 轨道序号 + 1）
      */
-    UInstancedStaticMeshComponent* GetBucketComponent(UStaticMesh* Mesh, int32 BucketIndex) const;
+    UInstancedStaticMeshComponent* GetBucketComponent(UStaticMesh* Mesh, int32 BucketIndex, const int32 GroupKey = 0) const;
 
     // ---- 球面分桶配置 ----
     /**
@@ -251,7 +272,8 @@ public:
      * @return 首元素句柄；添加失败时返回默认（无效）句柄。
      * @param Mesh          静态网格
      * @param Transform     变换
-     * @param GridCoord     格子坐标
+     * @param GridCoord     空间分桶依据（格子坐标；不启用空间分桶时传任意值）
+     * @param GroupKey      逻辑分桶依据（0 = 默认组；卫星 = 轨道序号 + 1）
      * @param NumCustomDataFloats   每实例 CustomData 数量
      * @param ISMParams     ISM 组件参数
      * @param bWorldSpace   世界空间标志
@@ -261,19 +283,24 @@ public:
         UStaticMesh* Mesh,
         const FTransform& Transform,
         const FIntPoint& GridCoord,
+        const int32 GroupKey,
         const int32 NumCustomDataFloats,
         const FISMComponentParams& ISMParams,
         bool bWorldSpace = false,             // 与引擎 AddInstancesById 同语义：false=局部坐标，true=世界坐标
         const TArray<float>& CustomData = TArray<float>());
     /**
-     * 分桶判定链：!bDisableBuckets && 组阈值 > 0 && 已配置球面分桶 && GridCoords 非空，
-     * 任一失败 → 单桶路径（全部进 Bucket[0]）。
-     * 分桶路径按 GetBucketKey(GridCoords[i]) 分组，一次遍历完成，每桶一次 AddInstancesById；
+     * 批量添加实例（双维度分桶模型）：
+     * - 维度一（空间分桶）：开关 = ISMParams.bDisableBuckets（强制关）；依据 = GridCoords（空 = 不启用）；
+     *   启用时按 GetBucketKey(GridCoords[i]) 分组，一次遍历完成，每桶一次 AddInstancesById；
+     * - 维度二（逻辑分桶）：依据 = GroupKey（0 = 默认组；≥1 = 逻辑组）——每组独立 ISM 组件；
+     *   键即开关：0 = 默认组（与旧行为等价），无需独立开关；
+     * - 两维度正交：逻辑组 × 组内空间桶可组合（组内单桶 = bDisableBuckets 或未配置球面分桶或 GridCoords 空）。
      * CustomData 长度必须 == Transforms.Num() × NumCustomDataFloats，否则静默跳过。
      * @return 与 Transforms 一一对应（保序）的全局句柄数组
      * @param Mesh          静态网格
      * @param Transforms    变换数组
-     * @param GridCoords    格子坐标数组
+     * @param GridCoords    空间分桶依据（格子坐标数组；空 = 不启用空间分桶）
+     * @param GroupKey      逻辑分桶依据（0 = 默认组；卫星 = 轨道序号 + 1）——返回句柄携带此键
      * @param NumCustomDataFloats   每实例 CustomData 数量
      * @param ISMParams     ISM 组件参数
      * @param bWorldSpace   世界空间标志
@@ -283,6 +310,7 @@ public:
         UStaticMesh* Mesh,
         const TArray<FTransform>& Transforms,
         const TArray<FIntPoint>& GridCoords,  
+        const int32 GroupKey,
         const int32 NumCustomDataFloats,
         const FISMComponentParams& ISMParams,
         bool bWorldSpace = false,             
@@ -396,6 +424,14 @@ private:
      */
     static UInstancedStaticMeshComponent* CreateISMComponent(UStaticMesh* Mesh, int32 NumCustomDataFloats, const FISMComponentParams& Params);
 
+    /**
+     * 解析某桶组实际生效的 ISM 参数（两级表：组级缓存 + Mesh 级注册种子）：
+     * - 组未注册：先取【Mesh 级注册】（默认组 (Mesh, 0) 条目）为种子；无则用传入值首次定格（兼容旧调用）；
+     * - 组已注册：以组内缓存为准；传入非空且不一致 → 每网格一次性告警（暴露漂移）
+     * 返回 AttachParent 为空表示不可用（调用方判空告警）。
+     */
+    FISMComponentParams ResolveEffectiveParams(FISMBucketGroup& Group, UStaticMesh* Mesh, const FISMComponentParams& Incoming);
+
     // 内部球面映射：格子坐标 → 桶索引（O(1) 纯整数：块行列号 → 桶线性索引，越界 clamp 保确定性）
     /**
      * 内部球面映射：格子坐标 → 桶线性索引（O(1) 纯整数运算，热路径）。
@@ -413,12 +449,13 @@ private:
     TMap<FISMMeshKey, FISMBucketGroup> MeshToBucketGroups; 
 
     // ---- AABB 线框调试状态（bDebugAABB 封装） ----
-    struct FISMDebugEntry // 画面列表条目（每次构建时实时取实例数/桶数）
+    struct FISMDebugEntry // 画面列表条目（每次构建时实时取实例数/桶数/组数；一轨一桶后按 Mesh 聚合）
     {
         FString PathName;
         FString DisplayName;
         int32 Instances = 0;
         int32 Buckets = 0;
+        int32 Groups = 0;
     };
     /** 构建排序后的 Mesh 调试列表（DisplayName 升序；画面绘制/键盘导航/鼠标命中共用同一序列） */
     void BuildDebugMeshEntries(TArray<FISMDebugEntry>& OutEntries) const;

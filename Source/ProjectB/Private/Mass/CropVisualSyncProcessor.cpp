@@ -154,7 +154,8 @@ void UCropVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
         const TArray<FGlobalInstanceId> NewIds = ISMManager->BatchAddInstances(
             Mesh,
             Transforms,
-            GridCoords,
+            GridCoords,              // 空间分桶依据：格子坐标（作物走球面分桶）
+            0,                       // 逻辑分桶依据：默认组（作物不分组）
             CropCustomData::Count,
             FISMComponentParams(),
             /*bWorldSpace=*/true,

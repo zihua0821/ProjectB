@@ -15,8 +15,9 @@ USatelliteRenderSyncProcessor::USatelliteRenderSyncProcessor()
 	ExecutionFlags = static_cast<int32>(EProcessorExecutionFlags::All);
 	// ISM 增删改仅限游戏线程（见 ISMManager 线程模型约定）
 	bRequiresGameThreadExecution = true;
-	// 排在本帧移动推进之后，保证渲染使用最新角度
-	ExecutionOrder.ExecuteAfter.Add(TEXT("SatelliteOrbitMovement"));
+	// 排在本帧相位推进之后（SatelliteMovement），保证渲染使用最新相位与同帧槽缓存
+	ExecutionOrder.ExecuteInGroup = TEXT("SatelliteRender");
+	ExecutionOrder.ExecuteAfter.Add(TEXT("SatelliteMovement"));
 }
 
 void USatelliteRenderSyncProcessor::ConfigureQueries()

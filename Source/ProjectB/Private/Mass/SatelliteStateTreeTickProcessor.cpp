@@ -13,6 +13,9 @@ USatelliteStateTreeTickProcessor::USatelliteStateTreeTickProcessor()
 	bAutoRegisterWithProcessingPhases = true;
 	ExecutionFlags = static_cast<int32>(EProcessorExecutionFlags::All);
 	// 仅发送信号（线程安全的信号收集），允许并行 chunk 收集
+	// 帧序：排在渲染同步之后（SatelliteRender → 【SatelliteHeartbeat】→ 状态树任务）
+	ExecutionOrder.ExecuteInGroup = TEXT("SatelliteHeartbeat");
+	ExecutionOrder.ExecuteAfter.Add(TEXT("SatelliteRender"));
 }
 
 void USatelliteStateTreeTickProcessor::ConfigureQueries()

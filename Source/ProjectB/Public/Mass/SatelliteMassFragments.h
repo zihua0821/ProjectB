@@ -184,21 +184,9 @@ struct PROJECTB_API FMassSatelliteTaskFragment : public FMassFragment
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
 	TArray<FSmartObjectClaimHandle> ClaimHandles;
 
-	/** 飞行起点快照（Fly 开始瞬间的位置） */
-	UPROPERTY(VisibleAnywhere, Category = "Satellite")
-	FVector PhaseStartLocation = FVector::ZeroVector;
-
 	/** 飞行终点（离轨=悬停点 / 回轨=入轨点；起飞时算好——路径参数一次算好） */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
 	FVector PhaseEndLocation = FVector::ZeroVector;
-
-	/** 贝塞尔控制点 1（起飞时算好） */
-	UPROPERTY(VisibleAnywhere, Category = "Satellite")
-	FVector PhaseControlPoint1 = FVector::ZeroVector;
-
-	/** 贝塞尔控制点 2（起飞时算好） */
-	UPROPERTY(VisibleAnywhere, Category = "Satellite")
-	FVector PhaseControlPoint2 = FVector::ZeroVector;
 
 	/** 飞行已进行时间（秒） */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")

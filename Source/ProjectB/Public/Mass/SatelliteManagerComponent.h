@@ -68,7 +68,7 @@ struct PROJECTB_API FSatelliteScoringWeights
  * 几何部分【继承项目唯一权威结构 FOrbitDefinition】
  * （OrbitName / Transform / Radius / ServiceDistance）；其余为运行时可编辑的卫星与视觉属性。
  * Initialize 时从 PlanetConfig->OrbitDefinitions 转换；编辑系统修改此数据，
- * ApplyOrbitChanges 后生效到卫星实体；可视化组件订阅广播实时刷新
+ * ApplyOrbitChangesForOrbit 按轨重建后生效到卫星实体；可视化组件订阅广播实时刷新
  */
 USTRUCT(BlueprintType)
 struct PROJECTB_API FRuntimeOrbitData : public FOrbitDefinition
@@ -126,20 +126,17 @@ public:
 	/** 选点评分权重（EQS 迁移版） */
 	const FSatelliteScoringWeights& GetScoringWeights() const { return ScoringWeights; }
 
-	/** 贝塞尔控制点比例（只读；离轨/回轨任务读取） */
-	float GetTransferControlFactor() const { return TransferControlFactor; }
-
 	/** 转场径向速度（只读；T = |R_orb − R_hover| / 此值；离轨/回轨共用） */
 	float GetRadialTransferSpeed() const { return RadialTransferSpeed; }
 
-	// ---- 轨道编辑接口（运行时数据编辑 → 可视化实时刷新 → ApplyOrbitChanges 重建卫星） ----
+	// ---- 轨道编辑接口（运行时数据编辑 → 可视化实时刷新 → ApplyOrbitChangesForOrbit 按轨重建卫星） ----
 
 	/** 获取运行时轨道数据（可编辑副本） */
 	const TArray<FRuntimeOrbitData>& GetRuntimeOrbits() const { return RuntimeOrbits; }
 
 	/**
 	 * 更新指定轨道数据（按 OrbitName 定位；广播 OnRuntimeOrbitChanged 供可视化刷新）
-	 * 注意：仅更新数据与可视化；卫星运动需调用 ApplyOrbitChanges 重建
+	 * 注意：仅更新数据与可视化；卫星运动需调用 ApplyOrbitChangesForOrbit 按轨重建
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Satellite|Orbit")
 	bool UpdateOrbitData(const FName OrbitName, const FRuntimeOrbitData& NewData);
@@ -151,10 +148,6 @@ public:
 	/** 移除轨道（成功后重建剩余轨道的卫星） */
 	UFUNCTION(BlueprintCallable, Category = "Satellite|Orbit")
 	void RemoveOrbit(const FName OrbitName);
-
-	/** 应用轨道变更：重建全部卫星实体（逐轨按轨重建；正式路径均按轨，此入口供调试） */
-	UFUNCTION(BlueprintCallable, Category = "Satellite|Orbit")
-	void ApplyOrbitChanges();
 
 	/** 按轨重建：只重建指定轨道的卫星与槽位（其他轨道零触碰——编辑交互正式路径） */
 	UFUNCTION(BlueprintCallable, Category = "Satellite|Orbit")
@@ -182,8 +175,11 @@ private:
 	/** 为单条轨道创建一组卫星实体（写入 OutEntities/OutTransforms） */
 	void CreateSatellitesForOrbit(const FRuntimeOrbitData& Orbit, FMassEntityManager& EntityManager, TArray<FMassEntityHandle>& OutEntities, TArray<FTransform>& OutTransforms);
 
-	/** 注册卫星渲染实例（ISM 单桶路径）并回写 InstanceId */
-	void RegisterRenderInstances(const TArray<FMassEntityHandle>& Entities, const TArray<FTransform>& Transforms);
+	/** 注册卫星渲染实例（ISM 单桶路径、一轨一桶：按轨传入逻辑组键）并回写 InstanceId */
+	void RegisterRenderInstances(const TArray<FMassEntityHandle>& Entities, const TArray<FTransform>& Transforms, const int32 GroupKey);
+
+	/** 轨道名 → 逻辑组键（轨道序号 + 1；0 = 默认组——未找到轨道时防御返回） */
+	int32 GetOrbitGroupKey(const FName OrbitName) const;
 
 	/** 销毁指定轨道的卫星（渲染实例 + 实体；含归还一切认领——其他轨道保留） */
 	void DestroySatellitesForOrbit(const FName OrbitName);
@@ -241,10 +237,6 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Satellite", meta = (DisplayName = "卫星缩放", ClampMin = "0.01"))
 	float SatelliteScale = 10.0f;
 
-	/** 贝塞尔控制点比例 k（离轨/回轨转场：d = k × 起终点距离） */
-	UPROPERTY(EditDefaultsOnly, Category = "Satellite", meta = (DisplayName = "转场控制点比例", ClampMin = "0.05", ClampMax = "1.0"))
-	float TransferControlFactor = 0.35f;
-
 	/** 转场径向速度（cm/s；时长 T = |R_orb − R_hover| / 此值；离轨/回轨共用） */
 	UPROPERTY(EditDefaultsOnly, Category = "Satellite", meta = (DisplayName = "转场径向速度", ClampMin = "1.0"))
 	float RadialTransferSpeed = 2000.0f;
@@ -283,6 +275,6 @@ private:
 	/** 上次进入均匀化窗口的时间（秒；阶段②独立节流） */
 	double LastRebalanceTime = 0.0;
 
-	/** 运行时轨道数据（Initialize 构建；编辑系统修改后 ApplyOrbitChanges 生效到卫星） */
+	/** 运行时轨道数据（Initialize 构建；编辑系统修改后 ApplyOrbitChangesForOrbit 按轨生效到卫星） */
 	TArray<FRuntimeOrbitData> RuntimeOrbits;
 };

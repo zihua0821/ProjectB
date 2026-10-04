@@ -101,7 +101,7 @@ void USmartObjectManagerComponent::TickComponent(float DeltaTime, ELevelTick Tic
 		return;
 	}
 
-	// 注：注册完成后槽位推进不在本组件 Tick 内做——由 SatelliteOrbitMovementProcessor 在 Mass 帧序内驱动
+	// 注：注册完成后槽位推进不在本组件 Tick 内做——由 USatelliteSlotSyncProcessor（专职 GT）在 Mass 帧序内驱动
 	//（先槽后星、同帧同序：渲染同步处理器随后读到同帧槽缓存，消除恒定错位）
 }
 
@@ -482,17 +482,6 @@ int32 USmartObjectManagerComponent::GetOrbitSlotCount(const FName OrbitName) con
 	return Entry ? Entry->SlotHandles.Num() : 0;
 }
 
-bool USmartObjectManagerComponent::GetOrbitSlotWorldPosition(const FName OrbitName, const int32 SlotIndex, FVector& OutWorldPosition) const
-{
-	const FOrbitSlotEntry* Entry = OrbitSlots.Find(OrbitName);
-	if (!Entry || !Entry->SlotWorldPositions.IsValidIndex(SlotIndex))
-	{
-		return false;
-	}
-	OutWorldPosition = Entry->SlotWorldPositions[SlotIndex];
-	return true;
-}
-
 bool USmartObjectManagerComponent::GetOrbitSlotPhase(const FName OrbitName, const int32 SlotIndex, float& OutPhaseDeg) const
 {
 	const FOrbitSlotEntry* Entry = OrbitSlots.Find(OrbitName);
@@ -515,8 +504,15 @@ bool USmartObjectManagerComponent::GetOrbitSlotWorldPositionByClaim(const FName 
 	{
 		return false;
 	}
+	// 内联索引解析：按句柄查询 = 世界位置查询唯一入口（原“按索引”公开接口已收窄删除）
 	const int32 SlotIndex = ResolveSlotIndexByClaim(OrbitName, ClaimHandle);
-	return GetOrbitSlotWorldPosition(OrbitName, SlotIndex, OutWorldPosition);
+	const FOrbitSlotEntry* Entry = OrbitSlots.Find(OrbitName);
+	if (!Entry || !Entry->SlotWorldPositions.IsValidIndex(SlotIndex))
+	{
+		return false;
+	}
+	OutWorldPosition = Entry->SlotWorldPositions[SlotIndex];
+	return true;
 }
 
 bool USmartObjectManagerComponent::GetOrbitSlotPhaseByClaim(const FName OrbitName, const FSmartObjectClaimHandle& ClaimHandle, float& OutPhaseDeg) const

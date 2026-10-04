@@ -256,7 +256,8 @@ void UOrbitCoverageVisualComponent::RebuildOrbitVisual(const FName OrbitName)
 				Entry.RingInstanceIds = ISMManager->BatchAddInstances(
 					RingSegmentMesh,
 					SegmentTransforms,
-					TArray<FIntPoint>(),        // 空坐标 → 单桶路径
+					TArray<FIntPoint>(),        // 空间分桶依据：空 → 不启用（单桶）
+					0,                          // 逻辑分桶依据：默认组（圆环不分组）
 					0,                          // 无 CustomData（颜色走组件级材质实例）
 					ISMParams,
 					/*bWorldSpace=*/false);     // 相对本组件（星球本地空间）

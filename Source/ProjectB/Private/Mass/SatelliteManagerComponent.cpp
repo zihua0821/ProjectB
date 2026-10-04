@@ -284,18 +284,20 @@ void USatelliteManagerComponent::CreateAllSatellites()
 {
 	FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
 
-	// 注：槽位注册在 ApplyOrbitChanges（重建入口）与 Initialize 路径中负责；
+	// 注：槽位注册在 ApplyOrbitChangesForOrbit（重建入口）与 Initialize 路径中负责；
 	//     卫星创建时仅做初始认领（依赖槽位已注册）
 
 	TArray<FMassEntityHandle> AllEntities;
-	TArray<FTransform> AllTransforms;
 
 	for (const FRuntimeOrbitData& Orbit : RuntimeOrbits)
 	{
-		CreateSatellitesForOrbit(Orbit, EntityManager, AllEntities, AllTransforms);
+		// 一轨一桶：逐轨创建 + 按轨注册渲染实例（逻辑组键 = 轨道序号 + 1）
+		TArray<FMassEntityHandle> OrbitEntities;
+		TArray<FTransform> OrbitTransforms;
+		CreateSatellitesForOrbit(Orbit, EntityManager, OrbitEntities, OrbitTransforms);
+		RegisterRenderInstances(OrbitEntities, OrbitTransforms, GetOrbitGroupKey(Orbit.OrbitName));
+		AllEntities.Append(OrbitEntities);
 	}
-
-	RegisterRenderInstances(AllEntities, AllTransforms);
 
 	SatelliteEntities = MoveTemp(AllEntities);
 }
@@ -384,7 +386,15 @@ void USatelliteManagerComponent::CreateSatellitesForOrbit(const FRuntimeOrbitDat
 	OutEntities.Append(Entities);
 }
 
-void USatelliteManagerComponent::RegisterRenderInstances(const TArray<FMassEntityHandle>& Entities, const TArray<FTransform>& Transforms)
+int32 USatelliteManagerComponent::GetOrbitGroupKey(const FName OrbitName) const
+{
+	// 逻辑组键 = 轨道在 RuntimeOrbits 中的序号 + 1（0 保留给默认组）
+	const int32 OrbitIndex = RuntimeOrbits.IndexOfByPredicate(
+		[OrbitName](const FRuntimeOrbitData& Data) { return Data.OrbitName == OrbitName; });
+	return (OrbitIndex >= 0) ? (OrbitIndex + 1) : 0;
+}
+
+void USatelliteManagerComponent::RegisterRenderInstances(const TArray<FMassEntityHandle>& Entities, const TArray<FTransform>& Transforms, const int32 GroupKey)
 {
 	if (SatelliteMesh == nullptr || Entities.Num() == 0)
 	{
@@ -397,22 +407,29 @@ void USatelliteManagerComponent::RegisterRenderInstances(const TArray<FMassEntit
 		return;
 	}
 
-	// 单桶路径：空 GridCoords + 注册参数（Initialize 已 RegisterMeshParams——含 bDisableBuckets）
+	// 双维度分桶参数：空间分桶依据传空（不启用）；逻辑分桶依据 = 轨道逻辑组键——
+	// 每组独立 ISM 组件（一轨一桶）；注册参数自默认组 (Mesh, 0) 种子继承（含 bDisableBuckets）
 	FISMComponentParams ISMParams;
 
 	const TArray<FGlobalInstanceId> InstanceIds = ISMManager->BatchAddInstances(
 		SatelliteMesh,
 		Transforms,
-		TArray<FIntPoint>(),   // 空坐标 → 单桶路径
+		TArray<FIntPoint>(),   // 空间分桶依据：空 → 不启用
+		GroupKey,              // 逻辑分桶依据：轨道序号 + 1
 		0,                     // 无 CustomData
 		ISMParams,
-		/*bWorldSpace=*/true);
+		/*bWorldSpace=*/true,
+		TArray<float>());      // 无自定义数据
 
 	FMassEntityManager& EntityManager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
 	for (int32 Index = 0; Index < Entities.Num() && Index < InstanceIds.Num(); ++Index)
 	{
 		EntityManager.GetFragmentDataChecked<FSatelliteRenderFragment>(Entities[Index]).InstanceId = InstanceIds[Index];
 	}
+
+	// 一轨一桶验证日志（每轨每次注册一条，低频）：ISM 逻辑组键 = 轨道序号 + 1——
+	// 多轨场景下应看到 group 逐轨递增且各自独立注册
+	UE_LOG(LogTemp, Log, TEXT("[SatelliteManager] Rendered %d instances -> ISM group %d"), InstanceIds.Num(), GroupKey);
 }
 
 void USatelliteManagerComponent::DestroySatellitesForOrbit(const FName OrbitName)
@@ -511,18 +528,6 @@ void USatelliteManagerComponent::DestroySatellitesForOrbit(const FName OrbitName
 	SatelliteEntities = MoveTemp(ToKeep);
 }
 
-void USatelliteManagerComponent::ApplyOrbitChanges()
-{
-	// 全量重建 = 逐轨"按轨重建"（语义：所有轨道重置；正式编辑路径均走按轨接口——此入口供调试）
-	for (const FRuntimeOrbitData& Orbit : RuntimeOrbits)
-	{
-		ApplyOrbitChangesForOrbit(Orbit.OrbitName);
-	}
-
-	UE_LOG(LogTemp, Log, TEXT("[SatelliteManager] Applied orbit changes: %d satellites on %d orbit(s)"),
-		SatelliteEntities.Num(), RuntimeOrbits.Num());
-}
-
 void USatelliteManagerComponent::ApplyOrbitChangesForOrbit(const FName OrbitName)
 {
 	if (!PlanetActor)
@@ -558,7 +563,7 @@ void USatelliteManagerComponent::ApplyOrbitChangesForOrbit(const FName OrbitName
 	TArray<FMassEntityHandle> NewEntities;
 	TArray<FTransform> NewTransforms;
 	CreateSatellitesForOrbit(*OrbitData, EntityManager, NewEntities, NewTransforms);
-	RegisterRenderInstances(NewEntities, NewTransforms);
+	RegisterRenderInstances(NewEntities, NewTransforms, GetOrbitGroupKey(OrbitName));
 	SatelliteEntities.Append(NewEntities);
 
 	UE_LOG(LogTemp, Log, TEXT("[SatelliteManager] Orbit '%s' rebuilt: %d satellites (total %d)"),
@@ -995,12 +1000,13 @@ void USatelliteManagerComponent::BuildOrbitPlan(const FOrbitSnapshot& Snapshot, 
 			continue;
 		}
 
-		// 弧段（与 Drift 任务同构：总扫过量 = ω·T·dir + Δs；
-		// T = clamp(|Δs| / 滑动速率上限, 2, 6)——后移速率上限 0.75ω（保底绝对速度 0.25ω，不停住），前移 1ω）
+		// 弧段（与 Drift 任务同构：总相位扫过量 = （ω·T + Δs）× 方向——把"沿运动方向量"统一换算为相位增量；
+		// 原式 ω·T·dir + Δs 在顺时针时位移项符号反——2026-10-04 修复）
+		// T = clamp(|Δs| / 滑动速率上限, 2, 6)——后移速率上限 0.75ω（保底绝对速度 0.25ω，不停住），前移 1ω
 		const float ArcAngularSpeed = FMath::Max(Snapshot.AngularVelocity, 1.f);
 		const float SlideRateDegPerSec = (DeltaMoveDeg < 0.f) ? (ArcAngularSpeed * 0.75f) : ArcAngularSpeed;
 		const float Duration = FMath::Clamp(FMath::Abs(DeltaMoveDeg) / SlideRateDegPerSec, 2.0f, 6.0f);
-		const float TotalArcDeg = Snapshot.AngularVelocity * Duration * Direction + DeltaMoveDeg;
+		const float TotalArcDeg = (Snapshot.AngularVelocity * Duration + DeltaMoveDeg) * Direction;
 
 		// 防撞（合并版）：与在途漂移弧段、与本轮已发弧段，重叠即跳过（下轮再议）
 		bool bBlocked = false;

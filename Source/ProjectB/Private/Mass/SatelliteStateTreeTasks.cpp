@@ -731,22 +731,22 @@ EStateTreeRunStatus FSatelliteReturnTask::EnterState(FStateTreeExecutionContext&
 	const float RadSpan = FMath::Sqrt(FMath::Square(RadiusOrbit - RadiusHoverInPlane) + FMath::Square(VerticalHover));
 	const float Duration = FMath::Max(RadSpan / RadialSpeed, 0.1f);
 
-	// 切向推进量 = ω·T·dir + δ0（δ0 补偿）
-	// —— 槽位与卫星同速，起飞时刻的偏差 δ0 会被"冻结"到落点；
-	//    用 δ0 补偿后：落点 = 槽位到达时的相位 → 完全重合
+	// 切向推进量 = 公转项 + δ0 补偿
+	// —— 公转项 ω·T·dir：飞行期间"槽位/轨道时间轴"沿运动方向前进的量
+	// —— δ0 项 = 槽位相位 − 悬停投影方位的【直接相位差】（不乘 dir——乘了会让顺时针落点偏差 2×δ0；2026-10-04 修复）
+	//    槽位与卫星同速，起飞时刻的偏差 δ0 会被"冻结"到落点；补偿后：落点 = 槽位到达时的相位 → 完全重合
 	float ThetaDeltaDeg = Orbit.AngularVelocity * Duration * TravelDirection;
 	if (Orbit.SlotClaimHandle.IsValid())
 	{
 		float SlotPhaseDeg = 0.f;
 		if (Shared.SmartObjectManager->GetOrbitSlotPhaseByClaim(Orbit.OrbitName, Orbit.SlotClaimHandle, SlotPhaseDeg))
 		{
-			// 槽位相对悬停点投影方位的偏差（沿运动方向为正；归一到 [−180,180]）
-			const float SlotOffsetDeg = FMath::FindDeltaAngleDegrees(NormalizeAngleDegrees360(ThetaHoverDeg), NormalizeAngleDegrees360(SlotPhaseDeg)) * TravelDirection;
+			// 槽位相对悬停点投影方位的偏差（归一到 [−180,180]）
+			const float SlotOffsetDeg = FMath::FindDeltaAngleDegrees(NormalizeAngleDegrees360(ThetaHoverDeg), NormalizeAngleDegrees360(SlotPhaseDeg));
 			ThetaDeltaDeg += SlotOffsetDeg;
 		}
 	}
 
-	Task.PhaseStartLocation = StartPoint;
 	Task.PhaseThetaStartDeg = ThetaHoverDeg;
 	Task.PhaseThetaDeltaDeg = ThetaDeltaDeg;
 	Task.PhaseRadiusStart = RadiusHoverInPlane;
@@ -886,7 +886,6 @@ EStateTreeRunStatus FSatelliteApproachTask::EnterState(FStateTreeExecutionContex
 	// 时长 T = ΔR / v_r（单参数，配置于卫星管理组件；离轨/回轨共用）
 	const float RadiusOrbit = Shared.Radius;
 	const float RadialSpeed = FMath::Max(Shared.SatelliteManager ? Shared.SatelliteManager->GetRadialTransferSpeed() : 2000.0f, 1.0f);
-	const float TravelDirection = Orbit.bClockwise ? -1.0f : 1.0f;
 
 	// 起点位置（关键）：取卫星【显示位置】——从哪儿起就从哪儿算，保证起飞帧零跳变
 	FVector DisplayLocation;
@@ -915,12 +914,13 @@ EStateTreeRunStatus FSatelliteApproachTask::EnterState(FStateTreeExecutionContex
 	const float RadSpan = FMath::Sqrt(FMath::Square(RadiusHoverInPlane - RadiusStartInPlane) + FMath::Square(VerticalHover - VerticalStart));
 	const float Duration = FMath::Max(RadSpan / RadialSpeed, 0.1f);
 
-	Task.PhaseStartLocation = DisplayLocation;
 	Task.PhaseEndLocation = EndPoint;
 	Task.PhaseThetaStartDeg = ThetaStartDeg;
-	// 切向推进 = 精确对准悬停方位（"以悬停点为准"）：从起点方位沿运动方向到 θ_h 的有符号角差
+	// 切向推进 = 起点方位到悬停方位的直接相位差（精确对准悬停点）——不要乘运动方向：
+	// 该差本身就是相位增量（DepartWait 保证起点≈提前量点，差值即沿运动方向的短程推进）；
+	// 乘 dir 会让顺时针轨道的飞行方向反转——2026-10-04 修复
 	// （原为 ω·T 近似——起飞点偏差会留下"轨迹末端与悬停点"的固定偏移；此改后轨迹几何终点精确=悬停点，到达帧不再需要跳写掩饰）
-	Task.PhaseThetaDeltaDeg = FMath::FindDeltaAngleDegrees(NormalizeAngleDegrees360(ThetaStartDeg), NormalizeAngleDegrees360(ThetaHoverDeg)) * TravelDirection;
+	Task.PhaseThetaDeltaDeg = FMath::FindDeltaAngleDegrees(NormalizeAngleDegrees360(ThetaStartDeg), NormalizeAngleDegrees360(ThetaHoverDeg));
 	Task.PhaseRadiusStart = RadiusStartInPlane;
 	Task.PhaseRadiusEnd = RadiusHoverInPlane;
 	Task.PhaseVerticalStart = VerticalStart;
@@ -938,7 +938,7 @@ EStateTreeRunStatus FSatelliteApproachTask::EnterState(FStateTreeExecutionContex
 	// 开启位置覆盖（离轨期间位置由任务写入）
 	Orbit.State = ESatelliteState::Approach;
 	Orbit.bOverrideLocation = true;
-	Orbit.OverrideLocation = Task.PhaseStartLocation;
+	Orbit.OverrideLocation = DisplayLocation;
 
 	// 路径点调试（参数方程采样：黄）
 	if (UWorld* World = Context.GetWorld())
@@ -1150,9 +1150,10 @@ EStateTreeRunStatus FSatelliteDriftTask::EnterState(FStateTreeExecutionContext& 
 	const float Duration = FMath::Clamp(FMath::Abs(DeltaMoveDeg) / SlideRateDegPerSec, DriftMinDurationSeconds, DriftMaxDurationSeconds);
 
 	// 轨迹参数（一次算好；与回轨同构：θ 线性推进 + 半径/垂直不变）
-	Task.PhaseStartLocation = StartLocation;
+	// 总相位增量 = （公转 ω·T ＋ 沿运动方向位移）× 方向——乘法统一把"沿运动方向量"换算为相位增量
+	// （原式 ω·T·dir + Δs 在顺时针时位移项符号反——2026-10-04 修复）
 	Task.PhaseThetaStartDeg = ThetaStartDeg;
-	Task.PhaseThetaDeltaDeg = AngularSpeed * Duration * Direction + DeltaMoveDeg;
+	Task.PhaseThetaDeltaDeg = (AngularSpeed * Duration + DeltaMoveDeg) * Direction;
 	Task.PhaseRadiusStart = RadiusStartInPlane;
 	Task.PhaseRadiusEnd = Shared.Radius;
 	Task.PhaseVerticalStart = VerticalStart;

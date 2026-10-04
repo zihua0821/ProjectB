@@ -20,15 +20,6 @@ public:
 
 	/*
 	 * 计算单元格坐标对应的轨道角度（度数）
-	 * @param CellCoord 单元格坐标
-	 * @param OrbitData 轨道数据
-	 * @param PlanetActor 行星
-	 * @return 轨道角度（度数）
-	 */
-	static float CalculateOrbitAngleFromCell(const FIntPoint& CellCoord, const FOrbitDefinition& OrbitData, const UObject* PlanetActor);
-
-	/*
-	 * 计算单元格坐标对应的轨道角度（度数）
 	 * @param CellWorldTransform 单元格世界坐标
 	 * @param OrbitData 轨道数据
 	 * @return 轨道角度（度数）
@@ -92,35 +83,4 @@ public:
 	 */
 	static void DecomposeToOrbitPlane(const FTransform& OrbitTransform, const FVector& Point, float& OutThetaDeg, float& OutRadius, float& OutVertical);
 
-	/*
-	 * 轨道切线方向（卫星运动方向；与 ComputeOrbitWorldPosition 同一参数化）
-	 * @param bClockwise true=顺时针（角度递减，方向取反）
-	 */
-	static FVector ComputeOrbitTangent(const FTransform& OrbitTransform, const float AngleDeg, const bool bClockwise);
-
-	/*
-	 * 最近点判据：当前相位方向与目标方向在轨道平面内对齐（夹角 ≤ ToleranceDeg）
-	 * 此时“相位点 ↔ 目标”距离最小（每圈一次）——离轨/回轨的行动时机
-	 */
-	static bool IsAtNearestPhase(const FTransform& OrbitTransform, const float CurrentAngleDeg, const FVector& TargetLocation, const float ToleranceDeg = 2.0f);
-
-	/*
-	 * 三次贝塞尔求值（Alpha 内部经 smoothstep 缓动）
-	 */
-	static FVector EvaluateCubicBezier(const FVector& P0, const FVector& P1, const FVector& P2, const FVector& P3, const float Alpha);
-
-	/*
-	 * 轨道转场控制点组装（d = ControlFactor × |Start→End|）
-	 * 离轨（bOutbound=true）：P1 = 起点 + 轨道切向 × d；P2 = 终点 + 终点法线 × d（垂直下降）
-	 * 回轨（bOutbound=false）：P1 = 起点 + 起点法线 × d（垂直上升）；P2 = 终点 + 轨道切向 × d（切向入轨）
-	 */
-	static void BuildOrbitTransferControlPoints(const FVector& StartPoint, const FVector& EndPoint, const FVector& OrbitTangent,
-		const bool bOutbound, const float ControlFactor, FVector& OutP1, FVector& OutP2);
-
-	/*
-	 * 路径不穿球采样校验（含端点；纯算法兜底）
-	 * @return true=全程半径 ≥ MinRadius - Tolerance
-	 */
-	static bool ValidateTransferPath(const FVector& P0, const FVector& P1, const FVector& P2, const FVector& P3,
-		const float MinRadius, const int32 SampleCount = 16, const float Tolerance = 1.0f);
 };

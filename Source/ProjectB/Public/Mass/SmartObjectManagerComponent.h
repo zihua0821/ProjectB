@@ -102,9 +102,6 @@ public:
 	/** 槽位数（未注册返回 0） */
 	int32 GetOrbitSlotCount(const FName OrbitName) const;
 
-	/** 槽位世界位置（按轨道名 + 槽索引） */
-	bool GetOrbitSlotWorldPosition(const FName OrbitName, const int32 SlotIndex, FVector& OutWorldPosition) const;
-
 	/** 槽位当前相位（度；= 基准相位 + 360×i/N，随轨道旋转——选槽判据用） */
 	bool GetOrbitSlotPhase(const FName OrbitName, const int32 SlotIndex, float& OutPhaseDeg) const;
 
@@ -122,7 +119,7 @@ public:
 	/** 认领轨道槽（成功返回句柄；失败返回无效句柄） */
 	FSmartObjectClaimHandle TryClaimOrbitSlot(const FName OrbitName, const int32 SlotIndex, const ESmartObjectClaimPriority Priority) const;
 
-	/** 槽位随相位更新（由 SatelliteOrbitMovementProcessor 在 Mass 帧序内驱动：先槽后星，渲染同步读到同帧缓存） */
+	/** 槽位随相位更新（由 USatelliteSlotSyncProcessor 在 Mass 帧序内驱动：先槽后星，渲染同步读到同帧缓存） */
 	void UpdateOrbitSlots(const float DeltaSeconds);
 
 	/**

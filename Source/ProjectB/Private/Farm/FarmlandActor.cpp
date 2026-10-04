@@ -226,7 +226,7 @@ void AFarmlandActor::BeginPlay()
 		}
 
 		const TArray<FGlobalInstanceId> Ids = ISMManager->BatchAddInstances(
-			Mesh, Transforms, GridCoords, NumFloats, CachedParams,
+			Mesh, Transforms, GridCoords, /*GroupKey=*/0, NumFloats, CachedParams,
 			/*bWorldSpace=*/true, CData);
 		// 返回与输入一一对应的句柄数组（保序），按实例下标回填
 		for (int32 k = 0; k < Ids.Num() && k < Indices.Num(); ++k)
@@ -387,7 +387,7 @@ void AFarmlandActor::Tick(float DeltaSeconds)
 			}
 
 			const TArray<FGlobalInstanceId> NewIds = ISMManager->BatchAddInstances(
-				Mesh, Transforms, GridCoords, NumFloats, CachedParams, /*bWorldSpace=*/true, CData);
+				Mesh, Transforms, GridCoords, /*GroupKey=*/0, NumFloats, CachedParams, /*bWorldSpace=*/true, CData);
 			// 返回与输入一一对应（保序），按实例下标回填 Id/Mesh/Stage
 			for (int32 k = 0; k < NewIds.Num() && k < AddEntries.Num(); ++k)
 			{

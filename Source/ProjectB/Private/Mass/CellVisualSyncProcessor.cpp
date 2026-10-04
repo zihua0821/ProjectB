@@ -151,7 +151,8 @@ void UCellVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
     	    TArray<FGlobalInstanceId> NewIds = ISMManager->BatchAddInstances(
 				FarmlandConfig->OutlineMesh,
 				Transforms,
-				GridCoords,        // 轮廓实例走球面分桶
+				GridCoords,        // 空间分桶依据：轮廓实例走球面分桶
+				0,                 // 逻辑分桶依据：默认组（轮廓不分组）
 				CellOutlineCustomData::Count,
 				FISMComponentParams(),
 				true,              // bWorldSpace：轮廓变换继承自地块世界坐标

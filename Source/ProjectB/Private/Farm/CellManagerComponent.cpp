@@ -274,7 +274,8 @@ void UCellManagerComponent::CreateMassCell()
 		TArray<FGlobalInstanceId> PlotIds = ISMManager->BatchAddInstances(
 			FarmlandConfig->LandCellMesh,
 			CellTransforms,
-			CellGridCoords,
+			CellGridCoords,        // 空间分桶依据：格子坐标（地块走球面分桶）
+			0,                     // 逻辑分桶依据：默认组（地块不分组）
 			FarmlandConfig->NumCustomDataFloats,
 			PlotISMParams,
 			true,          // bWorldSpace：CellTransforms 为世界坐标（星球中心在原点）

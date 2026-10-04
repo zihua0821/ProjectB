@@ -15,7 +15,8 @@
  * 当前白名单（注解备忘——运行事实以"谁调用了宏"为准，grep 宏名即列全）：
  *   · USatelliteStateTreeTickProcessor（心跳——行为总闸）
  *   · USatelliteOrbitPlanProcessor（规划）
- *   · USatelliteOrbitMovementProcessor（槽推进 + 卫星相位）
+ *   · USatelliteSlotSyncProcessor（槽推进——专职 GT）
+ *   · USatelliteOrbitMovementProcessor（卫星相位）
  *   · UCropGrowthProcessor（作物生长）
  * 不参与（默认运行，零改动）：格子/作物/地块视觉同步、卫星渲染同步、玩家/相机/UI、昼夜
  */

@@ -18,7 +18,7 @@ class SVerticalBox;
 /**
  * 轨道编辑面板（Slate）
  * - 轨道列表（新建/删除/选中）+ 参数编辑（实时预览）+ 应用（重建卫星）
- * - 数据经 ABasePlayerController 接口转发（SetOrbitData / CreateOrbit / ApplyOrbitChanges...）
+ * - 数据经 ABasePlayerController 接口转发（SetOrbitData / CreateOrbit / CommitOrbitChanges...）
  * - 颜色：调色板快选 + SColorPicker 微调（独立数值模式，非编辑器属性系统）
  */
 class SOrbitEditorPanel : public SCompoundWidget

@@ -35,34 +35,6 @@ namespace
             && A.bDisableBuckets == B.bDisableBuckets;
     }
 
-    /**
-     * 解析某网格实际生效的 ISM 参数（唯一权威为 Group.CachedParams）：
-     * - 未注册 + 传入非空 → 以传入值注册（首次定格，兼容旧调用）
-     * - 未注册 + 传入为空 → 返回默认（调用方判空处理）
-     * - 已注册 → 以注册值为准；传入非空且不一致 → 每网格一次性告警（暴露漂移）
-     */
-    FISMComponentParams ResolveEffectiveParams(FISMBucketGroup& Group, UStaticMesh* Mesh, const FISMComponentParams& Incoming)
-    {
-        if (!Group.bParamsRegistered)
-        {
-            if (Incoming.AttachParent)
-            {
-                Group.CachedParams = Incoming;
-                Group.bParamsRegistered = true;
-                return Group.CachedParams;
-            }
-            return FISMComponentParams();
-        }
-
-        if (Incoming.AttachParent && !Group.bParamMismatchWarned && !AreISMParamsEquivalent(Group.CachedParams, Incoming))
-        {
-            UE_LOG(LogTemp, Warning,
-                TEXT("ISMManager: mesh '%s' 传入的 ISM 参数与注册值不一致——以注册值为准（请统一走 RegisterMeshParams）"),
-                *FSoftObjectPath(Mesh).ToString());
-            Group.bParamMismatchWarned = true;
-        }
-        return Group.CachedParams;
-    }
 }
 
 // ============================================================================
@@ -119,15 +91,52 @@ UInstancedStaticMeshComponent* UISMManager::CreateISMComponent(UStaticMesh* Mesh
 }
 
 
-UInstancedStaticMeshComponent* UISMManager::GetBucketComponent(UStaticMesh* Mesh, int32 BucketIndex) const
+UInstancedStaticMeshComponent* UISMManager::GetBucketComponent(UStaticMesh* Mesh, int32 BucketIndex, const int32 GroupKey) const
 {
     if (!Mesh) return nullptr;
     // 线程约定：仅限游戏线程（无锁读与游戏线程写操作并发即数据竞争，且返回组件增量用法亦要求游戏线程）。
     checkf(IsInGameThread(), TEXT("GetBucketComponent 仅限游戏线程调用（见 ISMManager 技术文档 §3.3）"));
-    const FISMMeshKey Key(Mesh);
+    const FISMMeshKey Key(Mesh, GroupKey);
     const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
     if (Group && Group->Buckets.IsValidIndex(BucketIndex)) return Group->Buckets[BucketIndex];
     return nullptr;
+}
+
+FISMComponentParams UISMManager::ResolveEffectiveParams(FISMBucketGroup& Group, UStaticMesh* Mesh, const FISMComponentParams& Incoming)
+{
+    if (!Group.bParamsRegistered)
+    {
+        // 两级表（种子）：先取 Mesh 级注册（默认组 (Mesh, 0) 条目）——卫星等分组组由此继承 Mesh 参数
+        if (const FISMBucketGroup* MeshLevel = MeshToBucketGroups.Find(FISMMeshKey(Mesh)))
+        {
+            if (MeshLevel->bParamsRegistered)
+            {
+                Group.CachedParams = MeshLevel->CachedParams;
+                Group.bParamsRegistered = true;
+                Group.bParamMismatchWarned = MeshLevel->bParamMismatchWarned;   // 跨组继承告警状态（避免同类漂移重复告警）
+                return Group.CachedParams;
+            }
+        }
+        // 未注册 + 传入非空 → 以传入值首次定格（兼容旧调用）
+        if (Incoming.AttachParent)
+        {
+            Group.CachedParams = Incoming;
+            Group.bParamsRegistered = true;
+            return Group.CachedParams;
+        }
+        // 未注册 + 传入为空 → 返回默认（调用方判空处理）
+        return FISMComponentParams();
+    }
+
+    // 已注册 → 以组内缓存为准；传入非空且不一致 → 每网格一次性告警（暴露漂移）
+    if (Incoming.AttachParent && !Group.bParamMismatchWarned && !AreISMParamsEquivalent(Group.CachedParams, Incoming))
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("ISMManager: mesh '%s' 传入的 ISM 参数与注册值不一致——以注册值为准（请统一走 RegisterMeshParams）"),
+            *FSoftObjectPath(Mesh).ToString());
+        Group.bParamMismatchWarned = true;
+    }
+    return Group.CachedParams;
 }
 
 // ============================================================================
@@ -205,21 +214,21 @@ int32 UISMManager::GetBucketKey(const FIntPoint& GridCoords) const
 
 FGlobalInstanceId UISMManager::AddInstance(
     UStaticMesh* Mesh, const FTransform& Transform, const FIntPoint& GridCoord,
-    const int32 NumCustomDataFloats, const FISMComponentParams& ISMParams, const bool bWorldSpace,
-    const TArray<float>& CustomData)
+    const int32 GroupKey, const int32 NumCustomDataFloats, const FISMComponentParams& ISMParams,
+    const bool bWorldSpace, const TArray<float>& CustomData)
 {
     const TArray<FGlobalInstanceId> Ids = BatchAddInstances(
         Mesh,
         TArray<FTransform>{Transform},
         TArray<FIntPoint>{GridCoord},
-        NumCustomDataFloats, ISMParams, bWorldSpace, CustomData);
+        GroupKey, NumCustomDataFloats, ISMParams, bWorldSpace, CustomData);
     return Ids.Num() > 0 ? Ids[0] : FGlobalInstanceId();
 }
 
 TArray<FGlobalInstanceId> UISMManager::BatchAddInstances(
     UStaticMesh* Mesh, const TArray<FTransform>& Transforms, const TArray<FIntPoint>& GridCoords,
-    const int32 NumCustomDataFloats, const FISMComponentParams& ISMParams, const bool bWorldSpace,
-    const TArray<float>& CustomData)
+    const int32 GroupKey, const int32 NumCustomDataFloats, const FISMComponentParams& ISMParams,
+    const bool bWorldSpace, const TArray<float>& CustomData)
 {
     TArray<FGlobalInstanceId> AllGlobalIds;
     // 线程约定：仅限游戏线程（ISM 组件写接口游戏线程专属，非游戏线程断言）。
@@ -229,9 +238,9 @@ TArray<FGlobalInstanceId> UISMManager::BatchAddInstances(
     if (!GridCoords.IsEmpty() && GridCoords.Num() != Transforms.Num()) return AllGlobalIds;
 
     const int32 AddCount = Transforms.Num();
-    const FISMMeshKey Key(Mesh);
+    const FISMMeshKey Key(Mesh, GroupKey);
     FISMBucketGroup& Group = MeshToBucketGroups.FindOrAdd(Key);
-    // 参数解析（Mesh → Params 单一事实来源；空参数自动取注册值）
+    // 参数解析（两级表：Mesh 级注册种子 → 组级缓存；空参数自动取注册值）
     const FISMComponentParams EffectiveParams = ResolveEffectiveParams(Group, Mesh, ISMParams);
     if (EffectiveParams.AttachParent == nullptr)
     {
@@ -253,12 +262,12 @@ TArray<FGlobalInstanceId> UISMManager::BatchAddInstances(
     if (!bUseSphereBucketing)
     {
         // 单桶路径（Buckets[0]）
-        UInstancedStaticMeshComponent* ISMComp = GetOrCreateBucket(Mesh, 0, NumCustomDataFloats, EffectiveParams);
+        UInstancedStaticMeshComponent* ISMComp = GetOrCreateBucket(Mesh, 0, NumCustomDataFloats, EffectiveParams, GroupKey);
         if (!ISMComp) return AllGlobalIds;
         TArray<FPrimitiveInstanceId> Ids = ISMComp->AddInstancesById(Transforms, bWorldSpace);
         AllGlobalIds.Reserve(Ids.Num());
         for (const FPrimitiveInstanceId& Id : Ids)
-            AllGlobalIds.Emplace(0, Id);
+            AllGlobalIds.Emplace(GroupKey, 0, Id);
         if (CustomData.Num() > 0)
         {
             const int32 Expected = Ids.Num() * NumCustomDataFloats;
@@ -286,7 +295,7 @@ TArray<FGlobalInstanceId> UISMManager::BatchAddInstances(
     {
         const int32 BucketIdx = Pair.Key;
         const TArray<int32>& Indices = Pair.Value;
-        UInstancedStaticMeshComponent* Bucket = GetOrCreateBucket(Mesh, BucketIdx, NumCustomDataFloats, EffectiveParams);
+        UInstancedStaticMeshComponent* Bucket = GetOrCreateBucket(Mesh, BucketIdx, NumCustomDataFloats, EffectiveParams, GroupKey);
         if (!Bucket) continue;
         TArray<FTransform> SliceTransforms;
         SliceTransforms.Reserve(Indices.Num());
@@ -294,7 +303,7 @@ TArray<FGlobalInstanceId> UISMManager::BatchAddInstances(
 
         TArray<FPrimitiveInstanceId> SliceIds = Bucket->AddInstancesById(SliceTransforms, bWorldSpace);
         for (int32 k = 0; k < SliceIds.Num() && k < Indices.Num(); ++k)
-            AllGlobalIds[Indices[k]] = FGlobalInstanceId(BucketIdx, SliceIds[k]);
+            AllGlobalIds[Indices[k]] = FGlobalInstanceId(GroupKey, BucketIdx, SliceIds[k]);
 
         if (CustomData.Num() > 0)
         {
@@ -323,31 +332,36 @@ void UISMManager::BatchRemoveInstances(UStaticMesh* Mesh, const TArray<FGlobalIn
     // 线程约定：仅限游戏线程（ISM 组件写接口游戏线程专属，非游戏线程断言）。
     checkf(IsInGameThread(), TEXT("BatchRemoveInstances 仅限游戏线程调用（见 ISMManager 技术文档 §3.3）"));
     if (!Mesh || InstanceIds.Num() == 0) return;
-    const FISMMeshKey Key(Mesh);
-    FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
-    if (!Group) return;
-    // 计数对齐：确保每桶计数数组就绪（兼容预创建/历史桶组）
-    if (Group->BucketInstanceCounts.Num() < Group->Buckets.Num())
-        Group->BucketInstanceCounts.SetNum(Group->Buckets.Num());
 
-    // 按桶分组，再按组移除（避免逐桶遍历）
-    TMap<int32, TArray<FPrimitiveInstanceId>> BucketMap;
+    // 按【逻辑组键】分组（句柄自解析；跨组句柄数组亦正确——如全轨汇总销毁场景）
+    TMap<int32, TMap<int32, TArray<FPrimitiveInstanceId>>> GroupBucketMap;
     for (const FGlobalInstanceId& Gid : InstanceIds)
     {
-        if (Gid.IsValid() && Group->Buckets.IsValidIndex(Gid.BucketIndex))
-            BucketMap.FindOrAdd(Gid.BucketIndex).Add(Gid.LocalId);
+        if (Gid.IsValid())
+            GroupBucketMap.FindOrAdd(Gid.GroupKey).FindOrAdd(Gid.BucketIndex).Add(Gid.LocalId);
     }
-    for (auto& Pair : BucketMap)
+
+    for (auto& GroupPair : GroupBucketMap)
     {
-        if (UInstancedStaticMeshComponent* Bucket = Group->Buckets[Pair.Key])
+        FISMBucketGroup* Group = MeshToBucketGroups.Find(FISMMeshKey(Mesh, GroupPair.Key));
+        if (!Group) continue;
+        // 计数对齐：确保每桶计数数组就绪（兼容预创建/历史桶组）
+        if (Group->BucketInstanceCounts.Num() < Group->Buckets.Num())
+            Group->BucketInstanceCounts.SetNum(Group->Buckets.Num());
+
+        for (auto& BucketPair : GroupPair.Value)
         {
-            Bucket->RemoveInstancesById(Pair.Value);
-            Group->TotalInstanceCount = FMath::Max(0, Group->TotalInstanceCount - Pair.Value.Num());
-            // 事件驱动停用（PR-6）：Remove 归零即停用，无每帧轮询
-            Group->BucketInstanceCounts[Pair.Key] = FMath::Max(0, Group->BucketInstanceCounts[Pair.Key] - Pair.Value.Num());
-            if (Group->BucketInstanceCounts[Pair.Key] == 0)
+            if (!Group->Buckets.IsValidIndex(BucketPair.Key)) continue;
+            if (UInstancedStaticMeshComponent* Bucket = Group->Buckets[BucketPair.Key])
             {
-                Bucket->SetHiddenInGame(true);   // 轻量停用，组件常驻（组件级池化 D-4）
+                Bucket->RemoveInstancesById(BucketPair.Value);
+                Group->TotalInstanceCount = FMath::Max(0, Group->TotalInstanceCount - BucketPair.Value.Num());
+                // 事件驱动停用（PR-6）：Remove 归零即停用，无每帧轮询
+                Group->BucketInstanceCounts[BucketPair.Key] = FMath::Max(0, Group->BucketInstanceCounts[BucketPair.Key] - BucketPair.Value.Num());
+                if (Group->BucketInstanceCounts[BucketPair.Key] == 0)
+                {
+                    Bucket->SetHiddenInGame(true);   // 轻量停用，组件常驻（组件级池化 D-4）
+                }
             }
         }
     }
@@ -363,15 +377,17 @@ void UISMManager::BatchUpdateInstanceCustomData(UStaticMesh* Mesh, const TArray<
     // 线程约定：仅限游戏线程（ISM 组件写接口游戏线程专属，非游戏线程断言）。
     checkf(IsInGameThread(), TEXT("BatchUpdateInstanceCustomData 仅限游戏线程调用（见 ISMManager 技术文档 §3.3）"));
     if (!Mesh || InstanceIds.Num() == 0 || CustomData.Num() == 0) return;
-    const FISMMeshKey Key(Mesh);
-    const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
-    if (!Group) return;
+
+    // FloatsPerInstance：取首个有效句柄所在组（同 Mesh 各组 NumCustomDataFloats 一致）
     int32 FloatsPerInstance = 0;
-    for (const auto& Gid : InstanceIds)
+    for (const FGlobalInstanceId& Gid : InstanceIds)
     {
-        if (Gid.IsValid() && Group->Buckets.IsValidIndex(Gid.BucketIndex))
+        if (Gid.IsValid())
         {
-            FloatsPerInstance = Group->NumCustomDataFloats;
+            if (const FISMBucketGroup* Group = MeshToBucketGroups.Find(FISMMeshKey(Mesh, Gid.GroupKey)))
+            {
+                FloatsPerInstance = Group->NumCustomDataFloats;
+            }
             break;
         }
     }
@@ -379,23 +395,29 @@ void UISMManager::BatchUpdateInstanceCustomData(UStaticMesh* Mesh, const TArray<
     const int32 Expected = InstanceIds.Num() * FloatsPerInstance;
     if (CustomData.Num() != Expected) return;
 
-    // 按桶分组批量设置
-    TMap<int32, TArray<FPrimitiveInstanceId>> IdGroups;
-    TMap<int32, TArray<float>> DataGroups;
+    // 按（组标签 → 桶索引）分组批量设置（句柄自解析；跨组句柄数组亦正确）
+    TMap<int32, TMap<int32, TArray<FPrimitiveInstanceId>>> GroupBucketIds;
+    TMap<int32, TMap<int32, TArray<float>>> GroupBucketData;
     for (int32 i = 0; i < InstanceIds.Num(); ++i)
     {
         const FGlobalInstanceId& Gid = InstanceIds[i];
-        if (!Gid.IsValid() || !Group->Buckets.IsValidIndex(Gid.BucketIndex)) continue;
-        IdGroups.FindOrAdd(Gid.BucketIndex).Add(Gid.LocalId);
-        TArray<float>& Data = DataGroups.FindOrAdd(Gid.BucketIndex);
+        if (!Gid.IsValid()) continue;
+        GroupBucketIds.FindOrAdd(Gid.GroupKey).FindOrAdd(Gid.BucketIndex).Add(Gid.LocalId);
+        TArray<float>& Data = GroupBucketData.FindOrAdd(Gid.GroupKey).FindOrAdd(Gid.BucketIndex);
         const int32 Base = i * FloatsPerInstance;
         for (int32 f = 0; f < FloatsPerInstance; ++f)
             Data.Add(CustomData[Base + f]);
     }
-    for (auto& IdPair : IdGroups)
+    for (auto& GroupPair : GroupBucketIds)
     {
-        if (UInstancedStaticMeshComponent* Bucket = Group->Buckets[IdPair.Key])
-            Bucket->SetCustomDataById(IdPair.Value, DataGroups[IdPair.Key]);
+        const FISMBucketGroup* Group = MeshToBucketGroups.Find(FISMMeshKey(Mesh, GroupPair.Key));
+        if (!Group) continue;
+        for (auto& IdPair : GroupPair.Value)
+        {
+            if (!Group->Buckets.IsValidIndex(IdPair.Key)) continue;
+            if (UInstancedStaticMeshComponent* Bucket = Group->Buckets[IdPair.Key])
+                Bucket->SetCustomDataById(IdPair.Value, GroupBucketData[GroupPair.Key][IdPair.Key]);
+        }
     }
 }
 
@@ -404,7 +426,7 @@ void UISMManager::UpdateInstanceCustomData(UStaticMesh* Mesh, FGlobalInstanceId 
     // 线程约定：仅限游戏线程（ISM 组件写接口游戏线程专属，非游戏线程断言）。
     checkf(IsInGameThread(), TEXT("UpdateInstanceCustomData 仅限游戏线程调用（见 ISMManager 技术文档 §3.3）"));
     if (!Mesh || !InstanceId.IsValid()) return;
-    const FISMMeshKey Key(Mesh);
+    const FISMMeshKey Key(Mesh, InstanceId.GroupKey);
     const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
     if (!Group || !Group->Buckets.IsValidIndex(InstanceId.BucketIndex)) return;
 
@@ -420,7 +442,7 @@ void UISMManager::UpdateInstanceTransform(UStaticMesh* Mesh, FGlobalInstanceId I
     // 线程约定：仅限游戏线程（ISM 组件写接口游戏线程专属，非游戏线程断言）。
     checkf(IsInGameThread(), TEXT("UpdateInstanceTransform 仅限游戏线程调用（见 ISMManager 技术文档 §3.3）"));
     if (!Mesh || !InstanceId.IsValid()) return;
-    const FISMMeshKey Key(Mesh);
+    const FISMMeshKey Key(Mesh, InstanceId.GroupKey);
     const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
     if (!Group || !Group->Buckets.IsValidIndex(InstanceId.BucketIndex)) return;
 
@@ -435,15 +457,15 @@ void UISMManager::BatchUpdateInstancesTransforms(UStaticMesh* Mesh, const TArray
     // 线程约定：仅限游戏线程（ISM 组件写接口游戏线程专属，非游戏线程断言）。
     checkf(IsInGameThread(), TEXT("BatchUpdateInstancesTransforms 仅限游戏线程调用（见 ISMManager 技术文档 §3.3）"));
     if (!Mesh || InstanceIds.Num() == 0 || NewTransforms.Num() != InstanceIds.Num()) return;
-    const FISMMeshKey Key(Mesh);
-    const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
-    if (!Group) return;
 
-    // 逐实例：句柄定位桶 → ById 更新（引擎帧末统一聚合脏标记，无需调用层分组）
+    // 逐实例：句柄自解析组与桶 → ById 更新（引擎帧末统一聚合脏标记，无需调用层分组；
+    // 跨组句柄数组（多轨卫星汇总）亦正确）
     for (int32 i = 0; i < InstanceIds.Num(); ++i)
     {
         const FGlobalInstanceId& Gid = InstanceIds[i];
-        if (!Gid.IsValid() || !Group->Buckets.IsValidIndex(Gid.BucketIndex)) continue;
+        if (!Gid.IsValid()) continue;
+        const FISMBucketGroup* Group = MeshToBucketGroups.Find(FISMMeshKey(Mesh, Gid.GroupKey));
+        if (!Group || !Group->Buckets.IsValidIndex(Gid.BucketIndex)) continue;
         if (UInstancedStaticMeshComponent* Bucket = Group->Buckets[Gid.BucketIndex])
             Bucket->UpdateInstanceTransformById(Gid.LocalId, NewTransforms[i], bWorldSpace, bTeleport);
     }
@@ -453,14 +475,14 @@ void UISMManager::BatchUpdateInstancesTransforms(UStaticMesh* Mesh, const TArray
 // 桶管理
 // ============================================================================
 
-UInstancedStaticMeshComponent* UISMManager::GetOrCreateBucket(UStaticMesh* Mesh, int32 BucketIndex, int32 NumCustomDataFloats, const FISMComponentParams& Params)
+UInstancedStaticMeshComponent* UISMManager::GetOrCreateBucket(UStaticMesh* Mesh, int32 BucketIndex, int32 NumCustomDataFloats, const FISMComponentParams& Params, const int32 GroupKey)
 {
     if (!Mesh) return nullptr;
 
     // 线程约定：仅限游戏线程。非游戏线程直接断言（不再派发——调用端自行保证游戏线程，见文档 §3.3）。
     checkf(IsInGameThread(), TEXT("GetOrCreateBucket 仅限游戏线程调用（ISM 组件创建/写操作须在游戏线程，见 ISMManager 技术文档 §3.3）"));
 
-    const FISMMeshKey Key(Mesh);
+    const FISMMeshKey Key(Mesh, GroupKey);
     FISMBucketGroup& Group = MeshToBucketGroups.FindOrAdd(Key);
     // 参数解析（Mesh → Params 单一事实来源；空参数自动取注册值）
     const FISMComponentParams EffectiveParams = ResolveEffectiveParams(Group, Mesh, Params);
@@ -502,6 +524,8 @@ void UISMManager::RegisterMeshParams(UStaticMesh* Mesh, const FISMComponentParam
     // 线程约定：仅限游戏线程（写共享参数状态，非游戏线程断言）
     checkf(IsInGameThread(), TEXT("RegisterMeshParams 仅限游戏线程调用（见 ISMManager 技术文档 §3.3）"));
 
+    // 注册载体 = 默认组 (Mesh, 0) 条目（Mesh 级单一事实来源；分组组（如卫星一轨一桶）
+    // 由 ResolveEffectiveParams 从本条目取种子初始化组级参数）
     const FISMMeshKey Key(Mesh);
     FISMBucketGroup& Group = MeshToBucketGroups.FindOrAdd(Key);
 
@@ -524,6 +548,7 @@ FISMComponentParams UISMManager::GetMeshParams(UStaticMesh* Mesh) const
     // 线程约定：无锁读，仅限游戏线程
     checkf(IsInGameThread(), TEXT("GetMeshParams 仅限游戏线程调用（无锁读，见 ISMManager 技术文档 §3.3）"));
 
+    // 读默认组 (Mesh, 0) 注册条目（Mesh 级注册表）
     const FISMBucketGroup* Group = MeshToBucketGroups.Find(FISMMeshKey(Mesh));
     return (Group && Group->bParamsRegistered) ? Group->CachedParams : FISMComponentParams();
 }
@@ -548,8 +573,8 @@ void UISMManager::DebugPrintBucketStats()
             if (Group.Buckets[i] && Group.BucketInstanceCounts.IsValidIndex(i) && Group.BucketInstanceCounts[i] > 0)
                 ++ActiveBuckets;
         TotalBuckets += ActiveBuckets;
-        UE_LOG(LogTemp, Warning, TEXT("Mesh: %s, Total Instances: %d, Buckets: %d (Active %d / Disabled %d)"),
-            *Pair.Key.MeshPath.ToString(), Group.TotalInstanceCount, Group.Buckets.Num(), ActiveBuckets,
+        UE_LOG(LogTemp, Warning, TEXT("Mesh: %s (group=%d), Total Instances: %d, Buckets: %d (Active %d / Disabled %d)"),
+            *Pair.Key.MeshPath.ToString(), Pair.Key.GroupKey, Group.TotalInstanceCount, Group.Buckets.Num(), ActiveBuckets,
             Group.Buckets.Num() - ActiveBuckets);
         // 每桶包围盒尺寸与停用状态（NFR-5 诊断扩展）
         for (int32 i = 0; i < Group.Buckets.Num(); ++i)
@@ -579,42 +604,51 @@ void UISMManager::DrawBucketBoundsByPath(const FString& MeshPath, float LineThic
 {
     UWorld* World = GetWorld();
     if (!World || MeshPath.IsEmpty()) return;
-    // 花括号初始化：避免 Most Vexing Parse（圆括号 + 类型名实参会被解析为函数声明）
-    const FISMMeshKey Key{ FSoftObjectPath(MeshPath) };
-    const FISMBucketGroup* Group = MeshToBucketGroups.Find(Key);
-    if (!Group || Group->Buckets.Num() == 0) return;
+
+    // 收集同 MeshPath 的全部组（一轨一桶后同一 Mesh 可能对应多个分组组）
+    const FSoftObjectPath TargetPath(MeshPath);
+    TArray<const FISMBucketGroup*> MatchedGroups;
+    for (const auto& Pair : MeshToBucketGroups)
+    {
+        if (Pair.Key.MeshPath == TargetPath && Pair.Value.Buckets.Num() > 0)
+            MatchedGroups.Add(&Pair.Value);
+    }
+    if (MatchedGroups.Num() == 0) return;
 
     // 一次性持久绘制（bPersistent=true）：先清全部持久调试线再画，重复调用自动替换不叠加；
     // 每帧非持久绘制（bPersistent=false，bDebugAABB 路径）：不清理，线框按帧自动覆盖无残留
     if (bPersistent)
         UKismetSystemLibrary::FlushPersistentDebugLines(World);
 
-    const int32 NumBuckets = Group->Buckets.Num();
-    for (int32 i = 0; i < NumBuckets; ++i)
+    for (const FISMBucketGroup* Group : MatchedGroups)
     {
-        const UInstancedStaticMeshComponent* Bucket = Group->Buckets[i];
-        if (!Bucket) continue;
-
-        // 活动桶按索引取 HSV 渐变（相邻桶可区分）；停用桶灰色（PR-6 状态一目了然）
-        const bool bActive = Group->BucketInstanceCounts.IsValidIndex(i) && Group->BucketInstanceCounts[i] > 0;
-        FColor Color;
-        if (bActive)
+        const int32 NumBuckets = Group->Buckets.Num();
+        for (int32 i = 0; i < NumBuckets; ++i)
         {
-            const float Hue = (float)(i + 1) / (float)FMath::Max(1, NumBuckets) * 360.0f;
-            // HSV → RGB：成员函数 HSVToLinearRGB()（FLinearColor 无静态 HSVToLinearColor）
-            Color = FLinearColor(Hue, 1.0f, 1.0f).HSVToLinearRGB().ToFColor(true);
-        }
-        else
-        {
-            Color = FColor(96, 96, 96);
-        }
+            const UInstancedStaticMeshComponent* Bucket = Group->Buckets[i];
+            if (!Bucket) continue;
 
-        const FBoxSphereBounds& B = Bucket->Bounds;
-        // 内缩 1cm：相邻桶共面边界线不重合（方案 A 防重叠核心）
-        const FVector Extent = B.BoxExtent - FVector(1.0f);
-        DrawDebugBox(World, B.Origin, Extent, FQuat::Identity, Color,
-            /*bPersistentLines=*/bPersistent, /*LifeTime=*/bPersistent ? -1.0f : 0.0f,
-            /*DepthPriority=*/0, LineThickness);
+            // 活动桶按索引取 HSV 渐变（相邻桶可区分）；停用桶灰色（PR-6 状态一目了然）
+            const bool bActive = Group->BucketInstanceCounts.IsValidIndex(i) && Group->BucketInstanceCounts[i] > 0;
+            FColor Color;
+            if (bActive)
+            {
+                const float Hue = (float)(i + 1) / (float)FMath::Max(1, NumBuckets) * 360.0f;
+                // HSV → RGB：成员函数 HSVToLinearRGB()（FLinearColor 无静态 HSVToLinearColor）
+                Color = FLinearColor(Hue, 1.0f, 1.0f).HSVToLinearRGB().ToFColor(true);
+            }
+            else
+            {
+                Color = FColor(96, 96, 96);
+            }
+
+            const FBoxSphereBounds& B = Bucket->Bounds;
+            // 内缩 1cm：相邻桶共面边界线不重合（方案 A 防重叠核心）
+            const FVector Extent = B.BoxExtent - FVector(1.0f);
+            DrawDebugBox(World, B.Origin, Extent, FQuat::Identity, Color,
+                /*bPersistentLines=*/bPersistent, /*LifeTime=*/bPersistent ? -1.0f : 0.0f,
+                /*DepthPriority=*/0, LineThickness);
+        }
     }
 }
 
@@ -678,14 +712,23 @@ void UISMManager::SetDebugAABBTarget(const FString& MeshPath)
 void UISMManager::BuildDebugMeshEntries(TArray<FISMDebugEntry>& OutEntries) const
 {
     OutEntries.Reset();
+    // 按 Mesh 聚合（一轨一桶后同 Mesh 多个分组组：实例/桶求和，组数单列）
+    TMap<FString, int32> PathToEntryIndex;
     for (const auto& Pair : MeshToBucketGroups)
     {
-        FISMDebugEntry Entry;
-        Entry.PathName = Pair.Key.MeshPath.ToString();
-        Entry.DisplayName = Pair.Key.MeshPath.GetAssetName();
-        Entry.Instances = Pair.Value.TotalInstanceCount;
-        Entry.Buckets = Pair.Value.Buckets.Num();
-        OutEntries.Add(MoveTemp(Entry));
+        const FString PathName = Pair.Key.MeshPath.ToString();
+        int32& EntryIndex = PathToEntryIndex.FindOrAdd(PathName, INDEX_NONE);
+        if (EntryIndex == INDEX_NONE)
+        {
+            FISMDebugEntry Entry;
+            Entry.PathName = PathName;
+            Entry.DisplayName = Pair.Key.MeshPath.GetAssetName();
+            EntryIndex = OutEntries.Add(MoveTemp(Entry));
+        }
+        FISMDebugEntry& Entry = OutEntries[EntryIndex];
+        Entry.Instances += Pair.Value.TotalInstanceCount;
+        Entry.Buckets += Pair.Value.Buckets.Num();
+        ++Entry.Groups;
     }
     // DisplayName 升序（与原 Slate 列表一致；绘制/导航/命中共用同一序列）
     OutEntries.Sort([](const FISMDebugEntry& A, const FISMDebugEntry& B)
@@ -760,8 +803,8 @@ void UISMManager::OnDebugCanvasDraw(UCanvas* Canvas, APlayerController* PC)
     for (const FISMDebugEntry& Entry : Entries)
     {
         const bool bSelected = (Entry.PathName == DebugAABBMeshPath);
-        const FString Line = FString::Printf(TEXT("%s %s  (instances=%d, buckets=%d)"),
-            bSelected ? TEXT("▶") : TEXT("  "), *Entry.DisplayName, Entry.Instances, Entry.Buckets);
+        const FString Line = FString::Printf(TEXT("%s %s  (instances=%d, buckets=%d, groups=%d)"),
+            bSelected ? TEXT("▶") : TEXT("  "), *Entry.DisplayName, Entry.Instances, Entry.Buckets, Entry.Groups);
         FCanvasTextItem Item(FVector2D(10.0f, Y), FText::FromString(Line), Font,
             bSelected ? FLinearColor(0.2f, 1.0f, 0.4f) : FLinearColor::White);
         Canvas->DrawItem(Item);
