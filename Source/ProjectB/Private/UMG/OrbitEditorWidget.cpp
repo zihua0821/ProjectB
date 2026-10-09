@@ -426,15 +426,10 @@ FReply SOrbitEditorPanel::OnDeleteOrbitClicked()
 
 FReply SOrbitEditorPanel::OnCloseClicked()
 {
-	// 优先交给宿主（UMG 包装等）；未绑定时回退到控制器（Viewport 模式）
+	// 关闭请求交给宿主（UMG 包装：收起自身 + 退出编辑模式）
 	if (OnCloseRequested.IsBound())
 	{
 		OnCloseRequested.Execute();
-		return FReply::Handled();
-	}
-	if (ABasePlayerController* PC = Controller.Get())
-	{
-		PC->CloseOrbitEditor();   // Viewport 模式：移除 Viewport 内容 + 退出编辑模式
 	}
 	return FReply::Handled();
 }

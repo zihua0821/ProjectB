@@ -3,7 +3,7 @@
 
 #include "MassExecutionContext.h"
 #include "Mass/SatelliteMassFragments.h"
-#include "Simulation/SimulationControlSubsystem.h"   // 选定暂停（白名单挂载）
+#include "Subsystem/SimulationControlSubsystem.h"   // 选定暂停（白名单挂载）
 
 namespace
 {
@@ -12,7 +12,7 @@ namespace
 	 * 统一行为：相位始终按 ω 推进（巡航与离轨期间一致——离轨时仅渲染位置被覆盖）
 	 * 相位归一化到 [0, 360)
 	 */
-	void UpdateOrbitPhase(FMassOrbitFragment& Orbit, const float DeltaTime)
+	void UpdateOrbitPhase(FMassSatelliteOrbitFragment& Orbit, const float DeltaTime)
 	{
 		if (FMath::IsNearlyZero(Orbit.AngularVelocity))
 		{
@@ -45,8 +45,8 @@ USatelliteOrbitMovementProcessor::USatelliteOrbitMovementProcessor()
 
 void USatelliteOrbitMovementProcessor::ConfigureQueries()
 {
-	// 相位推进只依赖自身 fragment（卫星实体集合由 FMassOrbitFragment 唯一确定）
-	EntityQuery.AddRequirement<FMassOrbitFragment>(EMassFragmentAccess::ReadWrite);
+	// 相位推进只依赖自身 fragment（卫星实体集合由 FMassSatelliteOrbitFragment 唯一确定）
+	EntityQuery.AddRequirement<FMassSatelliteOrbitFragment>(EMassFragmentAccess::ReadWrite);
 }
 
 void USatelliteOrbitMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
@@ -56,10 +56,11 @@ void USatelliteOrbitMovementProcessor::Execute(FMassEntityManager& EntityManager
 
 	const float DeltaTime = Context.GetDeltaTimeSeconds();
 
-	// 纯相位推进（槽位相位推进已迁至 USatelliteSlotSyncProcessor——本处理器不再触碰 UObject，worker 并行安全）
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [DeltaTime](FMassExecutionContext& ChunkContext)
+	// 纯相位推进（槽位相位推进已迁至 USatelliteSlotSyncProcessor——本处理器不触碰 UObject；
+	// 各实体独立写自身 fragment → chunk 级并行安全：ParallelForEachEntityChunk）
+	EntityQuery.ParallelForEachEntityChunk(EntityManager, Context, [DeltaTime](FMassExecutionContext& ChunkContext)
 	{
-		const TArrayView<FMassOrbitFragment> OrbitFragments = ChunkContext.GetMutableFragmentView<FMassOrbitFragment>();
+		const TArrayView<FMassSatelliteOrbitFragment> OrbitFragments = ChunkContext.GetMutableFragmentView<FMassSatelliteOrbitFragment>();
 		const int32 NumEntities = ChunkContext.GetNumEntities();
 
 		for (int32 Index = 0; Index < NumEntities; ++Index)

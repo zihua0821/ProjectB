@@ -29,13 +29,6 @@ namespace
 	/** 规划：槽位"已过"重合容差（度；已过 ≤ 此角视为立即可用——与任务侧起飞对齐窗口一致） */
 	constexpr float PlanSlotLeadToleranceDeg = 2.0f;
 
-	/** 角度归一化到 [0, 360)（消除长时运行累积圈数，保证 FindDeltaAngleDegrees 单次修正准确） */
-	float NormalizeAngleDegrees360(const float AngleDeg)
-	{
-		const float Remainder = FMath::Fmod(AngleDeg, 360.f);
-		return Remainder < 0.f ? Remainder + 360.f : Remainder;
-	}
-
 	/**
 	 * 槽位等待角（度；"槽还要转多少度才到该悬停点的正下方"）——规划选座用
 	 * 将到达（沿运动方向未到）→ 剩余角；已过 ≤ 容差 → 0；已过较多 → 360−Δ（必超上限自然被滤）
@@ -49,7 +42,7 @@ namespace
 
 		const float SlotPhaseDeg = Snapshot.SlotPhaseBaseDeg + 360.f * static_cast<float>(SlotIndex) / static_cast<float>(Snapshot.SlotCount);
 		const float Direction = Snapshot.bClockwise ? -1.f : 1.f;
-		const float DeltaDeg = FMath::FindDeltaAngleDegrees(NormalizeAngleDegrees360(ThetaHoverDeg), NormalizeAngleDegrees360(SlotPhaseDeg)) * Direction;
+		const float DeltaDeg = FMath::FindDeltaAngleDegrees(UPlanetBlueprintFunctionLibrary::NormalizeAngleDegrees360(ThetaHoverDeg), UPlanetBlueprintFunctionLibrary::NormalizeAngleDegrees360(SlotPhaseDeg)) * Direction;
 		if (DeltaDeg > PlanSlotLeadToleranceDeg)
 		{
 			return 360.f - DeltaDeg;   // 已过较多（需绕一整圈）
@@ -180,7 +173,7 @@ USatelliteManagerComponent::USatelliteManagerComponent()
 void USatelliteManagerComponent::Initialize(APlanetActor* InPlanetActor)
 {
 	PlanetActor = InPlanetActor;
-	if (!PlanetActor)
+	if (!PlanetActor.IsValid())
 	{
 		UE_LOG(LogTemp, Error, TEXT("[SatelliteManager] Initialize failed: PlanetActor is null"));
 		return;
@@ -213,7 +206,7 @@ void USatelliteManagerComponent::Initialize(APlanetActor* InPlanetActor)
 	}
 
 	// 2. 先注册轨道槽位（智能对象；卫星创建时做初始认领），再为全部轨道创建卫星（含渲染实例注册）
-	if (PlanetActor)
+	if (PlanetActor.IsValid())
 	{
 		if (USmartObjectManagerComponent* SmartObjectManager = PlanetActor->GetSmartObjectManagerComponent())
 		{
@@ -238,7 +231,7 @@ void USatelliteManagerComponent::BuildRuntimeOrbits()
 {
 	RuntimeOrbits.Reset();
 
-	const UPlanetConfigDataAsset* Config = PlanetActor ? PlanetActor->PlanetConfig : nullptr;
+	const UPlanetConfigDataAsset* Config = PlanetActor.IsValid() ? PlanetActor->PlanetConfig : nullptr;
 
 	// 优先读取星球配置中的轨道定义（每个定义生成一条运行时轨道）
 	if (Config && Config->OrbitDefinitions.Num() > 0)
@@ -324,7 +317,7 @@ void USatelliteManagerComponent::CreateSatellitesForOrbit(const FRuntimeOrbitDat
 
 	// 建原型（手写路线，与格子创建模式一致）
 	TArray<const UScriptStruct*> FragmentTypes;
-	FragmentTypes.Add(FMassOrbitFragment::StaticStruct());
+	FragmentTypes.Add(FMassSatelliteOrbitFragment::StaticStruct());
 	FragmentTypes.Add(FMassSatelliteTaskFragment::StaticStruct());
 	FragmentTypes.Add(FSatelliteTag::StaticStruct());
 	FragmentTypes.Add(FSatelliteRenderFragment::StaticStruct());
@@ -341,14 +334,14 @@ void USatelliteManagerComponent::CreateSatellitesForOrbit(const FRuntimeOrbitDat
 	// 写轨道运动数据 + 组装初始世界变换（角度沿该轨道均分）
 	for (int32 Index = 0; Index < Entities.Num(); ++Index)
 	{
-		FMassOrbitFragment& OrbitFragment = EntityManager.GetFragmentDataChecked<FMassOrbitFragment>(Entities[Index]);
+		FMassSatelliteOrbitFragment& OrbitFragment = EntityManager.GetFragmentDataChecked<FMassSatelliteOrbitFragment>(Entities[Index]);
 		OrbitFragment.OrbitName = Orbit.OrbitName;
 		OrbitFragment.VirtualPhase = 360.0f * static_cast<float>(Index) / static_cast<float>(Entities.Num());   // 均分相位
 		OrbitFragment.AngularVelocity = Orbit.AngularVelocity;
 		OrbitFragment.bClockwise = Orbit.bClockwise;
 
 		// 初始槽位认领（槽 Index = 卫星序 × 倍数——与槽网格均分相位对齐；槽位由 SmartObjectManager 注册）
-		if (PlanetActor)
+		if (PlanetActor.IsValid())
 		{
 			if (USmartObjectManagerComponent* SmartObjectManager = PlanetActor->GetSmartObjectManagerComponent())
 			{
@@ -453,7 +446,7 @@ void USatelliteManagerComponent::DestroySatellitesForOrbit(const FName OrbitName
 	ToKeep.Reserve(SatelliteEntities.Num());
 	for (const FMassEntityHandle& Entity : SatelliteEntities)
 	{
-		const FMassOrbitFragment* OrbitFragment = EntityManager.GetFragmentDataPtr<FMassOrbitFragment>(Entity);
+		const FMassSatelliteOrbitFragment* OrbitFragment = EntityManager.GetFragmentDataPtr<FMassSatelliteOrbitFragment>(Entity);
 		if (OrbitFragment && OrbitFragment->OrbitName == OrbitName)
 		{
 			ToDestroy.Add(Entity);
@@ -465,10 +458,10 @@ void USatelliteManagerComponent::DestroySatellitesForOrbit(const FName OrbitName
 	}
 
 	// 1. 归还一切认领（认领是"借"，销毁前必"还"）：
-	//    · 格子认领：Task 全量账本（同 Slot 多项共享的重复句柄——星内去重）
+	//    · 格子认领：Task 两域句柄（Plot/Crop 各一句柄——天然无重复）
 	//    · 轨道槽认领：SlotClaimHandle
 	//    保证重建后"账本 / 引擎 / 槽位"三处无残留（否则格子永久不可用、槽位幽灵占用）
-	if (ToDestroy.Num() > 0 && PlanetActor)
+	if (ToDestroy.Num() > 0 && PlanetActor.IsValid())
 	{
 		if (USmartObjectManagerComponent* SmartObjectManager = PlanetActor->GetSmartObjectManagerComponent())
 		{
@@ -476,19 +469,17 @@ void USatelliteManagerComponent::DestroySatellitesForOrbit(const FName OrbitName
 			{
 				if (const FMassSatelliteTaskFragment* TaskFragment = EntityManager.GetFragmentDataPtr<FMassSatelliteTaskFragment>(Entity))
 				{
-					// 星内去重：同 Slot 多项共享同一句柄——重复释放会被引擎拒绝并报 Error
-					// （账本清理幂等，但引擎 MarkSlotAsFree 对已 Free 的槽不幂等）
-					TArray<FSmartObjectClaimHandle> ReleasedHandles;
-					for (const FSmartObjectClaimHandle& ClaimHandle : TaskFragment->ClaimHandles)
+					// 按域释放（两域不同 Slot；同域已折叠为单句柄——结构上不可能重复）
+					if (TaskFragment->PlotClaimHandle.IsValid())
 					{
-						if (ClaimHandle.IsValid() && !ReleasedHandles.Contains(ClaimHandle))
-						{
-							ReleasedHandles.Add(ClaimHandle);
-							SmartObjectManager->ReleaseClaim(ClaimHandle);
-						}
+						SmartObjectManager->ReleaseClaim(TaskFragment->PlotClaimHandle);
+					}
+					if (TaskFragment->CropClaimHandle.IsValid())
+					{
+						SmartObjectManager->ReleaseClaim(TaskFragment->CropClaimHandle);
 					}
 				}
-				if (const FMassOrbitFragment* OrbitFragment = EntityManager.GetFragmentDataPtr<FMassOrbitFragment>(Entity))
+				if (const FMassSatelliteOrbitFragment* OrbitFragment = EntityManager.GetFragmentDataPtr<FMassSatelliteOrbitFragment>(Entity))
 				{
 					if (OrbitFragment->SlotClaimHandle.IsValid())
 					{
@@ -530,7 +521,7 @@ void USatelliteManagerComponent::DestroySatellitesForOrbit(const FName OrbitName
 
 void USatelliteManagerComponent::ApplyOrbitChangesForOrbit(const FName OrbitName)
 {
-	if (!PlanetActor)
+	if (!PlanetActor.IsValid())
 	{
 		return;
 	}
@@ -650,7 +641,7 @@ void USatelliteManagerComponent::RemoveOrbit(const FName OrbitName)
 
 	// 只销毁该轨：卫星（含归还认领）+ 槽位；其他轨道零触碰
 	DestroySatellitesForOrbit(OrbitName);
-	if (PlanetActor)
+	if (PlanetActor.IsValid())
 	{
 		if (USmartObjectManagerComponent* SmartObjectManager = PlanetActor->GetSmartObjectManagerComponent())
 		{
@@ -721,7 +712,7 @@ void USatelliteManagerComponent::CollectOrbitSnapshots(TArray<FOrbitSnapshot>& O
 	OutSnapshots.Reset();
 
 	UWorld* World = GetWorld();
-	if (!World || !PlanetActor)
+	if (!World || !PlanetActor.IsValid())
 	{
 		return;
 	}
@@ -733,7 +724,7 @@ void USatelliteManagerComponent::CollectOrbitSnapshots(TArray<FOrbitSnapshot>& O
 	for (int32 SatelliteIndex = 0; SatelliteIndex < SatelliteEntities.Num(); ++SatelliteIndex)
 	{
 		const FMassEntityHandle& Entity = SatelliteEntities[SatelliteIndex];
-		const FMassOrbitFragment* OrbitFragment = EntityManager.GetFragmentDataPtr<FMassOrbitFragment>(Entity);
+		const FMassSatelliteOrbitFragment* OrbitFragment = EntityManager.GetFragmentDataPtr<FMassSatelliteOrbitFragment>(Entity);
 		if (!OrbitFragment)
 		{
 			continue;
@@ -770,7 +761,7 @@ void USatelliteManagerComponent::CollectOrbitSnapshots(TArray<FOrbitSnapshot>& O
 			Entry.SlotIndex = SmartObjectManager->ResolveSlotIndexByClaim(OrbitFragment->OrbitName, OrbitFragment->SlotClaimHandle);
 			Entry.bOccupiesSlot = Entry.SlotIndex != INDEX_NONE;   // 句柄有效但反查失败：视为不占位（防御）
 		}
-		Entry.bAwaitingReturn = (OrbitFragment->State == ESatelliteState::AwaitReturn) && !Entry.bOccupiesSlot;
+		Entry.bAwaitingReturn = (OrbitFragment->State == ESatelliteState::ReturnWait) && !Entry.bOccupiesSlot;
 		if (Entry.bAwaitingReturn && OrbitFragment->bOverrideLocation)
 		{
 			Entry.HoverLocation = OrbitFragment->OverrideLocation;
@@ -1056,7 +1047,7 @@ void USatelliteManagerComponent::DispatchOrbitPlan(const FOrbitPlan& Plan)
 		return;
 	}
 	UWorld* World = GetWorld();
-	USmartObjectManagerComponent* SmartObjectManager = PlanetActor ? PlanetActor->GetSmartObjectManagerComponent() : nullptr;
+	USmartObjectManagerComponent* SmartObjectManager = PlanetActor.IsValid() ? PlanetActor->GetSmartObjectManagerComponent() : nullptr;
 	if (!World || !SmartObjectManager)
 	{
 		return;
@@ -1069,7 +1060,7 @@ void USatelliteManagerComponent::DispatchOrbitPlan(const FOrbitPlan& Plan)
 		{
 			continue;
 		}
-		FMassOrbitFragment* OrbitFragment = EntityManager.GetFragmentDataPtr<FMassOrbitFragment>(PlanEntry.Entity);
+		FMassSatelliteOrbitFragment* OrbitFragment = EntityManager.GetFragmentDataPtr<FMassSatelliteOrbitFragment>(PlanEntry.Entity);
 		if (!OrbitFragment)
 		{
 			continue;

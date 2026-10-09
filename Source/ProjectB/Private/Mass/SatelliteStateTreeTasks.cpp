@@ -41,27 +41,31 @@ namespace
 	/** 作业时长缺省值（秒；认领句柄/行为定义缺失时使用） */
 	constexpr float DefaultActionDuration = 2.0f;
 
+	/** 域席位索引（与智能对象资产 Slot 布局一致：0=Plot / 1=Crop；映射见 GetSlotIndexForEditMode） */
+	constexpr int32 PlotDomainSlotIndex = 0;
+	constexpr int32 CropDomainSlotIndex = 1;
+
 	/** 卫星任务数据聚合（fragment + 共享引用） */
-	struct FSattelliteTaskData
+	struct FSatelliteTaskData
 	{
 		FMassEntityManager* EntityManager = nullptr;
 		FMassEntityHandle Entity;
 		const FMassSatelliteSharedFragment* Shared = nullptr;
-		FMassOrbitFragment* Orbit = nullptr;
+		FMassSatelliteOrbitFragment* Orbit = nullptr;
 		FMassSatelliteTaskFragment* Task = nullptr;
 
 		bool IsValid() const { return EntityManager && Shared && Orbit && Task; }
 	};
 
 	/** 读取卫星任务数据（任一缺失时 IsValid() 为 false） */
-	FSattelliteTaskData GetSatelliteTaskData(FStateTreeExecutionContext& Context)
+	FSatelliteTaskData GetSatelliteTaskData(FStateTreeExecutionContext& Context)
 	{
-		FSattelliteTaskData Data;
+		FSatelliteTaskData Data;
 		const FMassStateTreeExecutionContext& MassContext = static_cast<FMassStateTreeExecutionContext&>(Context);
 		Data.EntityManager = &MassContext.GetEntityManager();
 		Data.Entity = MassContext.GetEntity();
 		Data.Shared = Data.EntityManager->GetConstSharedFragmentDataPtr<FMassSatelliteSharedFragment>(Data.Entity);
-		Data.Orbit = Data.EntityManager->GetFragmentDataPtr<FMassOrbitFragment>(Data.Entity);
+		Data.Orbit = Data.EntityManager->GetFragmentDataPtr<FMassSatelliteOrbitFragment>(Data.Entity);
 		Data.Task = Data.EntityManager->GetFragmentDataPtr<FMassSatelliteTaskFragment>(Data.Entity);
 		return Data;
 	}
@@ -155,23 +159,56 @@ namespace
 	 * 位置覆盖不清（若已在悬停点，由回轨流程接管）
 	 * @return 统一返回 Failed（供状态树按配置跳转规定状态）
 	 */
-	EStateTreeRunStatus HandleOwnershipLost(const FSattelliteTaskData& Data, const TCHAR* TaskName)
+	EStateTreeRunStatus HandleOwnershipLost(const FSatelliteTaskData& Data, const TCHAR* TaskName)
 	{
 		if (Data.Task != nullptr)
 		{
 			UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] %s: ownership lost at cell (%d, %d) — cancel task"),
 				TaskName, Data.Task->TargetCoord.X, Data.Task->TargetCoord.Y);
+			// 只清本地记录（不释放引擎槽——失权即槽已被他人接管，误释会破坏新持有者）
 			Data.Task->TargetCoord = FIntPoint(-1, -1);
-			Data.Task->TargetEditMode = EEditMode::None;
-			Data.Task->ClaimHandle = FSmartObjectClaimHandle::InvalidHandle;
+			Data.Task->PlotClaimHandle = FSmartObjectClaimHandle::InvalidHandle;
+			Data.Task->CropClaimHandle = FSmartObjectClaimHandle::InvalidHandle;
 			Data.Task->WorkQueue.Reset();
-			Data.Task->ClaimHandles.Reset();
 		}
 		return EStateTreeRunStatus::Failed;
 	}
 
-	/** 读取认领句柄对应的作业时长（行为定义；无认领/无定义时用缺省） */
-	float ReadActionDuration(const UWorld* World, const FSmartObjectClaimHandle& ClaimHandle)
+	/**
+	 * 取操作所属域的认领句柄（无需认领/无效操作返回 InvalidHandle）
+	 * 域映射与认领侧同源（GetSlotIndexForEditMode）
+	 */
+	FSmartObjectClaimHandle ResolveDomainHandle(const FMassSatelliteTaskFragment& Task, const EEditMode EditMode)
+	{
+		switch (USmartObjectManagerComponent::GetSlotIndexForEditMode(EditMode))
+		{
+		case PlotDomainSlotIndex: return Task.PlotClaimHandle;
+		case CropDomainSlotIndex: return Task.CropClaimHandle;
+		default:                  return FSmartObjectClaimHandle::InvalidHandle;
+		}
+	}
+
+	/**
+	 * 逐域所有权检查：对每个已认领域（句柄有效）验证认领仍有效；任一失效即失权
+	 * （比旧"仅查主域"更完备：部分失权 = 整单不可执行）
+	 * 前提：SmartObjectManager 非空（各调用点已保护）
+	 */
+	bool IsOwnershipValid(const FSatelliteTaskData& Data)
+	{
+		const FMassSatelliteTaskFragment& Task = *Data.Task;
+		if (Task.PlotClaimHandle.IsValid() && !Data.Shared->SmartObjectManager->IsClaimValid(Task.TargetCoord, PlotDomainSlotIndex, Task.PlotClaimHandle))
+		{
+			return false;
+		}
+		if (Task.CropClaimHandle.IsValid() && !Data.Shared->SmartObjectManager->IsClaimValid(Task.TargetCoord, CropDomainSlotIndex, Task.CropClaimHandle))
+		{
+			return false;
+		}
+		return true;
+	}
+
+	/** 读取当前操作对应行为定义的作业时长（按操作映射具体行为类；无认领/未挂载时用缺省） */
+	float ReadActionDuration(const UWorld* World, const FSmartObjectClaimHandle& ClaimHandle, const EEditMode EditMode)
 	{
 		if (!ClaimHandle.IsValid() || World == nullptr)
 		{
@@ -179,36 +216,43 @@ namespace
 		}
 		// 注意：GetBehaviorDefinition<T> 为非 const 成员函数，Subsystem 指针不可加 const
 		USmartObjectSubsystem* SmartObjectSubsystem = World->GetSubsystem<USmartObjectSubsystem>();
-		if (SmartObjectSubsystem != nullptr)
+		if (SmartObjectSubsystem == nullptr)
 		{
-			if (const UFarmActionBehaviorBase* Behavior = SmartObjectSubsystem->GetBehaviorDefinition<UFarmActionBehaviorBase>(ClaimHandle))
-			{
-				return Behavior->Duration;
-			}
+			return DefaultActionDuration;
 		}
-		return DefaultActionDuration;
+		// 按操作映射具体行为类（哪类挂哪个 Slot 由资产决定；查不到 → 回退缺省）
+		const UFarmActionBehaviorBase* Behavior = nullptr;
+		switch (EditMode)
+		{
+		case EEditMode::HarvestCrop:                Behavior = SmartObjectSubsystem->GetBehaviorDefinition<UFarmHarvestBehavior>(ClaimHandle); break;
+		case EEditMode::PlantCrop:                  Behavior = SmartObjectSubsystem->GetBehaviorDefinition<UFarmPlantBehavior>(ClaimHandle); break;
+		case EEditMode::Wet:
+		case EEditMode::UnWet:                      Behavior = SmartObjectSubsystem->GetBehaviorDefinition<UFarmIrrigationBehavior>(ClaimHandle); break;
+		case EEditMode::Fertilize:
+		case EEditMode::UnFertilize:                Behavior = SmartObjectSubsystem->GetBehaviorDefinition<UFarmFertilizeBehavior>(ClaimHandle); break;
+		case EEditMode::Weed:
+		case EEditMode::UnWeed:                     Behavior = SmartObjectSubsystem->GetBehaviorDefinition<UFarmWeedingBehavior>(ClaimHandle); break;
+		case EEditMode::Pest:
+		case EEditMode::UnPest:                     Behavior = SmartObjectSubsystem->GetBehaviorDefinition<UFarmPestBehavior>(ClaimHandle); break;
+		case EEditMode::Plow:
+		case EEditMode::UnPlow:                     Behavior = SmartObjectSubsystem->GetBehaviorDefinition<UFarmPlowBehavior>(ClaimHandle); break;
+		default: break;   // 其余（Reset 等）：无专属行为类 → 缺省时长
+		}
+		return Behavior != nullptr ? Behavior->Duration : DefaultActionDuration;
 	}
 
 	/**
-	 * 开始队列第 ItemIndex 项（重置计时与时长；句柄按"已消费数"索引读取）
-	 * 注：ClaimHandles 不再出队（作为出勤账本，保留至回轨到达统一释放），
-	 *     当前项句柄 = ClaimHandles[已消费数] = ClaimHandles[总长 − WorkQueue 剩余长度]
+	 * 开始队列当前项（重置计时与时长；按操作所属域取认领句柄 → 读该类行为的 Duration）
+	 * 注：句柄按域存储（Plot/Crop 两字段），不再与 WorkQueue 逐项对齐
 	 */
-	void BeginQueueItem(const FMassSatelliteTaskFragment& Task, FSatelliteExecuteActionTaskInstanceData& InstanceData, const UWorld* World, const int32 ItemIndex)
+	void BeginQueueItem(const FMassSatelliteTaskFragment& Task, const EEditMode ItemEditMode, FSatelliteExecuteActionTaskInstanceData& InstanceData, const UWorld* World)
 	{
-		const FSmartObjectClaimHandle ItemHandle = Task.ClaimHandles.IsValidIndex(ItemIndex) ? Task.ClaimHandles[ItemIndex] : FSmartObjectClaimHandle::InvalidHandle;
-		InstanceData.ActionDuration = ReadActionDuration(World, ItemHandle);
+		const FSmartObjectClaimHandle ItemHandle = ResolveDomainHandle(Task, ItemEditMode);
+		InstanceData.ActionDuration = ReadActionDuration(World, ItemHandle, ItemEditMode);
 		InstanceData.ActionStartTime = FPlatformTime::Seconds();
 	}
 
 	
-	/** 角度归一化到 [0, 360)（消除长时运行累积圈数，保证 FindDeltaAngleDegrees 单次修正准确） */
-	float NormalizeAngleDegrees360(const float AngleDeg)
-	{
-		const float Remainder = FMath::Fmod(AngleDeg, 360.f);
-		return Remainder < 0.f ? Remainder + 360.f : Remainder;
-	}
-
 	/**
 	 * 悬停点投影 → 槽位 的有向夹角（度；沿运动方向为正）
 	 * δ > 0：槽位在悬停点投影【前方】（未到）——回轨会形成追逐，不可用
@@ -247,7 +291,7 @@ namespace
 	 * @param World 取全局配置用（可空）
 	 * @return true=存在过阈候选（OutBest 为最高分者）
 	 */
-	bool FindBestWorkTarget(const FSattelliteTaskData& Data, const UWorld* World, FSatelliteTargetCandidate& OutBest)
+	bool FindBestWorkTarget(const FSatelliteTaskData& Data, const UWorld* World, FSatelliteTargetCandidate& OutBest)
 	{
 		OutBest = FSatelliteTargetCandidate();
 		if (!Data.IsValid())
@@ -255,7 +299,7 @@ namespace
 			return false;
 		}
 		const FMassSatelliteSharedFragment& Shared = *Data.Shared;
-		const FMassOrbitFragment& Orbit = *Data.Orbit;
+		const FMassSatelliteOrbitFragment& Orbit = *Data.Orbit;
 		if (!Shared.PlanetConfig || !Shared.CellManager || !Shared.SmartObjectManager || !Shared.SatelliteManager)
 		{
 			return false;
@@ -343,7 +387,7 @@ namespace
 			// 提前量点 = 目标方位 − ω·T（T = 该目标的离轨时长，与 Approach 起飞同源）
 			const float CellAngle = UPlanetBlueprintFunctionLibrary::CalculateOrbitAngleFromCell(CellTransform, OrbitData);
 			const float TravelDirection = Orbit.bClockwise ? -1.f : 1.f;
-			const float ForwardDeltaDeg = FMath::FindDeltaAngleDegrees(NormalizeAngleDegrees360(Orbit.VirtualPhase), NormalizeAngleDegrees360(CellAngle)) * TravelDirection;
+			const float ForwardDeltaDeg = FMath::FindDeltaAngleDegrees(UPlanetBlueprintFunctionLibrary::NormalizeAngleDegrees360(Orbit.VirtualPhase), UPlanetBlueprintFunctionLibrary::NormalizeAngleDegrees360(CellAngle)) * TravelDirection;
 			const float ForwardDeg = (ForwardDeltaDeg >= 0.f) ? ForwardDeltaDeg : (ForwardDeltaDeg + 360.f);   // 到目标的正向行程 [0,360)
 
 			// 该目标的离轨时长（平面内 + 垂直合成跨度 / 径向速度；与 Approach::EnterState 同源）
@@ -386,10 +430,10 @@ namespace
 	 * @param World 取全局配置用（可空）
 	 * @return true=认领成功（Task 就绪，可转 Depart）
 	 */
-	bool ClaimWorkTarget(const FSattelliteTaskData& Data, const UWorld* World, const FSatelliteTargetCandidate& Best)
+	bool ClaimWorkTarget(const FSatelliteTaskData& Data, const UWorld* World, const FSatelliteTargetCandidate& Best)
 	{
 		const FMassSatelliteSharedFragment& Shared = *Data.Shared;
-		FMassOrbitFragment& Orbit = *Data.Orbit;
+		FMassSatelliteOrbitFragment& Orbit = *Data.Orbit;
 		FMassSatelliteTaskFragment& Task = *Data.Task;
 
 		const FSatelliteScoringWeights& Weights = Shared.SatelliteManager->GetScoringWeights();
@@ -407,16 +451,14 @@ namespace
 
 		// 写入目标 + 构建作业队列（与选点同源——重新收集该格缺口并按分数降序）
 		Task.TargetCoord = Best.Coord;
-		Task.TargetEditMode = Best.EditMode;
 		Task.WorkQueue.Reset();
-		Task.ClaimHandles.Reset();
-		Task.ClaimHandle = FSmartObjectClaimHandle::InvalidHandle;
+		Task.PlotClaimHandle = FSmartObjectClaimHandle::InvalidHandle;
+		Task.CropClaimHandle = FSmartObjectClaimHandle::InvalidHandle;
 
 		FMassEntityHandle SelectedEntity;
 		if (!Shared.CellManager->GetCellEntity(Best.Coord, SelectedEntity))
 		{
 			Task.TargetCoord = FIntPoint(-1, -1);   // 回滚（不留"伪认领"痕迹：评估器判据依托 TargetCoord）
-			Task.TargetEditMode = EEditMode::None;
 			return false;
 		}
 		const FPlotStateFragment* SelectedPlot = Data.EntityManager->GetFragmentDataPtr<FPlotStateFragment>(SelectedEntity);
@@ -425,7 +467,6 @@ namespace
 		if (SelectedPlot == nullptr)
 		{
 			Task.TargetCoord = FIntPoint(-1, -1);   // 回滚
-			Task.TargetEditMode = EEditMode::None;
 			return false;
 		}
 		TArray<FCellGap> SelectedGaps;
@@ -433,56 +474,51 @@ namespace
 		{
 			// 缺口已消失（本轮被他人完成）：回滚——调用方下轮节流重选 / 探测继续漂移
 			Task.TargetCoord = FIntPoint(-1, -1);   // 回滚
-			Task.TargetEditMode = EEditMode::None;
 			return false;
 		}
 		BuildCellWorkQueue(SelectedGaps, Task.WorkQueue);
 
-		// 认领（整格作业权）：队列涉及的全部 Slot 一次认领（防抢；同 Slot 多项共享句柄；任一项失败则整单回滚）
-		TMap<int32, FSmartObjectClaimHandle> SlotHandles;
+		// 认领（按域席位）：队列涉及的全部域一次认领（防抢；同域多项共享同一句柄；任一域失败则整单回滚）
 		bool bClaimAllSucceeded = true;
 		for (const TEnumAsByte<EEditMode>& QueueItem : Task.WorkQueue)
 		{
-			FSmartObjectClaimHandle ItemHandle = FSmartObjectClaimHandle::InvalidHandle;
 			const int32 ItemSlotIndex = USmartObjectManagerComponent::GetSlotIndexForEditMode(QueueItem);
-			if (ItemSlotIndex >= 0)
+			if (ItemSlotIndex < 0)
 			{
-				if (const FSmartObjectClaimHandle* Existing = SlotHandles.Find(ItemSlotIndex))
-				{
-					ItemHandle = *Existing;   // 同 Slot 复用（多个同域操作共享一个 Slot 所有权）
-				}
-				else
-				{
-					ItemHandle = Shared.SmartObjectManager->TryClaimSlot(Best.Coord, ItemSlotIndex, SatelliteClaimPriority);
-					if (!ItemHandle.IsValid())
-					{
-						bClaimAllSucceeded = false;
-						break;
-					}
-					SlotHandles.Add(ItemSlotIndex, ItemHandle);
-				}
+				continue;   // 无需认领的项（None 等）
 			}
-			Task.ClaimHandles.Add(ItemHandle);   // 无需认领的项占位 InvalidHandle（与 WorkQueue 对齐）
+			FSmartObjectClaimHandle* DomainHandle = (ItemSlotIndex == PlotDomainSlotIndex) ? &Task.PlotClaimHandle : &Task.CropClaimHandle;
+			if (DomainHandle->IsValid())
+			{
+				continue;   // 同域已认领（多项共享同一句柄）
+			}
+			*DomainHandle = Shared.SmartObjectManager->TryClaimSlot(Best.Coord, ItemSlotIndex, SatelliteClaimPriority);
+			if (!DomainHandle->IsValid())
+			{
+				bClaimAllSucceeded = false;
+				break;
+			}
 		}
 
 		if (!bClaimAllSucceeded)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] Entity[%d] claim failed at cell (%d, %d) — occupied/contested (ghost claim?)"),
 				Data.Entity.Index, Best.Coord.X, Best.Coord.Y);
-			// 整单失败：回滚已认领 → 清理 → 由调用方下轮再议
-			for (const TPair<int32, FSmartObjectClaimHandle>& Pair : SlotHandles)
+			// 整单失败：回滚已认领域 → 清理 → 由调用方下轮再议
+			if (Task.PlotClaimHandle.IsValid())
 			{
-				Shared.SmartObjectManager->ReleaseClaim(Pair.Value);
+				Shared.SmartObjectManager->ReleaseClaim(Task.PlotClaimHandle);
 			}
-			Task.ClaimHandles.Reset();
+			if (Task.CropClaimHandle.IsValid())
+			{
+				Shared.SmartObjectManager->ReleaseClaim(Task.CropClaimHandle);
+			}
+			Task.PlotClaimHandle = FSmartObjectClaimHandle::InvalidHandle;
+			Task.CropClaimHandle = FSmartObjectClaimHandle::InvalidHandle;
 			Task.WorkQueue.Reset();
 			Task.TargetCoord = FIntPoint(-1, -1);
-			Task.TargetEditMode = EEditMode::None;
 			return false;
 		}
-
-		// 兼容字段：首项句柄（过渡期读取）
-		Task.ClaimHandle = Task.ClaimHandles.Num() > 0 ? Task.ClaimHandles[0] : FSmartObjectClaimHandle::InvalidHandle;
 
 		// 卫星状态：待发（离轨时机由 DepartWait 任务判定）
 		Orbit.State = ESatelliteState::Depart;
@@ -495,14 +531,14 @@ namespace
 
 EStateTreeRunStatus FSatelliteSelectTargetTask::Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const
 {
-	const FSattelliteTaskData Data = GetSatelliteTaskData(Context);
+	const FSatelliteTaskData Data = GetSatelliteTaskData(Context);
 	if (!Data.IsValid())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] SelectTarget: satellite data missing (fragment/shared). Entity[%d]"), Data.Entity.Index);
 		return EStateTreeRunStatus::Failed;
 	}
 	const FMassSatelliteSharedFragment& Shared = *Data.Shared;
-	FMassOrbitFragment& Orbit = *Data.Orbit;
+	FMassSatelliteOrbitFragment& Orbit = *Data.Orbit;
 	FMassSatelliteTaskFragment& Task = *Data.Task;
 
 	if (!Shared.PlanetConfig || !Shared.CellManager || !Shared.SmartObjectManager || !Shared.SatelliteManager)
@@ -514,9 +550,9 @@ EStateTreeRunStatus FSatelliteSelectTargetTask::Tick(FStateTreeExecutionContext&
 	// 复用分支（兜底）：已有有效认领（如异常回访路径）→ 直接成功转 Depart，不再重选
 	if (Task.TargetCoord != FIntPoint(-1, -1))
 	{
-		const int32 ReuseSlotIndex = USmartObjectManagerComponent::GetSlotIndexForEditMode(Task.TargetEditMode);
-		const FSmartObjectClaimHandle ReuseHandle = Task.ClaimHandles.Num() > 0 ? Task.ClaimHandles[0] : Task.ClaimHandle;
-		if (ReuseSlotIndex >= 0 && Shared.SmartObjectManager->IsClaimValid(Task.TargetCoord, ReuseSlotIndex, ReuseHandle))
+		// 逐域验证：所有已认领域仍有效，且至少持有一个域（两域齐备为常态；单域兜底放行）
+		const bool bHasAnyClaim = Task.PlotClaimHandle.IsValid() || Task.CropClaimHandle.IsValid();
+		if (bHasAnyClaim && IsOwnershipValid(Data))
 		{
 			// 探针（Verbose：兜底路径观测——正常运行时主路径可靠，此处应极少触发）
 			UE_LOG(LogTemp, Verbose, TEXT("[SatelliteTask] Entity[%d] reuse claimed target (%d, %d) -> Depart"),
@@ -541,13 +577,7 @@ EStateTreeRunStatus FSatelliteSelectTargetTask::Tick(FStateTreeExecutionContext&
 		return EStateTreeRunStatus::Running;   // 无合适目标（继续巡航）
 	}
 
-	// 3. 写目标 + 认领（共享函数——与漂移中探测同源；含复查/整格认领/写 Depart）
-	Task.TargetCoord = Best.Coord;
-	Task.TargetEditMode = Best.EditMode;
-	Task.WorkQueue.Reset();
-	Task.ClaimHandles.Reset();
-	Task.ClaimHandle = FSmartObjectClaimHandle::InvalidHandle;
-
+	// 3. 写目标 + 认领（共享函数——与漂移中探测同源；写入/回滚自含）
 	return ClaimWorkTarget(Data, Context.GetWorld(), Best)
 		? EStateTreeRunStatus::Succeeded
 		: EStateTreeRunStatus::Running;   // 认领失败（整单回滚）→ 下一轮节流重选
@@ -555,14 +585,14 @@ EStateTreeRunStatus FSatelliteSelectTargetTask::Tick(FStateTreeExecutionContext&
 
 EStateTreeRunStatus FSatelliteDepartWaitTask::Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const
 {
-	const FSattelliteTaskData Data = GetSatelliteTaskData(Context);
+	const FSatelliteTaskData Data = GetSatelliteTaskData(Context);
 	if (!Data.IsValid())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] DepartWait: satellite data missing. Entity[%d]"), Data.Entity.Index);
 		return EStateTreeRunStatus::Failed;
 	}
 	const FMassSatelliteSharedFragment& Shared = *Data.Shared;
-	FMassOrbitFragment& Orbit = *Data.Orbit;
+	FMassSatelliteOrbitFragment& Orbit = *Data.Orbit;
 	FMassSatelliteTaskFragment& Task = *Data.Task;
 
 	// ---- 探针：中断→Depart 送达延迟 + 长等待告警（卡死排查）----
@@ -598,9 +628,8 @@ EStateTreeRunStatus FSatelliteDepartWaitTask::Tick(FStateTreeExecutionContext& C
 		return EStateTreeRunStatus::Failed;
 	}
 
-	// 所有权检查（Depart → Approach 转换点）：失权 → 取消任务（状态树据 Failed 回 Cruise）
-	const int32 SlotIndex = USmartObjectManagerComponent::GetSlotIndexForEditMode(Task.TargetEditMode);
-	if (SlotIndex >= 0 && !Shared.SmartObjectManager->IsClaimValid(Task.TargetCoord, SlotIndex, Task.ClaimHandle))
+	// 所有权检查（Depart → Approach 转换点，逐域）：失权 → 取消任务（状态树据 Failed 回 Cruise）
+	if (!IsOwnershipValid(Data))
 	{
 		return HandleOwnershipLost(Data, TEXT("DepartWait"));
 	}
@@ -643,7 +672,7 @@ EStateTreeRunStatus FSatelliteDepartWaitTask::Tick(FStateTreeExecutionContext& C
 	float DisplayRadiusInPlane = 0.f;
 	float DisplayVerticalOffset = 0.f;
 	UPlanetBlueprintFunctionLibrary::DecomposeToOrbitPlane(Shared.OrbitTransform, DisplayLocation, DisplayThetaDeg, DisplayRadiusInPlane, DisplayVerticalOffset);
-	const float PhaseDeltaDeg = FMath::Abs(FMath::FindDeltaAngleDegrees(NormalizeAngleDegrees360(DisplayThetaDeg), NormalizeAngleDegrees360(ThetaStartDeg)));
+	const float PhaseDeltaDeg = FMath::Abs(FMath::FindDeltaAngleDegrees(UPlanetBlueprintFunctionLibrary::NormalizeAngleDegrees360(DisplayThetaDeg), UPlanetBlueprintFunctionLibrary::NormalizeAngleDegrees360(ThetaStartDeg)));
 
 	return (PhaseDeltaDeg <= DepartAlignToleranceDeg)
 		? EStateTreeRunStatus::Succeeded
@@ -651,14 +680,14 @@ EStateTreeRunStatus FSatelliteDepartWaitTask::Tick(FStateTreeExecutionContext& C
 }
 EStateTreeRunStatus FSatelliteReturnWaitTask::Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const
 {
-	const FSattelliteTaskData Data = GetSatelliteTaskData(Context);
+	const FSatelliteTaskData Data = GetSatelliteTaskData(Context);
 	if (!Data.IsValid())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] ReturnWait: satellite data missing. Entity[%d]"), Data.Entity.Index);
 		return EStateTreeRunStatus::Failed;
 	}
 	const FMassSatelliteSharedFragment& Shared = *Data.Shared;
-	FMassOrbitFragment& Orbit = *Data.Orbit;
+	FMassSatelliteOrbitFragment& Orbit = *Data.Orbit;
 	// 槽位由群体决策分配（规划器认领后写回句柄）——本任务不再自选槽
 
 	if (!Shared.SmartObjectManager || !Shared.SatelliteManager || !Shared.PlanetConfig)
@@ -693,14 +722,14 @@ EStateTreeRunStatus FSatelliteReturnWaitTask::Tick(FStateTreeExecutionContext& C
 
 EStateTreeRunStatus FSatelliteReturnTask::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
 {
-	const FSattelliteTaskData Data = GetSatelliteTaskData(Context);
+	const FSatelliteTaskData Data = GetSatelliteTaskData(Context);
 	if (!Data.IsValid())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] Return: satellite data missing. Entity[%d]"), Data.Entity.Index);
 		return EStateTreeRunStatus::Failed;
 	}
 	const FMassSatelliteSharedFragment& Shared = *Data.Shared;
-	FMassOrbitFragment& Orbit = *Data.Orbit;
+	FMassSatelliteOrbitFragment& Orbit = *Data.Orbit;
 	FMassSatelliteTaskFragment& Task = *Data.Task;
 
 	if (!Shared.SatelliteManager || !Shared.PlanetConfig || !Orbit.bOverrideLocation)
@@ -742,7 +771,7 @@ EStateTreeRunStatus FSatelliteReturnTask::EnterState(FStateTreeExecutionContext&
 		if (Shared.SmartObjectManager->GetOrbitSlotPhaseByClaim(Orbit.OrbitName, Orbit.SlotClaimHandle, SlotPhaseDeg))
 		{
 			// 槽位相对悬停点投影方位的偏差（归一到 [−180,180]）
-			const float SlotOffsetDeg = FMath::FindDeltaAngleDegrees(NormalizeAngleDegrees360(ThetaHoverDeg), NormalizeAngleDegrees360(SlotPhaseDeg));
+			const float SlotOffsetDeg = FMath::FindDeltaAngleDegrees(UPlanetBlueprintFunctionLibrary::NormalizeAngleDegrees360(ThetaHoverDeg), UPlanetBlueprintFunctionLibrary::NormalizeAngleDegrees360(SlotPhaseDeg));
 			ThetaDeltaDeg += SlotOffsetDeg;
 		}
 	}
@@ -761,21 +790,20 @@ EStateTreeRunStatus FSatelliteReturnTask::EnterState(FStateTreeExecutionContext&
 	Orbit.State = ESatelliteState::Return;
 	// 位置覆盖保持（飞行位置由本任务写入）
 
-	// 释放格子认领（唯一释放点：回轨起飞瞬间——格子互斥期缩短一个飞行时长 T；同句柄去重）
+	// 释放格子认领（唯一释放点：回轨起飞瞬间——格子互斥期缩短一个飞行时长 T；按域释放，天然无重复）
 	if (Shared.SmartObjectManager)
 	{
-		TArray<FSmartObjectClaimHandle> UniqueHandles;
-		for (const FSmartObjectClaimHandle& ItemHandle : Task.ClaimHandles)
+		if (Task.PlotClaimHandle.IsValid())
 		{
-			if (ItemHandle.IsValid() && !UniqueHandles.Contains(ItemHandle))
-			{
-				UniqueHandles.Add(ItemHandle);
-				Shared.SmartObjectManager->ReleaseClaim(ItemHandle);
-			}
+			Shared.SmartObjectManager->ReleaseClaim(Task.PlotClaimHandle);
+		}
+		if (Task.CropClaimHandle.IsValid())
+		{
+			Shared.SmartObjectManager->ReleaseClaim(Task.CropClaimHandle);
 		}
 	}
-	Task.ClaimHandles.Reset();
-	Task.ClaimHandle = FSmartObjectClaimHandle::InvalidHandle;
+	Task.PlotClaimHandle = FSmartObjectClaimHandle::InvalidHandle;
+	Task.CropClaimHandle = FSmartObjectClaimHandle::InvalidHandle;
 
 	UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] Return start → orbit (phase=%.1f°), duration=%.2fs"),
 		Data.Entity.Index, Orbit.VirtualPhase, Task.PhaseDuration);
@@ -801,14 +829,14 @@ EStateTreeRunStatus FSatelliteReturnTask::EnterState(FStateTreeExecutionContext&
 
 EStateTreeRunStatus FSatelliteReturnTask::Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const
 {
-	const FSattelliteTaskData Data = GetSatelliteTaskData(Context);
+	const FSatelliteTaskData Data = GetSatelliteTaskData(Context);
 	if (!Data.IsValid())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] Return: satellite data missing. Entity[%d]"), Data.Entity.Index);
 		return EStateTreeRunStatus::Failed;
 	}
 	const FMassSatelliteSharedFragment& Shared = *Data.Shared;
-	FMassOrbitFragment& Orbit = *Data.Orbit;
+	FMassSatelliteOrbitFragment& Orbit = *Data.Orbit;
 	FMassSatelliteTaskFragment& Task = *Data.Task;
 
 	Task.PhaseElapsed += DeltaTime;
@@ -855,14 +883,14 @@ EStateTreeRunStatus FSatelliteReturnTask::Tick(FStateTreeExecutionContext& Conte
 
 EStateTreeRunStatus FSatelliteApproachTask::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
 {
-	const FSattelliteTaskData Data = GetSatelliteTaskData(Context);
+	const FSatelliteTaskData Data = GetSatelliteTaskData(Context);
 	if (!Data.IsValid())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] Approach: satellite data missing. Entity[%d]"), Data.Entity.Index);
 		return EStateTreeRunStatus::Failed;
 	}
 	const FMassSatelliteSharedFragment& Shared = *Data.Shared;
-	FMassOrbitFragment& Orbit = *Data.Orbit;
+	FMassSatelliteOrbitFragment& Orbit = *Data.Orbit;
 	FMassSatelliteTaskFragment& Task = *Data.Task;
 
 	if (!Shared.PlanetConfig || !Shared.CellManager || !Shared.SatelliteManager)
@@ -920,7 +948,7 @@ EStateTreeRunStatus FSatelliteApproachTask::EnterState(FStateTreeExecutionContex
 	// 该差本身就是相位增量（DepartWait 保证起点≈提前量点，差值即沿运动方向的短程推进）；
 	// 乘 dir 会让顺时针轨道的飞行方向反转——2026-10-04 修复
 	// （原为 ω·T 近似——起飞点偏差会留下"轨迹末端与悬停点"的固定偏移；此改后轨迹几何终点精确=悬停点，到达帧不再需要跳写掩饰）
-	Task.PhaseThetaDeltaDeg = FMath::FindDeltaAngleDegrees(NormalizeAngleDegrees360(ThetaStartDeg), NormalizeAngleDegrees360(ThetaHoverDeg));
+	Task.PhaseThetaDeltaDeg = FMath::FindDeltaAngleDegrees(UPlanetBlueprintFunctionLibrary::NormalizeAngleDegrees360(ThetaStartDeg), UPlanetBlueprintFunctionLibrary::NormalizeAngleDegrees360(ThetaHoverDeg));
 	Task.PhaseRadiusStart = RadiusStartInPlane;
 	Task.PhaseRadiusEnd = RadiusHoverInPlane;
 	Task.PhaseVerticalStart = VerticalStart;
@@ -961,14 +989,14 @@ EStateTreeRunStatus FSatelliteApproachTask::EnterState(FStateTreeExecutionContex
 
 EStateTreeRunStatus FSatelliteApproachTask::Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const
 {
-	const FSattelliteTaskData Data = GetSatelliteTaskData(Context);
+	const FSatelliteTaskData Data = GetSatelliteTaskData(Context);
 	if (!Data.IsValid())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] Approach: satellite data missing. Entity[%d]"), Data.Entity.Index);
 		return EStateTreeRunStatus::Failed;
 	}
 	const FMassSatelliteSharedFragment& Shared = *Data.Shared;
-	FMassOrbitFragment& Orbit = *Data.Orbit;
+	FMassSatelliteOrbitFragment& Orbit = *Data.Orbit;
 	FMassSatelliteTaskFragment& Task = *Data.Task;
 
 	// 飞行推进（参数已一次算好；每帧仅参数方程求值）
@@ -991,14 +1019,10 @@ EStateTreeRunStatus FSatelliteApproachTask::Tick(FStateTreeExecutionContext& Con
 	// 到达：精确写悬停点
 	Orbit.OverrideLocation = Task.PhaseEndLocation;
 
-	// 到达检查：所有权失 → 已在悬停点（取消任务；状态树据 Failed 跳 AwaitReturn）
-	if (Shared.SmartObjectManager != nullptr)
+	// 到达检查（逐域）：所有权失 → 已在悬停点（取消任务；状态树据 Failed 跳 ReturnWait）
+	if (Shared.SmartObjectManager != nullptr && !IsOwnershipValid(Data))
 	{
-		const int32 SlotIndex = USmartObjectManagerComponent::GetSlotIndexForEditMode(Task.TargetEditMode);
-		if (SlotIndex >= 0 && !Shared.SmartObjectManager->IsClaimValid(Task.TargetCoord, SlotIndex, Task.ClaimHandle))
-		{
-			return HandleOwnershipLost(Data, TEXT("Approach"));
-		}
+		return HandleOwnershipLost(Data, TEXT("Approach"));
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] Approach arrived at cell (%d, %d)"),
@@ -1009,14 +1033,14 @@ EStateTreeRunStatus FSatelliteApproachTask::Tick(FStateTreeExecutionContext& Con
 
 EStateTreeRunStatus FSatelliteExecuteActionTask::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
 {
-	const FSattelliteTaskData Data = GetSatelliteTaskData(Context);
+	const FSatelliteTaskData Data = GetSatelliteTaskData(Context);
 	if (!Data.IsValid())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] Work: satellite data missing (fragment/shared). Entity[%d]"), Data.Entity.Index);
 		return EStateTreeRunStatus::Failed;
 	}
 	const FMassSatelliteSharedFragment& Shared = *Data.Shared;
-	FMassOrbitFragment& Orbit = *Data.Orbit;
+	FMassSatelliteOrbitFragment& Orbit = *Data.Orbit;
 	FMassSatelliteTaskFragment& Task = *Data.Task;
 
 	if (!Shared.PlanetConfig || !Shared.CellManager || !Shared.SmartObjectManager)
@@ -1041,8 +1065,8 @@ EStateTreeRunStatus FSatelliteExecuteActionTask::EnterState(FStateTreeExecutionC
 
 	FSatelliteExecuteActionTaskInstanceData& InstanceData = Context.GetInstanceData(*this);
 
-	// 开始首项（读该项行为时长；此时已消费数 = 0）
-	BeginQueueItem(Task, InstanceData, Context.GetWorld(), 0);
+	// 开始首项（按首项操作对应域取句柄 → 读该类行为时长）
+	BeginQueueItem(Task, Task.WorkQueue[0], InstanceData, Context.GetWorld());
 
 	UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] work start at cell (%d, %d) (%s), items=%d, first=%s duration=%.2fs"),
 		Data.Entity.Index, Task.TargetCoord.X, Task.TargetCoord.Y, *Orbit.OrbitName.ToString(), Task.WorkQueue.Num(),
@@ -1053,14 +1077,14 @@ EStateTreeRunStatus FSatelliteExecuteActionTask::EnterState(FStateTreeExecutionC
 
 EStateTreeRunStatus FSatelliteExecuteActionTask::Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const
 {
-	const FSattelliteTaskData Data = GetSatelliteTaskData(Context);
+	const FSatelliteTaskData Data = GetSatelliteTaskData(Context);
 	if (!Data.IsValid())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] Work: satellite data missing (fragment/shared). Entity[%d]"), Data.Entity.Index);
 		return EStateTreeRunStatus::Failed;
 	}
 	const FMassSatelliteSharedFragment& Shared = *Data.Shared;
-	FMassOrbitFragment& Orbit = *Data.Orbit;
+	FMassSatelliteOrbitFragment& Orbit = *Data.Orbit;
 	FMassSatelliteTaskFragment& Task = *Data.Task;
 	FSatelliteExecuteActionTaskInstanceData& InstanceData = Context.GetInstanceData(*this);
 
@@ -1086,40 +1110,31 @@ EStateTreeRunStatus FSatelliteExecuteActionTask::Tick(FStateTreeExecutionContext
 		UE_LOG(LogTemp, Log, TEXT("[SatelliteTask] Entity[%d] work complete at cell (%d, %d)"),
 			Data.Entity.Index, Task.TargetCoord.X, Task.TargetCoord.Y);
 	
-		Task.ClaimHandle = FSmartObjectClaimHandle::InvalidHandle;
 		Task.TargetCoord = FIntPoint(-1, -1);
-		Task.TargetEditMode = EEditMode::None;
-		// 位置覆盖保持（悬停等待回轨时机）；进入待回状态
-		Orbit.State = ESatelliteState::AwaitReturn;
+		// 位置覆盖保持（悬停等待回轨时机）；进入待回状态（域句柄保留至回轨起飞统一释放）
+		Orbit.State = ESatelliteState::ReturnWait;
 		return EStateTreeRunStatus::Succeeded;
 	}
 
-	// 还有下一项：所有权检查（失权 → 取消任务）后开始下一项
-	// 已消费数 = 总句柄数 − 剩余队列长度（当前项 = WorkQueue[0] ↔ ClaimHandles[已消费数]）
-	const int32 ConsumedCount = Task.ClaimHandles.Num() - Task.WorkQueue.Num();
-	const FSmartObjectClaimHandle HeadHandle = Task.ClaimHandles.IsValidIndex(ConsumedCount) ? Task.ClaimHandles[ConsumedCount] : FSmartObjectClaimHandle::InvalidHandle;
-	const int32 HeadSlotIndex = USmartObjectManagerComponent::GetSlotIndexForEditMode(Task.WorkQueue[0]);
-	if (HeadSlotIndex >= 0)
+	// 还有下一项：逐域所有权检查（失权 → 取消任务）后开始下一项
+	if (!IsOwnershipValid(Data))
 	{
-		if (!Shared.SmartObjectManager->IsClaimValid(Task.TargetCoord, HeadSlotIndex, HeadHandle))
-		{
-			return HandleOwnershipLost(Data, TEXT("Work"));
-		}
+		return HandleOwnershipLost(Data, TEXT("Work"));
 	}
-	BeginQueueItem(Task, InstanceData, Context.GetWorld(), ConsumedCount);
+	BeginQueueItem(Task, Task.WorkQueue[0], InstanceData, Context.GetWorld());
 	return EStateTreeRunStatus::Running;
 }
 
 EStateTreeRunStatus FSatelliteDriftTask::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
 {
-	const FSattelliteTaskData Data = GetSatelliteTaskData(Context);
+	const FSatelliteTaskData Data = GetSatelliteTaskData(Context);
 	if (!Data.IsValid())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] Drift: satellite data missing. Entity[%d]"), Data.Entity.Index);
 		return EStateTreeRunStatus::Failed;
 	}
 	const FMassSatelliteSharedFragment& Shared = *Data.Shared;
-	FMassOrbitFragment& Orbit = *Data.Orbit;
+	FMassSatelliteOrbitFragment& Orbit = *Data.Orbit;
 	FMassSatelliteTaskFragment& Task = *Data.Task;
 
 	if (!Shared.SmartObjectManager || !Orbit.bDriftRequested || !Orbit.SlotClaimHandle.IsValid())
@@ -1141,7 +1156,7 @@ EStateTreeRunStatus FSatelliteDriftTask::EnterState(FStateTreeExecutionContext& 
 		return EStateTreeRunStatus::Failed;
 	}
 	const float Direction = Orbit.bClockwise ? -1.f : 1.f;
-	const float DeltaMoveDeg = FMath::FindDeltaAngleDegrees(NormalizeAngleDegrees360(ThetaStartDeg), NormalizeAngleDegrees360(SlotPhaseDeg)) * Direction;
+	const float DeltaMoveDeg = FMath::FindDeltaAngleDegrees(UPlanetBlueprintFunctionLibrary::NormalizeAngleDegrees360(ThetaStartDeg), UPlanetBlueprintFunctionLibrary::NormalizeAngleDegrees360(SlotPhaseDeg)) * Direction;
 
 	// 时长 = 位移 ÷ 滑动速率上限，夹 [2, 6]：前移 1×ω（大位移不磨蹭）；后移 0.75×ω（保底绝对速度 ≥ 0.25×ω——不停住）
 	// （位移上限 45° 与 6s 咬合：后移不倒车）
@@ -1189,14 +1204,14 @@ EStateTreeRunStatus FSatelliteDriftTask::EnterState(FStateTreeExecutionContext& 
 
 EStateTreeRunStatus FSatelliteDriftTask::Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const
 {
-	const FSattelliteTaskData Data = GetSatelliteTaskData(Context);
+	const FSatelliteTaskData Data = GetSatelliteTaskData(Context);
 	if (!Data.IsValid())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[SatelliteTask] Drift: satellite data missing. Entity[%d]"), Data.Entity.Index);
 		return EStateTreeRunStatus::Failed;
 	}
 	const FMassSatelliteSharedFragment& Shared = *Data.Shared;
-	FMassOrbitFragment& Orbit = *Data.Orbit;
+	FMassSatelliteOrbitFragment& Orbit = *Data.Orbit;
 	FMassSatelliteTaskFragment& Task = *Data.Task;
 
 	Task.PhaseElapsed += DeltaTime;
@@ -1242,7 +1257,7 @@ EStateTreeRunStatus FSatelliteDriftTask::Tick(FStateTreeExecutionContext& Contex
 				}
 				Orbit.SlotClaimHandle = FSmartObjectClaimHandle::InvalidHandle;
 				Orbit.bOverrideLocation = false;
-				Orbit.VirtualPhase = NormalizeAngleDegrees360(Task.PhaseThetaStartDeg + Task.PhaseThetaDeltaDeg * Alpha);
+				Orbit.VirtualPhase = UPlanetBlueprintFunctionLibrary::NormalizeAngleDegrees360(Task.PhaseThetaStartDeg + Task.PhaseThetaDeltaDeg * Alpha);
 				Task.PhaseElapsed = 0.f;
 				Task.PhaseDuration = 0.f;
 
@@ -1263,7 +1278,7 @@ EStateTreeRunStatus FSatelliteDriftTask::Tick(FStateTreeExecutionContext& Contex
 
 void FSatelliteDriftRequestEvaluator::Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const
 {
-	const FSattelliteTaskData Data = GetSatelliteTaskData(Context);
+	const FSatelliteTaskData Data = GetSatelliteTaskData(Context);
 	FSatelliteDriftRequestEvaluatorInstanceData& InstanceData = Context.GetInstanceData(*this);
 	// 只读同步（无副作用）：供"Tick时 + 条件（本字段 == true）→ Drift"的转移消费
 	const bool bNewRequested = Data.IsValid() ? Data.Orbit->bDriftRequested : false;

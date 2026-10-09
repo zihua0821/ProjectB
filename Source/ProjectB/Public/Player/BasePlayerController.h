@@ -74,60 +74,25 @@ protected:
 	UFUNCTION(BlueprintCallable, Category = "OrbitEdit")
 	void ExitOrbitEditMode();
 
-	/** 控制台测试命令：ToggleOrbitEditMode */
-	UFUNCTION(Exec)
-	void ToggleOrbitEditMode();
-
-	// ---- 轨道参数控制台调试命令（测试/演示用；正式入口为 UMG 面板） ----
-
-	/** 设置第一条轨道的服务距离（覆盖半高）：OrbitSetServiceDistance 5000 */
-	UFUNCTION(Exec)
-	void OrbitSetServiceDistance(float ServiceDistance);
-
-	/** 设置第一条轨道的轨道半径：OrbitSetRadius 55000 */
-	UFUNCTION(Exec)
-	void OrbitSetRadius(float OrbitRadius);
-
-	/** 设置第一条轨道的圆心偏移：OrbitSetCenter X Y Z */
-	UFUNCTION(Exec)
-	void OrbitSetCenter(float X, float Y, float Z);
-
-	/** 设置第一条轨道的平面法线（自动归一化）：OrbitSetNormal X Y Z */
-	UFUNCTION(Exec)
-	void OrbitSetNormal(float X, float Y, float Z);
-
-	// ---- UMG 轨道编辑面板接口（BlueprintCallable；内部转发到 SatelliteManager） ----
+	// ---- 轨道编辑面板接口（C++；内部转发到 SatelliteManager——经 friend 供面板访问） ----
 
 	/** 全部轨道名（面板列表用） */
-	UFUNCTION(BlueprintCallable, Category = "OrbitEdit")
 	TArray<FName> GetOrbitNames() const;
 
 	/** 读取指定轨道数据（面板初始化/切换选中） */
-	UFUNCTION(BlueprintCallable, Category = "OrbitEdit")
 	bool GetOrbitData(FName OrbitName, FRuntimeOrbitData& OutData) const;
 
 	/** 写入轨道数据（面板拖动实时预览；不重建卫星） */
-	UFUNCTION(BlueprintCallable, Category = "OrbitEdit")
 	bool SetOrbitData(const FRuntimeOrbitData& NewData) const;
 
 	/** 新建轨道（成功后重建全部卫星） */
-	UFUNCTION(BlueprintCallable, Category = "OrbitEdit")
 	bool CreateOrbit(const FRuntimeOrbitData& NewData) const;
 
 	/** 删除轨道（成功后重建剩余轨道的卫星） */
-	UFUNCTION(BlueprintCallable, Category = "OrbitEdit")
 	void DeleteOrbit(FName OrbitName) const;
 
 	/** 提交编辑变更（参数控件的回车/失焦落定）：只重建指定轨道——所见即所得 */
-	UFUNCTION(BlueprintCallable, Category = "OrbitEdit")
 	void CommitOrbitChanges(FName OrbitName) const;
-
-	/** 显示/隐藏轨道编辑面板（控制台命令）：OrbitShowEditor */
-	UFUNCTION(Exec)
-	void OrbitShowEditor();
-
-	/** 关闭轨道编辑面板（面板内部调用） */
-	void CloseOrbitEditor();
 
 	UFUNCTION(BlueprintCallable, Category = "OrbitEdit")
 	bool IsOrbitEditMode() const { return bOrbitEditMode; }
@@ -135,14 +100,8 @@ protected:
 	/** 轨道编辑模式开关（进入时悬停高亮禁用，覆盖格高亮独占轮廓层） */
 	bool bOrbitEditMode = false;
 
-	/** 修改第一条轨道的指定参数（控制台调试命令共用；返回成功与否） */
-	bool UpdateFirstOrbit(TFunctionRef<void(FRuntimeOrbitData&)> Mutator);
-
-	/** 解析场景中的卫星管理组件（UMG 接口共用；失败返回 nullptr） */
+	/** 解析场景中的卫星管理组件（面板接口共用；失败返回 nullptr） */
 	class USatelliteManagerComponent* ResolveSatelliteManager() const;
-
-	/** 轨道编辑面板（Slate；打开时创建） */
-	TSharedPtr<class SOrbitEditorPanel> OrbitEditorPanel;
 
 	// 编辑模式
 	EEditMode EditMode = EEditMode::None;
@@ -155,7 +114,7 @@ protected:
 	void UpdateHoveredPlot();
 
 	UPROPERTY()
-	TObjectPtr<APlanetActor> PreHoveredPlanetActor;
+	TWeakObjectPtr<APlanetActor> PreHoveredPlanetActor;
 	
 	UPROPERTY()
 	FIntPoint PreHoveredPlotCoords = FIntPoint(-1, -1);

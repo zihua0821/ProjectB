@@ -64,7 +64,7 @@ public:
 
 	// 获取当前吸附的星球 Actor
 	UFUNCTION(BlueprintCallable, Category = "Movement")
-	APlanetActor* GetHoveredPlanet() const { return HoveredPlanet; }
+	APlanetActor* GetHoveredPlanet() const { return HoveredPlanet.Get(); }
 
 	// ==================== 相机控制 ====================
 
@@ -149,9 +149,9 @@ protected:
 	UPROPERTY(BlueprintReadWrite, Category = "Movement")
 	FVector SurfaceNormal = FVector::UpVector;
 
-	// 当前吸附的星球
+	// 当前吸附的星球（弱引用：非拥有观察——星球可能先于 Pawn 销毁）
 	UPROPERTY()
-	TObjectPtr<APlanetActor> HoveredPlanet;
+	TWeakObjectPtr<APlanetActor> HoveredPlanet;
 
 	// 输入移动向量（2D，WSAD）
 	FVector2D MoveInput = FVector2D::ZeroVector;

@@ -88,6 +88,12 @@ bool UPlanetBlueprintFunctionLibrary::IsPointInOrbitCoverage(const FVector& Poin
 	return ComputeDistanceToOrbitPlane(Point, OrbitCenter, OrbitNormal) <= ServiceDistance;
 }
 
+float UPlanetBlueprintFunctionLibrary::NormalizeAngleDegrees360(const float AngleDeg)
+{
+	const float Remainder = FMath::Fmod(AngleDeg, 360.f);
+	return Remainder < 0.f ? Remainder + 360.f : Remainder;
+}
+
 // ==================== 离轨作业：路径函数（纯算法） ====================
 
 FVector UPlanetBlueprintFunctionLibrary::ComputeOrbitHoverPoint(const FVector& CellCenter, const float PlanetRadius, const float HoverHeight)

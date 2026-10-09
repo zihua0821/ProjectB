@@ -25,7 +25,7 @@ void UCellManagerComponent::BeginPlay()
 	OwnerActor = GetOwner();
 
 	BasePlayerController = Cast<ABasePlayerController>(GetWorld()->GetFirstPlayerController());
-	if (BasePlayerController)
+	if (BasePlayerController.IsValid())
 	{
 		BasePlayerController->OnEditModeChanged.AddDynamic(this, &ThisClass::OnEditModeChanged);
 	}
@@ -330,7 +330,7 @@ void UCellManagerComponent::HandleLeftMouseClicked(const EEditMode EditMode, con
 		ClearPest(Coords);
 		break;
 	case EEditMode::PlantCrop:
-		PlantCrop(Coords, BasePlayerController->GetSelectedCropName());
+		PlantCrop(Coords, BasePlayerController.IsValid() ? BasePlayerController->GetSelectedCropName() : FString());
 		break;
 	case EEditMode::HarvestCrop:
 		HarvestCrop(Coords);
@@ -1030,7 +1030,13 @@ FLinearColor UCellManagerComponent::GetOutlineColorForEditMode() const
 	
 	UISMManager* ISMManager = GetWorld()->GetSubsystem<UISMManager>();
 	if (!ISMManager) return OutlineColor;
-	
+
+	// PC 失效防御（弱引用）：无效时用默认颜色（不读编辑模式）
+	if (!BasePlayerController.IsValid())
+	{
+		return OutlineColor;
+	}
+
 	switch (BasePlayerController->GetEditMode()) {
 	case None:
 		OutlineColor = FLinearColor::White;

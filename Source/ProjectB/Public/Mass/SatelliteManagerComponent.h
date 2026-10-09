@@ -103,7 +103,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRuntimeOrbitChanged, FName, Orbit
  * 卫星管理组件
  * 挂载在星球 Actor 上，负责：
  * - 批量创建卫星实体（CreateArchetype + BatchCreateEntities，与格子创建模式一致）
- * - 初始化轨道运动数据（FMassOrbitFragment）
+ * - 初始化轨道运动数据（FMassSatelliteOrbitFragment）
  * - 挂载 StateTree（InstanceFragment + ConstSharedFragment；激活/实例化由引擎 Processor 自动完成）
  */
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
@@ -264,7 +264,7 @@ private:
 	// ---- 运行时 ----
 
 	UPROPERTY()
-	TObjectPtr<APlanetActor> PlanetActor;
+	TWeakObjectPtr<APlanetActor> PlanetActor;
 
 	/** 已创建的卫星实体（全部轨道汇总） */
 	TArray<FMassEntityHandle> SatelliteEntities;

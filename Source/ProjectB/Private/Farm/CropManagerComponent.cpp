@@ -29,7 +29,7 @@ void UCropManagerComponent::Initialize(UFarmlandComponent* InFarmlandComponent)
 
 void UCropManagerComponent::HandleLeftMouseClicked(const EEditMode EditMode, const FIntPoint Coords)
 {
-    if (!BasePlayerController)
+    if (!BasePlayerController.IsValid())
     {
         return;
     }
@@ -128,7 +128,7 @@ void UCropManagerComponent::RemoveCrop(FIntPoint Coords)
     
     OnCropPlantedOrRemoved.Broadcast(Coords);
 
-    PlantCrop(Coords, BasePlayerController->GetSelectedCropName());
+    PlantCrop(Coords, BasePlayerController.IsValid() ? BasePlayerController->GetSelectedCropName() : FString());
 }
 
 void UCropManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)

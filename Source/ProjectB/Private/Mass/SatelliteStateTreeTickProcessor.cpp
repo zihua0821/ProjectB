@@ -5,7 +5,7 @@
 #include "MassSignalSubsystem.h"
 #include "MassStateTreeTypes.h"     // UE::Mass::Signals::NewStateTreeTaskRequired
 #include "Mass/SatelliteMassFragments.h"
-#include "Simulation/SimulationControlSubsystem.h"   // 选定暂停（白名单挂载）
+#include "Subsystem/SimulationControlSubsystem.h"   // 选定暂停（白名单挂载）
 
 USatelliteStateTreeTickProcessor::USatelliteStateTreeTickProcessor()
 	: EntityQuery(*this)

@@ -1,7 +1,6 @@
 // OrbitEditorWidget.h
 // 轨道编辑界面（一体两件）：Slate 面板（SOrbitEditorPanel）+ UMG 包装控件（UOrbitEditorWidget）
 // - UMG 用法：蓝图中放置 UOrbitEditorWidget（承载整个面板内容）
-// - Viewport 用法：控制器 OrbitShowEditor（Exec 命令）直接 SNew(SOrbitEditorPanel) 加入 Viewport
 // - 纯 Runtime（Slate + UMG）；不依赖任何编辑器模块
 #pragma once
 
@@ -141,10 +140,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "OrbitEditor")
 	void ExitOrbitEditMode();
 
+	virtual void ReleaseSlateResources(bool bReleaseChildren) override;
+
 protected:
 	// UWidget interface
+	/** UMG 构建回调：首次 TakeWidget 时被调用（惰性构建）；此后缓存复用不再调用——缓存失效时会再次调用（故名为 Rebuild） */
 	virtual TSharedRef<SWidget> RebuildWidget() override;
-	virtual void ReleaseSlateResources(bool bReleaseChildren) override;
 
 private:
 	/** Slate 面板实例 */

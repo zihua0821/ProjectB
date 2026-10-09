@@ -232,7 +232,7 @@ SatelliteAIController / AutomationSatellite / OrbitMovementComponent / FarmProto
 
 ## 六、时间线阶段报告索引（P1~P8·全部已产出）
 
-> **位置**：`docs/时间线审阅/`（含本目录 README 索引）；八份报告均为 AI 初审版·待核对（⑤ 评估区待逐条表态）
+> **位置**：`docs/AI系统审阅/时间线审阅/`（含本目录 README 索引·已收官归档）；八份报告均已核对（P1~P8 全无异议）
 
 | 阶段 | 报告文件 | 一句话 |
 |---|---|---|
@@ -259,6 +259,7 @@ SatelliteAIController / AutomationSatellite / OrbitMovementComponent / FarmProto
 | 前导发现 | A1~A9（已裁决·清理） | 见 5.2 | 删除（含头文件声明与相关注释） | **已执行（10-02）** |
 | P4 报告 | O1 深化（10-03）：UpdateBounds 调用点注释材料——引擎机制（写 API 不内联/帧末补偿四条件/重建分支吞补偿）+ 双重失效（误剔除/过度提交）+ Nanite 例外 | ISMManager.cpp L267-274/L309-316 | 修订阶段按材料补注释 | 待实施 |
 | P5 报告 | B10（候选）：OrbitCoverageVisualComponent.h 头注释引用文件错（写"SatelliteMassFragments.h"，应为 PlanetBlueprintFunctionLibrary.h） | 见 P5 报告 ⑥ | 逐条改 | 待核对 |
+| 模块审阅 M-2 | S3 发现（10-06）：注释“引擎智能对象实例位置不开放运行时修改”**不准确**——UE5.5 有公开 API `USmartObjectSubsystem::UpdateSmartObjectTransform`（SmartObjectSubsystem.h L487-493；槽位位置=实例 Transform×槽偏移，GetSlotLocation 可读）。现状自算缓存的真实理由 = 消费模式（高频/批量/跨线程）+ 线程约束（worker 读）+ 成本（每帧空间分区更新），而非“引擎不支持” | SmartObjectManagerComponent.cpp L457-459 | 修订为准确表述（含未来触发点：引擎级空间查询需求时评估“单实例多槽+每帧同步”轻量版） | 待实施 |
 
 ---
 
@@ -272,7 +273,7 @@ SatelliteAIController / AutomationSatellite / OrbitMovementComponent / FarmProto
 | 前导·B 组 | 10-02 | 推迟 | B1~B9 待核对——**推迟至时间线审阅核对后一并决定（用户决定）** |
 | 前导·C 组 | 10-02 | 推迟 | C1~C4 待讨论——同上推迟 |
 | 结构 | 10-02 | — | P4 确认纳入审阅范围 |
-| 时间线审阅 | 10-02 | — | **P1~P8 八份报告一次性产出**（docs/时间线审阅/）；⑤ 评估区待逐条表态 |
+| 时间线审阅 | 10-02 | — | **P1~P8 八份报告一次性产出**（docs/AI系统审阅/时间线审阅/）；⑤ 评估区已全部核对 |
 | P1 核对 | 10-02 | **E1~E7 全部无异议**（7/0/0/0） | 报告 ⑤ 区已标注；另补充单桶决策论据（时刻运行因素） |
 | P2 核对 | 10-02 | **E1~E7 全部无异议**（7/0/0/0） | 报告 ⑤ 区已标注；另发起“信号驱动范式”讨论（答复要点见下） |
 | T1/T2 线程规范 | 10-02 | 裁决：**方案 C**（专职 GT 槽推进；Plan 保持 worker） | 已入第十章 M1（攒批执行） |
@@ -462,7 +463,7 @@ AI 代劳（每阶段执行）：
 
 ---
 
-## 十、待执行代码修改清单（10-02 定 · 执行窗口：注释修订阶段之前；10-03 核对收官——M1~M4 就绪待开工）
+## 十、待执行代码修改清单（10-02 定 · 执行窗口：注释修订阶段之前；M1~M4 + S3 均已执行完毕 ✅）
 
 > 规则（2026-10-02 用户修订）：审阅与讨论中裁决的**代码修改**不再当场实施，统一攒入本节；
 > 全部审阅核对完成后、注释修订阶段之前，集中执行。【先行例外：A 组死代码清理已于 10-02 执行】
@@ -564,9 +565,37 @@ ByClaim 实现内联索引解析（原两步→直查表，行为等价：Resolv
 VFS 刷新延迟，刚编辑文件需用 findstr/Grep 兜底）；ByClaim 版 7 处调用面零影响；2 文件已 reindex。
 ```
 
+### S3 弱指针化（M-3 审阅发现 · 独立小项）【10-07 用户裁定：独立（不并入 N9）】
+
+```
+背景（M-3 静态审阅 S3）：父对象/跨对象指针的强弱指针规范化。全项目扫描分类：
+真目标（非拥有观察引用——对象可能先于持有者销毁）5 处 → 改 TWeakObjectPtr：
+  ① BasePlayerController::PreHoveredPlanetActor（悬停高亮缓存）
+  ② SurfacePawn::HoveredPlanet（球体导航缓存）
+  ③ CellManagerComponent::BasePlayerController（玩家操作入口缓存；附隐患：L1034 无判空直接解引用）
+  ④ CropManagerComponent::BasePlayerController（旧组件）
+  ⑤ FarmlandComponent::BasePlayerController（旧组件）
+宿主引用 2 处 → 可统一弱化（对齐先例 CellManager::OwnerActor 已是弱）：
+  SatelliteManagerComponent::PlanetActor / OrbitCoverageVisualComponent::PlanetActor
+不宜动（强引用语义正确）：配置资产引用（PlanetConfig/FarmlandConfig/DataTable/SmartObjectDefinition/
+  StateTree/Mesh 等）/ 自建子组件（CreateDefaultSubobject 同级）/ 子系统引用（SmartObjectSubsystem）
+状态：【✅ 已完成（10-07·编译验证通过）】14 文件改动——
+· 声明：7 处 TObjectPtr→TWeakObjectPtr（组件宿主×2：Satellite/OrbitVisual::PlanetActor；
+  非拥有观察×5：PC::PreHoveredPlanetActor / Pawn::HoveredPlanet / Cell·CropManager·Farmland::BasePlayerController）
+· 使用点适配：布尔判断全部改 IsValid()（弱指针无 operator bool——引擎显式 delete；实测验证）；
+  SurfacePawn::GetHoveredPlanet getter 改 .Get()；operator-> 使用点零改动
+· 加固：CellManager L1034 无判空解引用 → 前置 IsValid 守卫（无效返默认色）；FarmlandComponent OutlineColor
+  同款守卫；两处 PlantCrop 读取点改条件表达式（PC 无效传空串——安全退化）
+· 核验：`TObjectPtr<APlanetActor>|TObjectPtr<ABasePlayerController>` 全库零残留；布尔残余仅 2 处注释掉的旧代码（预期）；
+  14 文件已 reindex；编译由用户验证
+```
+
 ---
 
 ## 十一、评估议题登记（10-02~03 · 已裁决/待审议）
+
+> 【10-09 状态】模块审阅已全部收官（M-8 完成；M-4 挂起待 N8/N10）——N 系列排期窗口已开启：
+> N8（自建槽池）/ N9（配置重整·草案待审 D1~D7）/ N10（单 Slot 化·草案待审 D1~D6）与 N2 等结构级重构同批（注释修订前）。
 
 ### N1 操作体系统一化：Action 资产化 + 重播重设计 + AI/玩家路径统一【用户发起·待评估】
 
@@ -613,6 +642,8 @@ VFS 刷新延迟，刚编辑文件需用 findstr/Grep 兜底）；ByClaim 版 7 
 状态：待审——用户理解后决定是否立项
 【立项确认（10-02）】用户：“Mass Observer 化非常好，确认后续推进”——本项目已立项，后续按批次推进
 （与 D1 修复绑定；排期可与 N1/EQS 一并梳理）
+【口径补充（10-07，M-3 S4）】用户：“意图委托这些现在就看看，之后尽量迁移 Mass Observer”——
+维持已立项；方向明确为“尽量迁移 Mass Observer 形态”（观察者驱动实体列表，替代意图委托+双源 TSet）。
 ```
 
 ### N3 EQS 回归排期【已定】
@@ -704,4 +735,111 @@ GetOrbitSlotPhase/Count（规划承重）与认领/ByClaim 面不动。入 M4（
 · C 【倾向】位移限距（漂移仅调整相邻间隙、禁止跨越式重排——把“穿越”从设计上排除，
   与“消除过近”哲学一致；K=5 滚动节拍局部收敛）或 A 的简化时间窗版
 启动方式：用户发起（已确认“需要继续修正”）——届时出需求/执行草案。
+```
+
+### N7 选点与规划算法专题审阅【用户发起·待启动（2026-10-06）】
+
+```
+背景（M-1 模块审阅中发现）：FindBestWorkTarget（选点评分：覆盖过滤→缺口收集→单向轴行程→
+提前量→距离扣分）与 BuildOrbitPlan（规划：乙案落座→均匀化→漂移位移/防撞）——两个算法的
+“导读/断点/静态审阅”均不够直观，用户要求单独开专题审阅。
+已知疑点（随专题一并裁决）：
+· 选点只用 Gaps[0]（最高缺口）作格子评分，而作业队列执行全量缺口——评分与收益不一致
+  （“缺口多而单项低”的格子被系统性低估）——修正方向：综合评分（sum/加权），需行为变更评估。
+专题形式建议：流程图 + 数值例（真实可达数据） + 几何图示；与 N6（群体决策流程图需求）**合并制作**
+（同一主题域的可视化理解工具）。
+```
+
+### N8 轨道槽位去智能对象化（自建轻量槽池）【用户发起·待启动（2026-10-06）】
+
+```
+背景（M-2 模块审阅 S4）：从需求回看——轨道槽位的需求仅【随轨道移动的槽位 + 占有/释放】，
+而智能对象实际使用面 = 4 API（Create/Destroy/MarkClaimed/MarkFree）+ 1 句柄类型；
+空间查询/行为定义/启停/荷载/条件系统 0 使用；验证仅句柄 .IsValid() 字段检查。
+当初否决自建的理由（离轨方案 §12.6“两套认领语义并存，无收益”）在三个环境变化下不再充分：
+① K=5 扩容后规模 ×5（250 UObject 实例/轨）；② 位置语义认知（S3：引擎位置“撒谎”/移动成本）；
+③ 功能面认知（空间查询与乙案落座不同构，永不使用——“零新写”省下的以“100% 负担承担 5% 使用面”偿付）。
+评估结论：自建（轻量槽池 + 带代际结构化句柄）在架构上更契合需求；现状已是“半自建”
+（位置/相位/推进全在项目侧）——重构=收回最后的状态机。
+要点备忘（待启动时展开）：
+· 形态：每轨相位缓存 + 状态位数组 + 代际计数；句柄=OrbitRef+Index+Generation（重建++——ISM 前车之鉴）
+· 接口形状不变（TryClaim/Release/ByClaim 三件/Count/Phase/UpdateOrbitSlots）——调用方近零改动（封装红利）
+· 句柄类型穿透面：Fragment.SlotClaimHandle / 任务链 / 规划器 / 渲染（机械替换，编译期全暴露）
+· 边界：格子智能对象保留（零改动——其用法正当：空间注册/两域荷载/行为定义/启停）
+· 收益：删除引擎依赖（4 API+250 实例/轨+微查询绕路+资产要求）/注册链 μs 级/重建链=清空+代际++/
+  位置语义统一（S3 议题永久消失）/代码净减；成本：穿透替换+回归验证（测试手段齐全）
+· 【重建链效率场景（10-07，M-3 S5）】用户：轨道重建时智能对象释放/重建是多层循环，效率不好——
+  自建时一并解决。现状操作量（单轨）：Destroy（逐星×3 指针+≤3 ReleaseClaim+渲染收集循环）
+  + RegisterSingleOrbitSlots（N×K 槽逐个销毁+N×K 逐个创建——每槽引擎 API）
+  + Create（逐星 TryClaim）≈ O(N×K) UObject 操作+多次线性遍历；自建后 = 数组重置+代际++（O(1)）
+· 叙事：从“统一智能对象”升级为“按需求匹配分层选型”（面试更强的架构能力叙事）
+· 帧序定位（两问补充 10-06）：自建后槽推进【仍在 GT + 同一帧序节点】——GT 约束源于 DrawDebug
+  （要求 GT）+ 组件数据纪律 + worker 读者同序——与智能对象无关；SlotSync 处理器与帧序链零改动
+  （M-1 拆分红利：底层替换隔离在处理器层之下）；槽池数据从 SmartObjectManager 移出（归属方案时定）
+· 【Mass 化评估（10-06，M-2 导读 S6）：不取】——引擎对照 MassCrowd（Lane 共享资源表在子系统，
+  实体持句柄，trait 允许 worker）——共享资源保持中心化是引擎范式；项目现状与其完全同构。
+  N8 组件自建与 Mass 化是【替代终态非先后步骤】——决策时二选一；若需彻底解线程约束，
+  范式路径是“子系统化+并发安全”（Crowd 先例）而非 Mass 化（但收益仍小，不值得为此改）
+启动方式：用户发起；【排期裁定（10-06）：实施放最后 = 模块审阅全部收口后、注释统一修订之前】
+（理由：穿透性重构会撕碎后续模块导读/断点地图；与 N2 等结构级重构统一批次；必须在注释修订前完成）
+——方案草案可任意时点先行（纯文档）；详细讨论见 M-2 导读 S4。
+```
+
+### N9 卫星配置体系重整（配置资产化 + FOrbitDefinition 统一）【用户发起·确认做（10-07）】
+
+```
+背景（M-3 静态审阅 S1+S2；10-07 用户裁定：S1 做 / S2 统一 FOrbitDefinition / 蓝图确认无使用）：
+
+一、S1 配置资产化【做】——现状配置散三处：
+· 组件 UPROPERTY×13：卫星数量/角速度/方向/默认轨道名/Mesh/缩放/径向速度/槽倍数/规划 4 项/评分权重
+· 任务侧匿名常量×7（S6 已盘：容差 1.5°/3°、时长 2s/6s、优先级、默认时长）
+· 规划侧常量×4（FallbackOrbitRadius / DefaultServiceDistance / PlanSlotLeadToleranceDeg / PlanMoveMinDeg）
+→ 汇总入独立【卫星配置数据资产】（与 PlanetConfig/FarmlandConfig 同模式）；命名/字段分组方案时定
+
+二、S2 统一 FOrbitDefinition【保留该名，删 FRuntimeOrbitData】：
+· 合并后 FOrbitDefinition = 几何四字段（OrbitName/Transform/Radius/ServiceDistance）
+  + 运行时五字段（SatelliteCount/AngularVelocity/bClockwise/VisualColor/CoverageColor）
+· 全库引用替换：FRuntimeOrbitData → FOrbitDefinition（Manager/SmartObjectManager/PC/Widget/
+  OrbitCoverageVisual 等）；定义位置从 OrbitManagerComponent.h 迁出（归属方案时定）
+· 退役 OrbitManagerComponent（C++ 零调用 + 蓝图经用户确认无使用）——从 PlanetActor 摘除创建
+· 删 PlanetConfig::OrbitDefinitions 资产字段——BuildRuntimeOrbits 直接默认轨（用户：“放一个默认的就好”）
+· CalculateOrbitAngleFromCell 签名简化（函数体实际只用 Transform——改双 Transform 直传；
+  任务侧临时构造 Tasks L337-339 随之删除）
+
+排期：与 N8 同批（结构级批次：模块审阅收口后、注释修订前）；执行方案按【执行级设计】流程先出草案。
+【方案草案已出（10-07）：docs/Mass/卫星配置体系重整_执行方案.md（草案 v0.1——含 7 个设计决策点 D1~D7 待审）】
+关联：S6（原定“随 N7”——范围已并入本议题）；S8 评分疑点仍留 N7 裁决（评分字段形态影响配置资产设计——
+  方案时评估与 N7 的先后依赖）。
+【范围并入（10-09 用户裁定）】M-8 收口批⑧“编辑语义合并”（删 SetOrbitData；CommitOrbitChanges 带数据
+  一体化；Slate 回调适配）——与 FRuntimeOrbitData→FOrbitDefinition 改名同文件（PC/Widget）同批实施。
+```
+
+### N10 格子智能对象单 Slot 化（双 Slot 合并）【用户发起·确认做（10-08）】
+
+```
+背景（M-4 静态审阅四条意见 → 用户裁定）：① 双 Slot（Plot/Crop）合并做（“玩家域并发不重要”）；
+② 接口同步更正（泛型 SlotIndex 退场）；③ 句柄接口收窄（GetObjectHandle 零调用/GetSlotHandle 仅内部包装）；
+④ BeginPlay 空实现清理。
+事实核查（M-4 审阅产出）：收获不广播（(1,false) 实为 RemoveCrop）/ 时长按具体行为类查询（不依赖双 Slot）/ 
+选点已格级互斥（域并发唯一实质=卫星单域队列时玩家可操作另一域——裁定不重要）。
+附带发现（待处置）：活跃农田集合口径与注释不符（只监听 Slot 1——“已耕地广播”被忽略；
+集合实际=“播种过格子”，注释写“已耕地+已播种”）——N10 D1 处置。
+方案草案已出（10-08）：docs/Mass/格子智能对象单Slot化_执行方案.md（草案 v0.1——含 D1~D6 待审）。
+排期：与 N8/N9 同批；【D5 推荐：N10 先于 N8（同文件顺序解耦）——待审确认】。
+关联：M-4 审阅【挂起——待 N8/N10 落定后重写导读再审】。
+```
+
+### N11 轨道覆盖可视化重构（M-8 收口批残余·10-09 转入）【用户发起·确认做（10-09）】
+
+```
+背景（M-8 审阅 S3/S4/S7/S8 裁定；10-09 用户裁定“重构类项转 N 系列”）：
+· ②删三缓存字段（PlanetActor/CellManager/SatelliteManager）→ 使用点按需经 GetOwner
+  （全局规范“高配缓存/低频现取”首个落地）
+· ④ComputeCoveredCells → BPFL 纯函数 + 混合色（多轨重叠 = 全部命中色求平均；去“列表序靠前 break”）
+· ⑤RebuildCellHighlight 维持原逻辑（执行④时可选顺便结构整理——无独立改动）
+· ⑥事件驱动按需重建（无节流）：HandleRuntimeOrbitChanged(OrbitName) 直接单轨处理（存在→RebuildOrbitVisual；
+  不存在→移除条目+实例）；整体移除 Tick 机制（三件套/TickComponent/bPendingRebuild/TimeSinceRebuild/RebuildInterval）
+  + 约定注释“调用端负责频率”（S6 随之消除）
+排期：与 N8/N9/N10 同批（模块审阅已收官；注释修订前）。
+关联：M8 导读附一（S3~S8 讨论）+ 收口批清单；延后项（槽位球归拢 N8 后 / 通道分离更后 / 单轨显示增强）不在本卡。
 ```

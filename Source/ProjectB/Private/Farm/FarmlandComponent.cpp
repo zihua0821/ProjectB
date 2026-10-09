@@ -433,7 +433,7 @@ void UFarmlandComponent::UpdateOutline(FIntPoint Coords, bool bEnable)
 	InstanceTransform.AddToTranslation(FVector(0.f, 0.f, FarmlandConfig->OutlineOffsetZ));
 	int32 InstanceIndex;
 	UISMTools::GetInstanceIndexByTransform(LandCellOutlineRenderer,InstanceTransform, InstanceIndex);
-	if (bEnable && BasePlayerController->GetEditMode() != EEditMode::None)
+	if (bEnable && BasePlayerController.IsValid() && BasePlayerController->GetEditMode() != EEditMode::None)
 	{
 		CurrentOutlineCoords = Coords;
 		LandCellOutlineRenderer->SetCustomDataValue(InstanceIndex, CellOutlineCustomData::Opacity, 0.1f);
@@ -459,6 +459,13 @@ void UFarmlandComponent::UpdateOutlineColor(FIntPoint Coords) const
 	}
 
 	FLinearColor OutlineColor = FLinearColor::Green;
+
+	// PC 失效防御（弱引用）：无效时不更新轮廓色
+	if (!BasePlayerController.IsValid())
+	{
+		return;
+	}
+
 	switch (BasePlayerController->GetEditMode()) {
 	case None:
 		OutlineColor = FLinearColor::White;

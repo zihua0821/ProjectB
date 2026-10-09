@@ -24,7 +24,7 @@ enum class ESatelliteState : uint8
 	Depart        UMETA(DisplayName = "待发"),
 	Approach      UMETA(DisplayName = "离轨飞行"),
 	Work          UMETA(DisplayName = "悬停作业"),
-	AwaitReturn   UMETA(DisplayName = "待回"),
+	ReturnWait    UMETA(DisplayName = "待回"),
 	Return        UMETA(DisplayName = "回轨飞行"),
 	Drift         UMETA(DisplayName = "漂移")
 };
@@ -35,7 +35,7 @@ enum class ESatelliteState : uint8
  * 注：成员带 UPROPERTY 以便 mass.PrintEntityFragments / 调试工具显示值
  */
 USTRUCT()
-struct PROJECTB_API FMassOrbitFragment : public FMassFragment
+struct PROJECTB_API FMassSatelliteOrbitFragment : public FMassFragment
 {
 	GENERATED_BODY()
 
@@ -161,28 +161,25 @@ struct PROJECTB_API FMassSatelliteTaskFragment : public FMassFragment
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
 	FIntPoint TargetCoord = FIntPoint(-1, -1);
 
-	/** 已认领的智能对象 Slot 句柄（选点任务写入，执行任务释放） */
+	/**
+	 * 格子认领句柄——Plot 域（目标格 Plot 席位；无效 = 未认领该域）
+	 * 语义：一次作业 = 单格 + 多任务队列；认领 = 按域席位（同域多项共享同一句柄）
+	 * 生命周期：选点一次认领 → 全量保留（出勤账本，出队只消耗 WorkQueue）
+	 *   → 回轨起飞瞬间（Return::EnterState）统一释放（唯一释放点）
+	 * 所有权：逐域检查——任一已认领域失权 = 整单不可执行（HandleOwnershipLost）
+	 */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
-	FSmartObjectClaimHandle ClaimHandle;
+	FSmartObjectClaimHandle PlotClaimHandle;
 
-	/** 目标操作类型（选点任务写入，执行任务读取；TEnumAsByte 包装 unscoped 枚举以满足 UHT 规则） */
+	/** 格子认领句柄——Crop 域（目标格 Crop 席位；无效 = 未认领该域；生命周期同 PlotClaimHandle） */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
-	TEnumAsByte<EEditMode> TargetEditMode = EEditMode::None;
+	FSmartObjectClaimHandle CropClaimHandle;
 
 	// ---- 离轨作业（方案 v1.0）：作业队列与飞行状态 ----
 
 	/** 作业队列（格内多操作；选点任务构建；标准 FIFO 出队，无索引） */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
 	TArray<TEnumAsByte<EEditMode>> WorkQueue;
-
-	/**
-	 * 队列各操作的认领句柄（与 WorkQueue 一一对应；无需认领的项为 InvalidHandle）
-	 * 认领于选点时一次完成（同 Slot 的多项共享同一句柄）；
-	 * 【全量保留】——出队只消耗 WorkQueue，本数组作为“出勤账本”保留至真实回轨到达统一释放
-	 * （当前项句柄 = ClaimHandles[已消费数]；已消费数 = 总长 − WorkQueue 剩余长度）
-	 */
-	UPROPERTY(VisibleAnywhere, Category = "Satellite")
-	TArray<FSmartObjectClaimHandle> ClaimHandles;
 
 	/** 飞行终点（离轨=悬停点 / 回轨=入轨点；起飞时算好——路径参数一次算好） */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")

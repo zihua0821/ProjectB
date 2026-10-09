@@ -155,7 +155,7 @@ void ASurfacePawn::UpdateSurfaceNormal()
 	// 查找最近的星球
 	FindNearestPlanet();
 
-	if (HoveredPlanet)
+	if (HoveredPlanet.IsValid())
 	{
 		// 计算从球心到 Pawn 的向量
 		FVector SphereCenter = HoveredPlanet->GetActorLocation();
@@ -243,7 +243,7 @@ void ASurfacePawn::HandleCameraRotation(float DeltaTime)
 void ASurfacePawn::FindNearestPlanet()
 {
 	// 如果已经有吸附的星球且距离不远，继续使用
-	if (HoveredPlanet)
+	if (HoveredPlanet.IsValid())
 	{
 		float DistanceToCurrent = FVector::Dist(GetActorLocation(), HoveredPlanet->GetActorLocation());
 		float MaxSearchRadius = HoveredPlanet->PlanetConfig->Radius * 3.0f;
@@ -285,7 +285,7 @@ void ASurfacePawn::FindNearestPlanet()
 
 	HoveredPlanet = Cast<APlanetActor>(NearestPlanet);
 
-	if (HoveredPlanet)
+	if (HoveredPlanet.IsValid())
 	{
 		UE_LOG(LogTemp, Log, TEXT("ASurfacePawn::FindNearestPlanet - Found planet at distance: %.2f cm"), MinDistance);
 	}

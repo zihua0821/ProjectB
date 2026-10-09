@@ -98,9 +98,9 @@ private:
     UPROPERTY()
     TWeakObjectPtr<AActor> OwnerActor;
     
-    // 玩家控制器
+    // 玩家控制器（弱引用：非拥有观察——PC 可能先于组件销毁）
     UPROPERTY()
-    TObjectPtr<ABasePlayerController>  BasePlayerController;
+    TWeakObjectPtr<ABasePlayerController>  BasePlayerController;
     
     // 地块组件（弱引用，避免循环）
     UPROPERTY()

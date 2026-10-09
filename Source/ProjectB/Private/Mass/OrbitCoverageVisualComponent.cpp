@@ -40,7 +40,7 @@ UOrbitCoverageVisualComponent::UOrbitCoverageVisualComponent()
 void UOrbitCoverageVisualComponent::Initialize(APlanetActor* InPlanetActor)
 {
 	PlanetActor = InPlanetActor;
-	if (!PlanetActor)
+	if (!PlanetActor.IsValid())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[OrbitVisual] Initialize failed: PlanetActor is null"));
 		return;
@@ -177,7 +177,7 @@ void UOrbitCoverageVisualComponent::RemoveAllVisualInstances()
 
 void UOrbitCoverageVisualComponent::RebuildOrbitVisual(const FName OrbitName)
 {
-	if (!SatelliteManager || !PlanetActor || !PlanetActor->PlanetConfig)
+	if (!SatelliteManager || !PlanetActor.IsValid() || !PlanetActor->PlanetConfig)
 	{
 		return;
 	}
@@ -347,7 +347,7 @@ void UOrbitCoverageVisualComponent::ComputeCoveredCells(const TArray<FRuntimeOrb
 {
 	OutCells.Reset();
 
-	if (!CellManager || !PlanetActor || !PlanetActor->PlanetConfig || Orbits.Num() == 0)
+	if (!CellManager || !PlanetActor.IsValid() || !PlanetActor->PlanetConfig || Orbits.Num() == 0)
 	{
 		return;
 	}

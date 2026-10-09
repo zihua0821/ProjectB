@@ -64,6 +64,12 @@ public:
 	 */
 	static bool IsPointInOrbitCoverage(const FVector& Point, const FVector& OrbitCenter, const FVector& OrbitNormal, const float ServiceDistance);
 
+	/*
+	 * 角度归一化到 [0, 360)（消除长时运行累积圈数，保证 FindDeltaAngleDegrees 单次修正准确）
+	 * 任务链/规划器共用（原两处 .cpp 匿名实现因 Unity Build 同 TU 重名冲突，已提取为公共函数）
+	 */
+	static float NormalizeAngleDegrees360(const float AngleDeg);
+
 	// ==================== 离轨作业：路径函数（纯算法；方案见 docs/Mass/卫星离轨作业_需求方案.md v1.0） ====================
 
 	/*

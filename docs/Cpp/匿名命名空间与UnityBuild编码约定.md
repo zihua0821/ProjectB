@@ -161,6 +161,23 @@ class C { static void Foo(); };         // 类静态成员函数：外部链接�
 
 Unity 构建下的重定义错误，行号可能指向拼接生成的中间文件（Intermediate 下的 Unity 文件），而非你的源文件——排查时以错误信息中的原始文件名为准。
 
+### 5.5 同名匿名函数也会在 Unity 下“意外重定义”（2026-10-06 实例）
+
+匿名 namespace 防的是【跨 TU 链接冲突】，但【防不了 Unity 合并后的同 TU 重定义】：
+同一翻译单元中的多个匿名 namespace 块属于**同一个匿名命名空间**——两个 .cpp 的
+`namespace {}` 里定义了同名同签名函数，被 Unity 拼进同一 TU 后即 `C2084: 函数已有主体`。
+
+```
+实例：NormalizeAngleDegrees360 曾在 SatelliteStateTreeTasks.cpp 与
+SatelliteManagerComponent.cpp 各持一份（实现完全相同）——某次 Unity 分组抖动（新增文件/
+Adaptive Unity 重排）后两者拼入同一 unity 文件 → 编译阻断（后续“未声明标识符”均为连锁报错）。
+修复：提取为 UPlanetBlueprintFunctionLibrary 公共函数（单一实现）。
+```
+
+**结论**：跨文件重复的小工具（哪怕都放匿名 namespace）仍是隐患——
+同一模块内出现**第二份相同实现**时，应立即提取为公共函数（见 4.2 Q2：被多个文件复用 → 头文件公共函数），
+而不是再复制一份匿名副本。
+
 ---
 
 ## 六、澄清：它不是"性能优化"

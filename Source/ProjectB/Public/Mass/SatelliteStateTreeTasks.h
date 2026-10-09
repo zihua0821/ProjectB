@@ -26,7 +26,7 @@ struct FSatelliteSelectTargetTaskInstanceData
 /**
  * 选点任务（Cruise 状态）
  * 巡航态节流选点：遍历活跃农田（轨道覆盖带几何过滤）→ 缺口评分（状态权重 + 距离）
- * → 最高分按操作类型认领对应 Slot → 写入目标坐标/操作类型/移动意图
+ * → 最高分按操作所属域认领对应 Slot → 写入目标坐标/作业队列
  * @return Succeeded=已选目标（转往目标）；Running=无合适目标（继续巡航）
  */
 USTRUCT(meta = (DisplayName = "Satellite Select Target"))
@@ -107,7 +107,7 @@ struct FSatelliteReturnTaskInstanceData
 };
 
 /**
- * 待回任务（AwaitReturn 状态）
+ * 待回任务（ReturnWait 状态）
  * 保持悬停（位置覆盖由作业阶段持有）；槽位由群体决策分配（规划器认领后写回句柄）
  * → 等到"目标槽位实时位置与悬停投影重合"（≤ 容差）→ Succeeded
  */
@@ -148,13 +148,13 @@ struct FSatelliteExecuteActionTaskInstanceData
 	/** 当前项开始时间（秒） */
 	double ActionStartTime = 0.0;
 
-	/** 当前项作业时长（秒；取自该项认领的行为定义，缺省用默认值） */
+	/** 当前项作业时长（秒；按操作所属域取行为定义，缺省用默认值） */
 	float ActionDuration = 0.f;
 };
 
 /**
  * 悬停作业任务（Work 状态）
- * EnterState：写悬停点（位置覆盖）→ 快照认领句柄 → 开始首项（读行为时长）
+ * EnterState：写悬停点（位置覆盖）→ 开始首项（按操作所属域取句柄 → 读该类行为时长）
  * Tick：倒计时 → 执行队首操作 → 出队 → 队列空：不释放认领（保留至回轨起飞统一释放）、清理并 Succeeded；
  *       否则所有权检查（失权 → Failed）后开始下一项
  */

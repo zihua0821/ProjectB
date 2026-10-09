@@ -46,10 +46,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "OrbitVisual")
 	void RefreshVisualization();
 
-	/** 查询指定格子当前是否在覆盖集（调试/验证用） */
-	UFUNCTION(BlueprintCallable, Category = "OrbitVisual")
-	bool IsCellCovered(const FIntPoint Coords) const { return CurrentCoveredCells.Contains(Coords); }
-
 protected:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -129,7 +125,7 @@ private:
 	// ---- 运行时 ----
 
 	UPROPERTY()
-	TObjectPtr<APlanetActor> PlanetActor;
+	TWeakObjectPtr<APlanetActor> PlanetActor;
 
 	UPROPERTY()
 	TObjectPtr<UCellManagerComponent> CellManager;

@@ -9,15 +9,12 @@
 #include "Farm/FarmlandComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Mass/CellMassFragments.h"           // FHighlightFragment（悬停高亮同步清除）
-#include "UMG/OrbitEditorWidget.h"           // 轨道编辑界面（Slate 面板 + UMG 包装一体）
-#include "Engine/Engine.h"                    // GEngine->GameViewport（Slate 面板挂载）
-#include "Engine/GameViewportClient.h"        // AddViewportWidgetContent
 #include "Mass/OrbitCoverageVisualComponent.h"
 #include "Mass/SmartObjectManagerComponent.h"
 #include "MassEntitySubsystem.h"
 #include "Planet/PlanetActor.h"
 #include "ProjectB/Public/TimeSync/TimeSyncComponent.h"
-#include "Simulation/SimulationControlSubsystem.h"   // 选定暂停（编辑模式进/出）
+#include "Subsystem/SimulationControlSubsystem.h"   // 选定暂停（编辑模式进/出）
 
 ABasePlayerController::ABasePlayerController()
 {
@@ -199,7 +196,7 @@ void ABasePlayerController::UpdateHoveredPlot()
 			return;
 		}
 		OnHoveredPlot.Broadcast(HitPlanet, CellCoords);
-		if (PreHoveredPlanetActor && PreHoveredPlanetActor != HitPlanet)
+		if (PreHoveredPlanetActor.IsValid() && PreHoveredPlanetActor != HitPlanet)
 		{
 			PreHoveredPlanetActor->OutlinePlot(PreHoveredPlotCoords, false);
 		}
@@ -214,7 +211,7 @@ void ABasePlayerController::UpdateHoveredPlot()
 	else
 	{
 		OnHoveredPlot.Broadcast(nullptr, FIntPoint(-1, -1));
-		if (PreHoveredPlanetActor)
+		if (PreHoveredPlanetActor.IsValid())
 		{
 			PreHoveredPlanetActor->OutlinePlot(PreHoveredPlotCoords, false);
 			PreHoveredPlotCoords = FIntPoint(-1, -1);
@@ -232,7 +229,7 @@ void ABasePlayerController::EnterOrbitEditMode()
 	bOrbitEditMode = true;
 
 	// 清除当前悬停高亮（UpdateOutline 已统一为同步直写——与覆盖标记同路径，无时序竞态）
-	if (PreHoveredPlanetActor && PreHoveredPlotCoords != FIntPoint(-1, -1))
+	if (PreHoveredPlanetActor.IsValid() && PreHoveredPlotCoords != FIntPoint(-1, -1))
 	{
 		PreHoveredPlanetActor->OutlinePlot(PreHoveredPlotCoords, false);
 		PreHoveredPlotCoords = FIntPoint(-1, -1);
@@ -292,90 +289,6 @@ void ABasePlayerController::ExitOrbitEditMode()
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("[Player] Orbit edit mode EXITED"));
-}
-
-void ABasePlayerController::ToggleOrbitEditMode()
-{
-	if (bOrbitEditMode)
-	{
-		ExitOrbitEditMode();
-	}
-	else
-	{
-		EnterOrbitEditMode();
-	}
-}
-
-bool ABasePlayerController::UpdateFirstOrbit(TFunctionRef<void(FRuntimeOrbitData&)> Mutator)
-{
-	APlanetActor* Planet = Cast<APlanetActor>(UGameplayStatics::GetActorOfClass(GetWorld(), APlanetActor::StaticClass()));
-	if (!Planet)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[OrbitEdit] No PlanetActor found"));
-		return false;
-	}
-	USatelliteManagerComponent* Manager = Planet->GetSatelliteManagerComponent();
-	if (!Manager)
-	{
-		return false;
-	}
-	const TArray<FRuntimeOrbitData>& Orbits = Manager->GetRuntimeOrbits();
-	if (Orbits.Num() == 0)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[OrbitEdit] No runtime orbit available"));
-		return false;
-	}
-
-	FRuntimeOrbitData Data = Orbits[0];
-	Mutator(Data);
-	Manager->UpdateOrbitData(Data.OrbitName, Data);   // 广播 → 可视化节流刷新
-	return true;
-}
-
-void ABasePlayerController::OrbitSetServiceDistance(float ServiceDistance)
-{
-	const float NewValue = FMath::Max(0.f, ServiceDistance);
-	if (UpdateFirstOrbit([NewValue](FRuntimeOrbitData& Data) { Data.ServiceDistance = NewValue; }))
-	{
-		UE_LOG(LogTemp, Log, TEXT("[OrbitEdit] ServiceDistance -> %.1f"), NewValue);
-	}
-}
-
-void ABasePlayerController::OrbitSetRadius(float OrbitRadius)
-{
-	const float NewValue = FMath::Max(1.f, OrbitRadius);
-	if (UpdateFirstOrbit([NewValue](FRuntimeOrbitData& Data) { Data.Radius = NewValue; }))
-	{
-		UE_LOG(LogTemp, Log, TEXT("[OrbitEdit] OrbitRadius -> %.1f"), NewValue);
-	}
-}
-
-void ABasePlayerController::OrbitSetCenter(float X, float Y, float Z)
-{
-	const FVector NewCenter(X, Y, Z);
-	if (UpdateFirstOrbit([NewCenter](FRuntimeOrbitData& Data) { Data.Transform.SetLocation(NewCenter); }))
-	{
-		UE_LOG(LogTemp, Log, TEXT("[OrbitEdit] Center -> %s"), *NewCenter.ToCompactString());
-	}
-}
-
-void ABasePlayerController::OrbitSetNormal(float X, float Y, float Z)
-{
-	const FVector NewNormal = FVector(X, Y, Z).GetSafeNormal();
-	if (NewNormal.IsNearlyZero())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[OrbitEdit] Invalid normal (zero vector)"));
-		return;
-	}
-	if (UpdateFirstOrbit([NewNormal](FRuntimeOrbitData& Data)
-		{
-			// 与 CellManager 同源写法：MakeFromZ(...).Rotator()（TMatrix 无 ToQuaternion）
-			const FRotator NewRotation = FRotationMatrix::MakeFromZ(NewNormal).Rotator();
-			Data.Transform.SetRotation(NewRotation.Quaternion());
-		}))
-	{
-		UE_LOG(LogTemp, Log, TEXT("[OrbitEdit] Normal -> %s"), *NewNormal.ToCompactString());
-	}
 }
 
 USatelliteManagerComponent* ABasePlayerController::ResolveSatelliteManager() const
@@ -445,42 +358,6 @@ void ABasePlayerController::CommitOrbitChanges(const FName OrbitName) const
 	{
 		Manager->ApplyOrbitChangesForOrbit(OrbitName);   // 只重建该轨（选定暂停中执行，安全）
 	}
-}
-
-void ABasePlayerController::OrbitShowEditor()
-{
-	// 已打开 → 关闭（Toggle）
-	if (OrbitEditorPanel.IsValid())
-	{
-		CloseOrbitEditor();
-		return;
-	}
-
-	if (GEngine == nullptr || GEngine->GameViewport == nullptr)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[OrbitEdit] GameViewport unavailable, cannot open editor panel"));
-		return;
-	}
-
-	EnterOrbitEditMode();   // 进编辑模式（可视化开 + 悬停互斥）
-	OrbitEditorPanel = SNew(SOrbitEditorPanel).PlayerController(this);
-	GEngine->GameViewport->AddViewportWidgetContent(OrbitEditorPanel.ToSharedRef(), /*ZOrder=*/100);
-
-	UE_LOG(LogTemp, Log, TEXT("[OrbitEdit] Editor panel OPENED"));
-}
-
-void ABasePlayerController::CloseOrbitEditor()
-{
-	if (OrbitEditorPanel.IsValid())
-	{
-		if (GEngine && GEngine->GameViewport)
-		{
-			GEngine->GameViewport->RemoveViewportWidgetContent(OrbitEditorPanel.ToSharedRef());
-		}
-		OrbitEditorPanel.Reset();
-	}
-	ExitOrbitEditMode();
-	UE_LOG(LogTemp, Log, TEXT("[OrbitEdit] Editor panel CLOSED"));
 }
 
 // 切换到下一个编辑模式（正向循环）

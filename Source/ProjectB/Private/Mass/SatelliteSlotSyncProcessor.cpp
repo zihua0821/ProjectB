@@ -4,7 +4,7 @@
 #include "MassExecutionContext.h"
 #include "Mass/SatelliteMassFragments.h"
 #include "Mass/SmartObjectManagerComponent.h"        // UpdateOrbitSlots（槽位相位推进）
-#include "Simulation/SimulationControlSubsystem.h"   // 选定暂停（白名单挂载）
+#include "Subsystem/SimulationControlSubsystem.h"   // 选定暂停（白名单挂载）
 
 USatelliteSlotSyncProcessor::USatelliteSlotSyncProcessor()
 	: EntityQuery(*this)
