@@ -9,7 +9,7 @@
 // 验证需求场景（7万实例 / 106~583 切换每帧 / 60fps）、分桶收益（bConfigureSphereBuckets 对照：
 // 开 = 自动分桶 vs 关 = 全部单桶）及超限压力（50万 / 30fps）。
 // 运行配置：DebugGame Editor（引擎 Development → 性能数据可信，项目代码可断点）
-// 验证结论与实测数据见 docs/ISMManager技术文档.md §11（性能验证结论）
+// 验证结论与实测数据见 docs/渲染体系/ISMManager技术文档.md §11（性能验证结论）
 #pragma once
 
 #include "CoreMinimal.h"

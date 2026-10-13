@@ -3,7 +3,7 @@
 //  
 //  职责：组件管理（按 Mesh 懒创建/复用 ISM 桶）、空间分桶映射、
 //        5.4+ ById 增量增删改、事件驱动停用与调试可视化。
-//  架构说明见 docs/ISMManager技术文档.md。
+//  架构说明见 docs/渲染体系/ISMManager技术文档.md。
 //=============================================================================
 #include "Subsystem/ISMManager.h"
 #include "Components/InstancedStaticMeshComponent.h"

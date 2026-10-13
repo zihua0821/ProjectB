@@ -172,9 +172,9 @@ ensureMsgf(CustomFloatData.Num() == 0, TEXT("Custom floats not supported with th
 
 ## 八、相关文件索引
 
-- [ISMManager 技术文档](../docs/ISMManager技术文档.md)
-- [增量 ISM 组件技术文档](../docs/增量ISM组件技术文档.md)
-- [球面AABB剔除精度问题与解决方案](../docs/球面AABB剔除精度问题与解决方案.md)
+- [ISMManager 技术文档](ISMManager技术文档.md)
+- [增量 ISM 组件技术文档](历史归档/增量ISM组件技术文档.md)
+- [球面AABB剔除精度问题与解决方案](球面AABB剔除精度问题与解决方案.md)
 - `Source/ProjectB/Private/Subsystem/ISMManager.cpp` / `Public/Subsystem/ISMManager.h`
 - `Source/ProjectB/Private/Mass/CropVisualSyncProcessor.cpp` / `CellVisualSyncProcessor.cpp` / `PlotVisualSyncProcessor.cpp`
 - 引擎：`Engine/Plugins/Runtime/MassGameplay/Source/MassRepresentation/`

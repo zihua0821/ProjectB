@@ -311,4 +311,4 @@ void UpdateIncrementalInstanceBodyTransform(int32 InstanceIndex,
 | `Source/ProjectB/Public/Subsystem/ISMManager.h` | 上层管理器（对象池 + Flush 调度） |
 | `Source/ProjectB/Private/Subsystem/ISMManager.cpp` | AcquireSlot / ReleaseSlot / Flush 实现 |
 | `Source/ProjectB/ProjectB.h` | `ParkedLocation` 定义（Nanite 隐藏停靠点） |
-| `Source/ProjectB/docs/ISMManager技术文档.md` | 上层管理器技术文档 |
+| `docs/渲染体系/ISMManager技术文档.md` | 上层管理器技术文档 |

@@ -248,5 +248,5 @@ CropISMComp->RemoveInstancesById({OldId});
 | `Source/ProjectB/Private/Mass/CropVisualSyncProcessor.cpp` | Crop 迁移（父类接口） |
 | `Source/ProjectB/Private/Farm/CellManagerComponent.cpp` | PreAllocateCount 参数化 |
 | `Source/ProjectB/ProjectB.h` | ParkedLocation（保留） |
-| `docs/增量ISM组件技术文档.md` | 现有组件技术文档（重构后需同步更新） |
-| `docs/ISMManager技术文档.md` | 现有管理器技术文档（重构后需同步更新） |
+| `docs/渲染体系/历史归档/增量ISM组件技术文档.md` | 现有组件技术文档（重构后需同步更新） |
+| `docs/渲染体系/ISMManager技术文档.md` | 现有管理器技术文档（重构后需同步更新） |

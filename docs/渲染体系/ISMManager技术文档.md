@@ -376,8 +376,8 @@ Bucket->SetCustomDataValueById(InstanceId.LocalId, CustomDataIndex, Value);  // 
 |------|------|
 | `Source/ProjectB/Public/Subsystem/ISMManager.h` | 管理器接口、数据结构与球面分桶配置声明 |
 | `Source/ProjectB/Private/Subsystem/ISMManager.cpp` | 内部球面映射、分桶、批量、增量实现 |
-| `docs/ISMManager空间分桶重构方案.md` | 重构方案（球面化设计、块大小算法、实施步骤） |
-| `docs/ISM分桶与增量渲染_需求文档.md` | 需求文档 v2.6（FR-2/FR-6/FR-7、C-5/C-7、PR-6 等） |
+| `docs/渲染体系/ISMManager空间分桶重构方案.md` | 重构方案（球面化设计、块大小算法、实施步骤） |
+| `docs/渲染体系/ISM分桶与增量渲染_需求文档.md` | 需求文档 v2.6（FR-2/FR-6/FR-7、C-5/C-7、PR-6 等） |
 | `Source/ProjectB/ProjectB.h` | `ECC_Cell` 定义 |
 
 > 注：`IncrementalInstancedStaticMeshComponent.h/.cpp`（自研增量组件）与 `ISMPoolManager.h/.cpp`（旧版池管理器）已删除；《增量ISM组件重构方案.md》已弃用。
