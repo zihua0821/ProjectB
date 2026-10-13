@@ -1,3 +1,5 @@
+// CropData.h
+// 作物数据定义：编辑/作业模式枚举（EEditMode）+ 生长阶段/状态/品质 + 数据表行与 CustomData 常量
 #pragma once
 
 #include "CoreMinimal.h"

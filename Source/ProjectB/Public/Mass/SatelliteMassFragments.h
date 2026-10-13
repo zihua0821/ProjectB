@@ -1,11 +1,12 @@
 // SatelliteMassFragments.h
-// 卫星 Mass 实体数据定义：轨道运动状态 fragment（状态 / 相位 / 位置覆盖）+ 卫星标记
+// 卫星 Mass 实体数据定义：轨道运动 / 共享数据 / 任务上下文 / 渲染句柄 fragment + 卫星标记
 #pragma once
 
 #include "CoreMinimal.h"
 #include "MassEntityTypes.h"
 #include "Crops/CropData.h"          // EEditMode（目标操作类型）
-#include "SmartObjectRuntime.h"      // FSmartObjectClaimHandle（卫星任务认领句柄）
+#include "Mass/SatelliteManagerComponent.h"  // FOrbitSlotHandle（轨道槽认领句柄——自建槽池）
+#include "SmartObjectRuntime.h"      // FSmartObjectClaimHandle（格子认领句柄——任务 fragment）
 #include "Subsystem/ISMManager.h"   // FGlobalInstanceId（卫星渲染实例句柄）
 #include "SatelliteMassFragments.generated.h"
 
@@ -15,7 +16,8 @@ class USmartObjectManagerComponent;
 class USatelliteManagerComponent;
 
 /**
- * 卫星状态：六阶段统一状态（离轨作业方案 v1.0；唯一状态字段）
+ * 卫星状态：统一状态机（作业六阶段 + 漂移扩展；唯一状态字段——
+ * 设计见《卫星离轨作业_需求方案.md》/《轨道全局规划_需求方案.md》）
  */
 UENUM(BlueprintType)
 enum class ESatelliteState : uint8
@@ -30,8 +32,7 @@ enum class ESatelliteState : uint8
 };
 
 /**
- * 卫星轨道运动状态（核心 fragment）
- * 对应旧 UOrbitMovementComponent 的运行状态字段
+ * 卫星轨道运动状态（核心 fragment——轨道相位 / 方向 / 槽位归属 / 位置覆盖）
  * 注：成员带 UPROPERTY 以便 mass.PrintEntityFragments / 调试工具显示值
  */
 USTRUCT()
@@ -43,7 +44,9 @@ struct PROJECTB_API FMassSatelliteOrbitFragment : public FMassFragment
 	UPROPERTY(VisibleAnywhere, Category = "Orbit")
 	FName OrbitName = NAME_None;
 
-	/** 轨道相位角（度；始终按 ω 推进——巡航位置基准与回轨依据；唯一相位字段） */
+	/** 名义轨道相位（度；按 ω 推进的时间轴状态——与物理位置/槽位分配无关；唯一相位字段）
+	 *  virtual 取“名义”义（非“虚假”）；读：无槽兜底三件（渲染/离轨判据/起飞起点）；
+	 *  写：初始化均分 / 到达归位（←槽相位）/ 漂移中断（←滑行相位） */
 	UPROPERTY(VisibleAnywhere, Category = "Orbit")
 	float VirtualPhase = 0.0f;
 
@@ -55,7 +58,7 @@ struct PROJECTB_API FMassSatelliteOrbitFragment : public FMassFragment
 	UPROPERTY(VisibleAnywhere, Category = "Orbit")
 	bool bClockwise = false;
 
-	// ---- 离轨作业（方案 v1.0）：状态与位置覆盖 ----
+	// ---- 离轨作业：状态与位置覆盖 ----
 
 	/** 卫星状态（唯一状态字段；各任务在 EnterState 时写入） */
 	UPROPERTY(VisibleAnywhere, Category = "Orbit")
@@ -66,18 +69,18 @@ struct PROJECTB_API FMassSatelliteOrbitFragment : public FMassFragment
 	bool bOverrideLocation = false;
 
 	/**
-	 * 轨道槽位归属（槽位 = 智能对象实例；与格子同构）
+	 * 轨道槽位归属（自建槽池句柄——替代智能对象实例）
 	 * 有效 = 持有该槽；无效 = 无槽（离轨中/未分配）
 	 * 注：已认领后的槽位查询一律用本句柄（GetOrbitSlot*ByClaim），不再维护"槽索引"字段，避免双字段不同步
 	 */
 	UPROPERTY(VisibleAnywhere, Category = "Orbit")
-	FSmartObjectClaimHandle SlotClaimHandle;
+	FOrbitSlotHandle SlotClaimHandle;
 
 	/** 漂移请求（规划器发单：巡航检查任务消费后转 Drift；消费即清） */
 	UPROPERTY(VisibleAnywhere, Category = "Orbit")
 	bool bDriftRequested = false;
 
-	/** 覆盖位置（世界/星球本地坐标；任务每帧写） */
+	/** 覆盖位置（世界坐标；任务链每帧写——星球中心=世界原点的项目约定下与星球本地系等价） */
 	UPROPERTY(VisibleAnywhere, Category = "Orbit")
 	FVector OverrideLocation = FVector::ZeroVector;
 };
@@ -103,7 +106,7 @@ struct PROJECTB_API FSatelliteRenderFragment : public FMassFragment
 
 /**
  * 卫星共享数据（ConstSharedFragment，按值去重：同轨道+同 Mesh 的卫星共享一份）
- * - 轨道几何：角度→世界位置的计算基础（与原 CalculateOrbitPosition 同源）
+ * - 轨道几何：角度→世界位置的计算基础（平面圆参数化的输入变换）
  * - 渲染 Mesh：渲染同步处理器按此更新 ISM 实例
  */
 USTRUCT()
@@ -143,14 +146,14 @@ struct PROJECTB_API FMassSatelliteSharedFragment : public FMassConstSharedFragme
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
 	TObjectPtr<USmartObjectManagerComponent> SmartObjectManager = nullptr;
 
-	/** 卫星管理组件（活跃农田集合 + 选点评分权重） */
+	/** 卫星管理组件（选点评分权重 + 转场速度） */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
 	TObjectPtr<USatelliteManagerComponent> SatelliteManager = nullptr;
 };
 
 /**
  * 卫星任务上下文（跨 StateTree 任务传递的数据）
- * 任务状态（巡航/前往目标/收获）由 StateTree 资产中的状态编排，不再存于 fragment
+ * 流程状态由 StateTree 资产编排（状态不落 fragment——此处仅存任务链共享数据）
  */
 USTRUCT()
 struct PROJECTB_API FMassSatelliteTaskFragment : public FMassFragment
@@ -162,20 +165,15 @@ struct PROJECTB_API FMassSatelliteTaskFragment : public FMassFragment
 	FIntPoint TargetCoord = FIntPoint(-1, -1);
 
 	/**
-	 * 格子认领句柄——Plot 域（目标格 Plot 席位；无效 = 未认领该域）
-	 * 语义：一次作业 = 单格 + 多任务队列；认领 = 按域席位（同域多项共享同一句柄）
-	 * 生命周期：选点一次认领 → 全量保留（出勤账本，出队只消耗 WorkQueue）
-	 *   → 回轨起飞瞬间（Return::EnterState）统一释放（唯一释放点）
-	 * 所有权：逐域检查——任一已认领域失权 = 整单不可执行（HandleOwnershipLost）
+	 * 格子认领句柄（目标格整格席位；无效 = 未认领）
+	 * 语义：一次作业 = 单格 + 多任务队列；单 Slot 化——整格一次认领（不区分域）
+	 * 生命周期：选点一次认领 → 保留至回轨起飞瞬间（Return::EnterState）统一释放（唯一释放点）
+	 * 所有权：单句柄校验——失权 = 整单不可执行（HandleOwnershipLost）
 	 */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
-	FSmartObjectClaimHandle PlotClaimHandle;
+	FSmartObjectClaimHandle CellClaimHandle;
 
-	/** 格子认领句柄——Crop 域（目标格 Crop 席位；无效 = 未认领该域；生命周期同 PlotClaimHandle） */
-	UPROPERTY(VisibleAnywhere, Category = "Satellite")
-	FSmartObjectClaimHandle CropClaimHandle;
-
-	// ---- 离轨作业（方案 v1.0）：作业队列与飞行状态 ----
+	// ---- 离轨作业：作业队列与飞行状态 ----
 
 	/** 作业队列（格内多操作；选点任务构建；标准 FIFO 出队，无索引） */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
@@ -193,7 +191,7 @@ struct PROJECTB_API FMassSatelliteTaskFragment : public FMassFragment
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")
 	float PhaseDuration = 0.0f;
 
-	// ---- 转场轨迹参数（方案 2：切向同步 + 径向匀速；极坐标参数方程）----
+	// ---- 转场轨迹参数（极坐标参数方程：切向角速度 ω 同步 + 径向匀速 v_r + 垂直分量）----
 
 	/** 起始方位角（度；轨道局部） */
 	UPROPERTY(VisibleAnywhere, Category = "Satellite")

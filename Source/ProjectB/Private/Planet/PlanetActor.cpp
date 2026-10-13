@@ -1,5 +1,5 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
+// PlanetActor.cpp
+// 实现：星球 Actor（组件创建与接线；职责见 .h）
 
 #include "Planet/PlanetActor.h"
 
@@ -9,7 +9,6 @@
 #include "Mass/SmartObjectManagerComponent.h"
 #include "Mass/SatelliteManagerComponent.h"
 #include "Mass/OrbitCoverageVisualComponent.h"
-#include "Planet/OrbitManagerComponent.h"
 
 
 APlanetActor::APlanetActor()
@@ -38,9 +37,6 @@ APlanetActor::APlanetActor()
 	// CropManagerComponent = CreateDefaultSubobject<UCropManagerComponent>(TEXT("CropManagerComponent"));
 	// CropManagerComponent->SetupAttachment(RootSceneComponent);
 	
-	// OrbitManagerComponent
-	OrbitManagerComponent = CreateDefaultSubobject<UOrbitManagerComponent>(TEXT("OrbitManagerComponent"));
-
 	// SmartObjectManagerComponent（资产在蓝图/细节面板配置 DA_FarmCell）
 	SmartObjectManagerComponent = CreateDefaultSubobject<USmartObjectManagerComponent>(TEXT("SmartObjectManagerComponent"));
 
@@ -68,7 +64,7 @@ void APlanetActor::BeginPlay()
 		SmartObjectManagerComponent->Initialize(CellManagerComponent);
 	}
 
-	// 卫星实体创建（独立于 CellManager；读 PlanetConfig 的轨道配置）
+	// 卫星实体创建（独立于 CellManager；轨道参数读卫星配置资产）
 	if (SatelliteManagerComponent)
 	{
 		SatelliteManagerComponent->Initialize(this);
@@ -104,11 +100,6 @@ void APlanetActor::PostInitializeComponents()
 	// if (FarmlandComponent && CropManagerComponent)
 	// {
 	// 	CropManagerComponent->Initialize(FarmlandComponent);
-	// }
-	// if (OrbitManagerComponent && FarmlandComponent)
-	// {
-	// 	OrbitManagerComponent->SetCellManager(FarmlandComponent);
-	// 	OrbitManagerComponent->SetPlanetConfig(PlanetConfig);
 	// }
 }
 
@@ -156,15 +147,6 @@ void APlanetActor::CallPlanetInfoChanged_Implementation()
 void APlanetActor::UpdateRotation_Implementation(float NewAngle)
 {
 	SetActorRotation(FRotator(0.0f, NewAngle, 0.0f));
-}
-
-FOrbitDefinition APlanetActor::GetOrbitData_Implementation(FName OrbitName) const
-{
-	if (OrbitManagerComponent)
-	{
-		return OrbitManagerComponent->GetOrbitData(OrbitName);
-	}
-	return IPlanetInterface::GetOrbitData_Implementation(OrbitName);
 }
 
 FTransform APlanetActor::GetCellWorldTransform_Implementation(FIntPoint CellCoord) const

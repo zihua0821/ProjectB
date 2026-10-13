@@ -3,7 +3,7 @@
 
 #include "MassExecutionContext.h"
 #include "Mass/SatelliteMassFragments.h"
-#include "Mass/SmartObjectManagerComponent.h"        // UpdateOrbitSlots（槽位相位推进）
+#include "Mass/SatelliteManagerComponent.h"        // UpdateOrbitSlots（槽位相位推进——自建槽池）
 #include "Subsystem/SimulationControlSubsystem.h"   // 选定暂停（白名单挂载）
 
 USatelliteSlotSyncProcessor::USatelliteSlotSyncProcessor()
@@ -11,7 +11,7 @@ USatelliteSlotSyncProcessor::USatelliteSlotSyncProcessor()
 {
 	bAutoRegisterWithProcessingPhases = true;
 	ExecutionFlags = static_cast<int32>(EProcessorExecutionFlags::All);
-	// 槽位推进访问 UObject 组件（SmartObjectManager）——仅游戏线程（T1/T2 修复：从 Movement 迁出的 GT 最小部分）
+	// 槽位推进访问 UObject 组件（SatelliteManager/SlotPool）——仅游戏线程（T1/T2 修复：从 Movement 迁出的 GT 最小部分）
 	bRequiresGameThreadExecution = true;
 	// 帧序：Plan → Slot → Movement → Render（先槽后星；本处理器接在规划之后、相位推进之前）
 	ExecutionOrder.ExecuteInGroup = TEXT("SatelliteSlot");
@@ -20,7 +20,7 @@ USatelliteSlotSyncProcessor::USatelliteSlotSyncProcessor()
 
 void USatelliteSlotSyncProcessor::ConfigureQueries()
 {
-	EntityQuery.AddConstSharedRequirement<FMassSatelliteSharedFragment>();   // 取 SmartObjectManager（槽位推进目标）
+	EntityQuery.AddConstSharedRequirement<FMassSatelliteSharedFragment>();   // 取 SatelliteManager（槽位推进目标）
 }
 
 void USatelliteSlotSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
@@ -40,9 +40,9 @@ void USatelliteSlotSyncProcessor::Execute(FMassEntityManager& EntityManager, FMa
 		}
 		bSlotsUpdated = true;
 		const FMassSatelliteSharedFragment& Shared = ChunkContext.GetConstSharedFragment<FMassSatelliteSharedFragment>();
-		if (Shared.SmartObjectManager)
+		if (Shared.SatelliteManager)
 		{
-			Shared.SmartObjectManager->UpdateOrbitSlots(DeltaTime);
+			Shared.SatelliteManager->UpdateOrbitSlots(DeltaTime);
 		}
 	});
 }

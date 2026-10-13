@@ -93,27 +93,17 @@ public:
 	FName CropID = NAME_None;
 };
 
-/** 除草（跨 Plot/Crop：需要双锁） */
+/** 除草（操作涉及地块与作物两方状态） */
 UCLASS(Blueprintable, EditInlineNew, DefaultToInstanced)
 class PROJECTB_API UFarmWeedingBehavior : public UFarmActionBehaviorBase
 {
 	GENERATED_BODY()
 };
 
-/** 除虫（跨 Plot/Crop：需要双锁） */
+/** 除虫（操作涉及地块与作物两方状态） */
 UCLASS(Blueprintable, EditInlineNew, DefaultToInstanced)
 class PROJECTB_API UFarmPestBehavior : public UFarmActionBehaviorBase
 {
 	GENERATED_BODY()
 };
 
-// ============================================================================
-// 轨道槽位行为（回轨槽位：无实际作业语义，仅满足保险要求的占位行为）
-// ============================================================================
-
-/** 轨道槽位占位行为（DA_OrbitSlot 的 Slot[0] 挂载本类；无参数） */
-UCLASS(Blueprintable, EditInlineNew, DefaultToInstanced)
-class PROJECTB_API UOrbitSlotBehavior : public UFarmActionBehaviorBase
-{
-	GENERATED_BODY()
-};

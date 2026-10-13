@@ -173,7 +173,7 @@ void SOrbitEditorPanel::SelectOrbit(const FName Name)
 		return;
 	}
 
-	FRuntimeOrbitData Data;
+	FOrbitDefinition Data;
 	if (!PC->GetOrbitData(Name, Data))
 	{
 		return;
@@ -212,35 +212,52 @@ void SOrbitEditorPanel::PushWorkingDataToManager()
 	}
 	if (ABasePlayerController* PC = Controller.Get())
 	{
-		PC->SetOrbitData(WorkingData);   // 广播 → 可视化节流刷新（实时预览）
+		PC->UpdateOrbitData(WorkingData);   // 广播 → 可视化直接刷新（事件驱动——无节流）
 	}
 }
 
-void SOrbitEditorPanel::CommitOrbitChanges()
+void SOrbitEditorPanel::CommitEdit()
 {
 	// 提交落定（回车/失焦/拖动节流）→ 只重建【当前选中轨道】：所见即所得（选定暂停中执行，安全）
 	if (!bHasSelection)
 	{
 		return;
 	}
+	// 先推送数据（节流可能已挡掉 onChange 的推送——最终值必达），再重建（读 Manager 数据）
+	PushWorkingDataToManager();
 	if (ABasePlayerController* PC = Controller.Get())
 	{
-		PC->CommitOrbitChanges(WorkingData.OrbitName);
+		PC->RebuildOrbitEntities(WorkingData.OrbitName);
 	}
 }
 
-void SOrbitEditorPanel::RequestThrottledRebuild()
+void SOrbitEditorPanel::RequestThrottledUpdate()
 {
-	// 拖动中"节流重建"：最少间隔 0.2s——拖动时也能看到卫星近似实时更新
-	// （松手的 OnValueCommitted 提交回调做最终落实；打字不触发值变化回调，无此路径）
-	constexpr double ThrottledRebuildIntervalSeconds = 0.2;
+	// 统一节拍器（源头单节流·最少间隔 0.2s）：到点依次 ①推送数据（可视化直接刷新）②提交重建（卫星/槽）
+	// （松手/回车的 OnValueCommitted 提交回调做最终落实——其内 CommitEdit 先推送兜底）
+	constexpr double ThrottledUpdateIntervalSeconds = 0.2;
 	const double Now = FSlateApplication::Get().GetCurrentTime();
-	if (Now - LastThrottledRebuildTime < ThrottledRebuildIntervalSeconds)
+	if (Now - LastThrottledUpdateTime < ThrottledUpdateIntervalSeconds)
 	{
 		return;
 	}
-	LastThrottledRebuildTime = Now;
-	CommitOrbitChanges();
+	LastThrottledUpdateTime = Now;
+	PushWorkingDataToManager();
+	CommitEdit();
+}
+
+void SOrbitEditorPanel::RequestThrottledPush()
+{
+	// 颜色轻节拍（0.2s）：只推送数据（可视化直接刷新）——颜色不涉实体，不触发重建
+	// （关窗 OnColorPickerWindowClosed 兜底最终色落地）
+	constexpr double ThrottledPushIntervalSeconds = 0.2;
+	const double Now = FSlateApplication::Get().GetCurrentTime();
+	if (Now - LastColorPushTime < ThrottledPushIntervalSeconds)
+	{
+		return;
+	}
+	LastColorPushTime = Now;
+	PushWorkingDataToManager();
 }
 
 FQuat SOrbitEditorPanel::MakeOrbitRotation() const
@@ -263,7 +280,6 @@ void SOrbitEditorPanel::SetCenterAxis(const int32 Axis, const float Value)
 	FVector Location = WorkingData.Transform.GetLocation();
 	Location.Component(Axis) = Value;
 	WorkingData.Transform.SetLocation(Location);
-	PushWorkingDataToManager();
 }
 
 void SOrbitEditorPanel::SetAngleXDegrees(const float Value)
@@ -274,7 +290,6 @@ void SOrbitEditorPanel::SetAngleXDegrees(const float Value)
 		return;
 	}
 	WorkingData.Transform.SetRotation(MakeOrbitRotation());
-	PushWorkingDataToManager();
 }
 
 void SOrbitEditorPanel::SetAngleYDegrees(const float Value)
@@ -285,7 +300,6 @@ void SOrbitEditorPanel::SetAngleYDegrees(const float Value)
 		return;
 	}
 	WorkingData.Transform.SetRotation(MakeOrbitRotation());
-	PushWorkingDataToManager();
 }
 
 void SOrbitEditorPanel::SetPhaseDegrees(const float Value)
@@ -296,7 +310,6 @@ void SOrbitEditorPanel::SetPhaseDegrees(const float Value)
 		return;
 	}
 	WorkingData.Transform.SetRotation(MakeOrbitRotation());
-	PushWorkingDataToManager();
 }
 
 void SOrbitEditorPanel::SetOrbitRadius(const float Value)
@@ -306,7 +319,6 @@ void SOrbitEditorPanel::SetOrbitRadius(const float Value)
 		return;
 	}
 	WorkingData.Radius = FMath::Max(1.f, Value);
-	PushWorkingDataToManager();
 }
 
 void SOrbitEditorPanel::SetServiceDistance(const float Value)
@@ -316,7 +328,6 @@ void SOrbitEditorPanel::SetServiceDistance(const float Value)
 		return;
 	}
 	WorkingData.ServiceDistance = FMath::Max(0.f, Value);
-	PushWorkingDataToManager();
 }
 
 void SOrbitEditorPanel::SetSatelliteCount(const int32 Value)
@@ -326,7 +337,6 @@ void SOrbitEditorPanel::SetSatelliteCount(const int32 Value)
 		return;
 	}
 	WorkingData.SatelliteCount = FMath::Max(0, Value);
-	PushWorkingDataToManager();
 }
 
 void SOrbitEditorPanel::SetAngularVelocity(const float Value)
@@ -336,7 +346,6 @@ void SOrbitEditorPanel::SetAngularVelocity(const float Value)
 		return;
 	}
 	WorkingData.AngularVelocity = Value;
-	PushWorkingDataToManager();
 }
 
 void SOrbitEditorPanel::SetClockwise(const bool bClockwise)
@@ -346,7 +355,6 @@ void SOrbitEditorPanel::SetClockwise(const bool bClockwise)
 		return;
 	}
 	WorkingData.bClockwise = bClockwise;
-	PushWorkingDataToManager();
 }
 
 void SOrbitEditorPanel::ApplyPickedColor(const FLinearColor NewColor, const bool bVisual)
@@ -363,7 +371,8 @@ void SOrbitEditorPanel::ApplyPickedColor(const FLinearColor NewColor, const bool
 	{
 		WorkingData.CoverageColor = NewColor;
 	}
-	PushWorkingDataToManager();
+	// 拖动色轮高频——轻节拍只推送（颜色为可视化属性：不触发实体重建）；关窗兜底 Push
+	RequestThrottledPush();
 }
 
 // ==================== 回调 ====================
@@ -377,7 +386,7 @@ FReply SOrbitEditorPanel::OnAddOrbitClicked()
 	}
 
 	// 新轨道默认参数：基于当前选中（无选中则首条）；调色板按序号自动换色
-	FRuntimeOrbitData NewData = WorkingData;
+	FOrbitDefinition NewData = WorkingData;
 	if (!bHasSelection)
 	{
 		const TArray<FName> Names = PC->GetOrbitNames();
@@ -461,6 +470,11 @@ void SOrbitEditorPanel::OpenColorPicker(const bool bVisual)
 			.OnColorCommitted_Lambda([this, bVisual](FLinearColor NewColor)
 			{
 				ApplyPickedColor(NewColor, bVisual);
+			})
+			.OnColorPickerWindowClosed_Lambda([this](const TSharedRef<SWindow>& ClosedWindow)
+			{
+				// 关窗兜底：最终色落地（节拍器可能未到点）
+				PushWorkingDataToManager();
 			})
 		];
 
@@ -546,8 +560,8 @@ TSharedRef<SWidget> SOrbitEditorPanel::BuildParamSection()
 				.MinFractionalDigits(0).MaxFractionalDigits(2)
 				.Delta(10.f)
 				.Value_Lambda([this]() { return bHasSelection ? static_cast<float>(WorkingData.Transform.GetLocation().X) : 0.f; })
-				.OnValueChanged_Lambda([this](float Value) { SetCenterAxis(0, Value); RequestThrottledRebuild(); })
-				.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetCenterAxis(0, Value); CommitOrbitChanges(); })
+				.OnValueChanged_Lambda([this](float Value) { SetCenterAxis(0, Value); RequestThrottledUpdate(); })
+				.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetCenterAxis(0, Value); CommitEdit(); })
 			]
 		]
 		+ SHorizontalBox::Slot().FillWidth(1.f).Padding(2.f, 0.f)
@@ -564,8 +578,8 @@ TSharedRef<SWidget> SOrbitEditorPanel::BuildParamSection()
 				.MinFractionalDigits(0).MaxFractionalDigits(2)
 				.Delta(10.f)
 				.Value_Lambda([this]() { return bHasSelection ? static_cast<float>(WorkingData.Transform.GetLocation().Y) : 0.f; })
-				.OnValueChanged_Lambda([this](float Value) { SetCenterAxis(1, Value); RequestThrottledRebuild(); })
-				.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetCenterAxis(1, Value); CommitOrbitChanges(); })
+				.OnValueChanged_Lambda([this](float Value) { SetCenterAxis(1, Value); RequestThrottledUpdate(); })
+				.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetCenterAxis(1, Value); CommitEdit(); })
 			]
 		]
 		+ SHorizontalBox::Slot().FillWidth(1.f).Padding(2.f, 0.f)
@@ -582,8 +596,8 @@ TSharedRef<SWidget> SOrbitEditorPanel::BuildParamSection()
 				.MinFractionalDigits(0).MaxFractionalDigits(2)
 				.Delta(10.f)
 				.Value_Lambda([this]() { return bHasSelection ? static_cast<float>(WorkingData.Transform.GetLocation().Z) : 0.f; })
-				.OnValueChanged_Lambda([this](float Value) { SetCenterAxis(2, Value); RequestThrottledRebuild(); })
-				.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetCenterAxis(2, Value); CommitOrbitChanges(); })
+				.OnValueChanged_Lambda([this](float Value) { SetCenterAxis(2, Value); RequestThrottledUpdate(); })
+				.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetCenterAxis(2, Value); CommitEdit(); })
 			]
 		];
 
@@ -591,56 +605,56 @@ TSharedRef<SWidget> SOrbitEditorPanel::BuildParamSection()
 		.MinValue(-180.f).MaxValue(180.f).MinDesiredWidth(100.f)
 		.MinFractionalDigits(0).MaxFractionalDigits(2)
 		.Value_Lambda([this]() { return EditingAngleXDeg; })
-		.OnValueChanged_Lambda([this](float Value) { SetAngleXDegrees(Value); RequestThrottledRebuild(); })
-		.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetAngleXDegrees(Value); CommitOrbitChanges(); });
+		.OnValueChanged_Lambda([this](float Value) { SetAngleXDegrees(Value); RequestThrottledUpdate(); })
+		.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetAngleXDegrees(Value); CommitEdit(); });
 
 	TSharedRef<SWidget> AngleYRow = SNew(SSpinBox<float>)
 		.MinValue(-180.f).MaxValue(180.f).MinDesiredWidth(100.f)
 		.MinFractionalDigits(0).MaxFractionalDigits(2)
 		.Value_Lambda([this]() { return EditingAngleYDeg; })
-		.OnValueChanged_Lambda([this](float Value) { SetAngleYDegrees(Value); RequestThrottledRebuild(); })
-		.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetAngleYDegrees(Value); CommitOrbitChanges(); });
+		.OnValueChanged_Lambda([this](float Value) { SetAngleYDegrees(Value); RequestThrottledUpdate(); })
+		.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetAngleYDegrees(Value); CommitEdit(); });
 
 	TSharedRef<SWidget> PhaseRow = SNew(SSpinBox<float>)
 		.MinValue(-180.f).MaxValue(180.f).MinDesiredWidth(100.f)
 		.MinFractionalDigits(0).MaxFractionalDigits(2)
 		.Value_Lambda([this]() { return EditingPhaseDeg; })
-		.OnValueChanged_Lambda([this](float Value) { SetPhaseDegrees(Value); RequestThrottledRebuild(); })
-		.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetPhaseDegrees(Value); CommitOrbitChanges(); });
+		.OnValueChanged_Lambda([this](float Value) { SetPhaseDegrees(Value); RequestThrottledUpdate(); })
+		.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetPhaseDegrees(Value); CommitEdit(); });
 
 	TSharedRef<SWidget> OrbitRadiusRow = SNew(SSpinBox<float>)
 		.MinValue(1000.f).MaxValue(100000.f).MinDesiredWidth(100.f)
 		.MinFractionalDigits(0).MaxFractionalDigits(2)
 		.Delta(100.f)
 		.Value_Lambda([this]() { return bHasSelection ? WorkingData.Radius : 0.f; })
-		.OnValueChanged_Lambda([this](float Value) { SetOrbitRadius(Value); RequestThrottledRebuild(); })
-		.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetOrbitRadius(Value); CommitOrbitChanges(); });
+		.OnValueChanged_Lambda([this](float Value) { SetOrbitRadius(Value); RequestThrottledUpdate(); })
+		.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetOrbitRadius(Value); CommitEdit(); });
 
 	TSharedRef<SWidget> ServiceDistanceRow = SNew(SSpinBox<float>)
 		.MinValue(100.f).MaxValue(5000.f).MinDesiredWidth(100.f)
 		.MinFractionalDigits(0).MaxFractionalDigits(2)
 		.Delta(10.f)
 		.Value_Lambda([this]() { return bHasSelection ? WorkingData.ServiceDistance : 0.f; })
-		.OnValueChanged_Lambda([this](float Value) { SetServiceDistance(Value); RequestThrottledRebuild(); })
-		.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetServiceDistance(Value); CommitOrbitChanges(); });
+		.OnValueChanged_Lambda([this](float Value) { SetServiceDistance(Value); RequestThrottledUpdate(); })
+		.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetServiceDistance(Value); CommitEdit(); });
 
 	TSharedRef<SWidget> SatelliteCountRow = SNew(SSpinBox<int32>)
 		.MinValue(1).MaxValue(50).MinDesiredWidth(100.f)
 		.Value_Lambda([this]() { return bHasSelection ? WorkingData.SatelliteCount : 0; })
-		.OnValueChanged_Lambda([this](int32 Value) { SetSatelliteCount(Value); RequestThrottledRebuild(); })
-		.OnValueCommitted_Lambda([this](int32 Value, ETextCommit::Type) { SetSatelliteCount(Value); CommitOrbitChanges(); });
+		.OnValueChanged_Lambda([this](int32 Value) { SetSatelliteCount(Value); RequestThrottledUpdate(); })
+		.OnValueCommitted_Lambda([this](int32 Value, ETextCommit::Type) { SetSatelliteCount(Value); CommitEdit(); });
 
 	TSharedRef<SWidget> AngularVelocityRow = SNew(SSpinBox<float>)
 		.MinValue(1.f).MaxValue(100.f).MinDesiredWidth(100.f)
 		.MinFractionalDigits(0).MaxFractionalDigits(2)
 		.Delta(1.f)
 		.Value_Lambda([this]() { return bHasSelection ? WorkingData.AngularVelocity : 0.f; })
-		.OnValueChanged_Lambda([this](float Value) { SetAngularVelocity(Value); RequestThrottledRebuild(); })
-		.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetAngularVelocity(Value); CommitOrbitChanges(); });
+		.OnValueChanged_Lambda([this](float Value) { SetAngularVelocity(Value); RequestThrottledUpdate(); })
+		.OnValueCommitted_Lambda([this](float Value, ETextCommit::Type) { SetAngularVelocity(Value); CommitEdit(); });
 
 	TSharedRef<SWidget> ClockwiseRow = SNew(SCheckBox)
 		.IsChecked_Lambda([this]() { return (bHasSelection && WorkingData.bClockwise) ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-		.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState) { SetClockwise(NewState == ECheckBoxState::Checked); CommitOrbitChanges(); })
+		.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState) { SetClockwise(NewState == ECheckBoxState::Checked); CommitEdit(); })
 		[
 			SNew(STextBlock).Text(LOCTEXT("Clockwise", "顺时针"))
 		];
@@ -682,7 +696,7 @@ TSharedRef<SWidget> SOrbitEditorPanel::MakeOrbitRow(const FName Name)
 	FLinearColor CoverageColor = FLinearColor::White;
 	if (ABasePlayerController* PC = Controller.Get())
 	{
-		FRuntimeOrbitData Data;
+		FOrbitDefinition Data;
 		if (PC->GetOrbitData(Name, Data))
 		{
 			VisualColor = Data.VisualColor;
@@ -721,6 +735,78 @@ TSharedRef<SWidget> SOrbitEditorPanel::MakeOrbitRow(const FName Name)
 					.Image(FCoreStyle::Get().GetBrush("WhiteBrush"))
 					.ColorAndOpacity(FSlateColor(CoverageColor))
 				]
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(6.f, 0.f, 0.f, 0.f).VAlign(VAlign_Center)
+			[
+				// 槽位球开关（每轨——运行时状态，随面板关闭保留）
+				SNew(SCheckBox)
+				.ToolTipText(LOCTEXT("ToggleSlotMarkers", "显示槽位球"))
+				.IsChecked_Lambda([this, Name]()
+				{
+					const ABasePlayerController* PC = Controller.Get();
+					return (PC && PC->IsOrbitSlotMarkersVisible(Name)) ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+				})
+				.OnCheckStateChanged_Lambda([this, Name](const ECheckBoxState NewState)
+				{
+					if (ABasePlayerController* PC = Controller.Get())
+					{
+						PC->SetOrbitSlotMarkersVisible(Name, NewState == ECheckBoxState::Checked);
+					}
+				})
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(2.f, 0.f, 0.f, 0.f).VAlign(VAlign_Center)
+			[
+				// 卫星轨迹路径点开关（每轨）
+				SNew(SCheckBox)
+				.ToolTipText(LOCTEXT("ToggleTrajectory", "显示卫星轨迹"))
+				.IsChecked_Lambda([this, Name]()
+				{
+					const ABasePlayerController* PC = Controller.Get();
+					return (PC && PC->IsOrbitTrajectoryVisible(Name)) ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+				})
+				.OnCheckStateChanged_Lambda([this, Name](const ECheckBoxState NewState)
+				{
+					if (ABasePlayerController* PC = Controller.Get())
+					{
+						PC->SetOrbitTrajectoryVisible(Name, NewState == ECheckBoxState::Checked);
+					}
+				})
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(2.f, 0.f, 0.f, 0.f).VAlign(VAlign_Center)
+			[
+				// 服务范围（圆柱）显示开关（每轨；缺省显示）
+				SNew(SCheckBox)
+				.ToolTipText(LOCTEXT("ToggleServiceRange", "显示服务范围（范围圆柱）"))
+				.IsChecked_Lambda([this, Name]()
+				{
+					const ABasePlayerController* PC = Controller.Get();
+					return (PC && PC->IsOrbitServiceRangeVisible(Name)) ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+				})
+				.OnCheckStateChanged_Lambda([this, Name](const ECheckBoxState NewState)
+				{
+					if (ABasePlayerController* PC = Controller.Get())
+					{
+						PC->SetOrbitServiceRangeVisible(Name, NewState == ECheckBoxState::Checked);
+					}
+				})
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(2.f, 0.f, 0.f, 0.f).VAlign(VAlign_Center)
+			[
+				// 覆盖（覆盖格）显示开关（每轨；缺省显示）
+				SNew(SCheckBox)
+				.ToolTipText(LOCTEXT("ToggleCoverage", "显示覆盖（覆盖格）"))
+				.IsChecked_Lambda([this, Name]()
+				{
+					const ABasePlayerController* PC = Controller.Get();
+					return (PC && PC->IsOrbitCoverageVisible(Name)) ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+				})
+				.OnCheckStateChanged_Lambda([this, Name](const ECheckBoxState NewState)
+				{
+					if (ABasePlayerController* PC = Controller.Get())
+					{
+						PC->SetOrbitCoverageVisible(Name, NewState == ECheckBoxState::Checked);
+					}
+				})
 			]
 		];
 }

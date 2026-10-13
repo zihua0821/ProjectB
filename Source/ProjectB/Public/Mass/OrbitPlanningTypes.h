@@ -38,6 +38,7 @@ struct FOrbitPlanParams
 	float WaitAngleLimitDeg = 45.f;                  // 阶段①排座：等待角上限（同口径充当位移上限——统一 45°）
 	float RebalanceRatio = 0.6f;                     // 阶段②触发：最小相邻间距 < 均匀间距 × 此比例
 	float MoveMinDeg = 3.f;                          // 阶段②过滤：位移下限（低于不漂）
+	float SlotLeadToleranceDeg = 2.f;                // 阶段①排座：槽位"已过"重合容差（配置化；已过 ≤ 此角视为立即可用）
 	bool bSkipRebalance = false;                     // 本轮跳过阶段②均匀化（独立节流；落座阶段①不受影响）
 };
 

@@ -1,9 +1,8 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
+// PlanetInterface.h
+// 星球接口：旋转控制 / 格心世界变换查询 / 星球信息（能源）——实现见 APlanetActor
 #pragma once
 
 #include "CoreMinimal.h"
-#include "OrbitManagerComponent.h"
 #include "Crops/CropData.h"
 #include "UObject/Interface.h"
 #include "PlanetInterface.generated.h"
@@ -48,11 +47,6 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Rotation")
 	void UpdateRotation(float NewAngle);
 	virtual void UpdateRotation_Implementation(float NewAngle);
-
-	// 获取轨道数据
-	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Orbit")
-	FOrbitDefinition GetOrbitData(FName OrbitName) const;
-	virtual FOrbitDefinition GetOrbitData_Implementation(FName OrbitName) const;
 
 	// 获取单元格世界坐标
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Cell")

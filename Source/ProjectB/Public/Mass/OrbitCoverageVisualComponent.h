@@ -1,12 +1,12 @@
 // OrbitCoverageVisualComponent.h
 // 轨道可视化组件：轨道圆环（引擎网格段拼接）+ 服务范围圆柱（引擎 Cylinder 缩放）+ 覆盖格高亮
-// 覆盖模型：平面带（点到轨道平面距离 ≤ 服务半径；判定唯一权威在 SatelliteMassFragments.h）
+// 覆盖模型：平面带（点到轨道平面距离 ≤ 服务半径；判定唯一权威在 PlanetBlueprintFunctionLibrary.h）
 // 实现说明：零程序化几何——全部使用引擎基础网格（BasicShapes）+ 实例/变换，编辑时只更新 Transform
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/SceneComponent.h"
-#include "Mass/SatelliteManagerComponent.h"   // FRuntimeOrbitData（ComputeCoveredCells 参数需完整类型）
+#include "Mass/OrbitTypes.h"                     // FOrbitDefinition（ComputeCoveredCells 参数需完整类型）
 #include "Subsystem/ISMManager.h"             // FGlobalInstanceId / Batch* 实例接口（通用 ISM 管理器）
 #include "OrbitCoverageVisualComponent.generated.h"
 
@@ -25,7 +25,8 @@ class USatelliteManagerComponent;
  * - 渲染统一经 ISMManager（单桶路径）：颜色经实例 CustomData（RGBA，索引 0-3）传递；
  *   材质取自网格资产默认材质（不再由组件配置）
  * - 覆盖格高亮：复用轮廓高亮层（FHighlightFragment；增删 diff，批量标记）——覆盖的权威表达
- * - 刷新节流：轨道数据变化置脏 → Tick 中按 RebuildInterval 重建（编辑拖动友好）
+ * - 事件驱动（无状态服务）：轨道数据变化事件到达即刷新（单轨重建 + 覆盖 diff）——【调用端负责频率】
+ *   （编辑链拖动由面板统一节拍器 0.2s 节流；谁产生压力谁处理——组件内不设 Tick/节流）
  */
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class PROJECTB_API UOrbitCoverageVisualComponent : public USceneComponent
@@ -46,28 +47,36 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "OrbitVisual")
 	void RefreshVisualization();
 
-protected:
-	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	/** 服务范围（圆柱）显示开关（编辑面板勾选——每轨；立即生效=只切圆柱可见性）；未设置 = 默认显示 */
+	void SetOrbitServiceRangeVisible(const FName OrbitName, const bool bShow);
+	bool IsOrbitServiceRangeVisible(const FName OrbitName) const;
+
+	/** 覆盖（覆盖格）显示开关（编辑面板勾选——每轨；关闭 = 该轨不计入覆盖格——立即重算 diff）；未设置 = 默认显示 */
+	void SetOrbitCoverageVisible(const FName OrbitName, const bool bShow);
+	bool IsOrbitCoverageVisible(const FName OrbitName) const;
 
 private:
-	/** 轨道数据变化回调（置脏标记，Tick 中节流重建） */
+	/** 轨道数据变化回调（事件到达即处理——单轨增量重建 + 覆盖 diff；调用端负责频率） */
 	UFUNCTION()
 	void HandleRuntimeOrbitChanged(FName OrbitName);
 
 	/** 重建单条轨道的可视化（轨道环段 + 范围圆柱变换） */
 	void RebuildOrbitVisual(const FName OrbitName);
 
-	/** 重建覆盖格高亮（多轨道并集 → 增删/颜色 diff → fragment 标记；值为该格归属轨道的覆盖色） */
+	/** 重建覆盖格高亮（多轨道并集 → 增删/颜色 diff → fragment 标记；值为该格归属轨道覆盖色） */
 	void RebuildCellHighlight(const TMap<FIntPoint, FLinearColor>& NewCoveredCells);
-
-	/** 计算覆盖格集合（多轨道并集；每格记录归属轨道覆盖色——列表序靠前者优先） */
-	void ComputeCoveredCells(const TArray<FRuntimeOrbitData>& Orbits, TMap<FIntPoint, FLinearColor>& OutCells) const;
 
 	/** 移除指定轨道的全部可视化实例（ISM 管理器回收） */
 	void RemoveOrbitVisualInstances(const FName OrbitName);
 
 	/** 移除全部轨道的可视化实例（关闭可视化/清理） */
 	void RemoveAllVisualInstances();
+
+	/** 覆盖重算 + diff（读当前开关过滤；三处调用点共用：全量刷新 / 事件 / 覆盖开关） */
+	void RefreshCoverage();
+
+	/** 收集参与覆盖计算的轨道（排除关闭“覆盖”显示的轨——供 BPFL 混合色计算） */
+	void CollectCoverageOrbits(const TArray<FOrbitDefinition>& Orbits, TArray<FOrbitDefinition>& OutOrbits) const;
 
 	// ---- 配置（蓝图/细节面板） ----
 
@@ -118,20 +127,13 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "OrbitVisual", meta = (DisplayName = "启用覆盖格高亮"))
 	bool bEnableCellHighlight = true;
 
-	/** 重建节流间隔（秒；编辑拖动时限制重建频率） */
-	UPROPERTY(EditDefaultsOnly, Category = "OrbitVisual", meta = (DisplayName = "重建节流", ClampMin = "0.016"))
-	float RebuildInterval = 0.1f;
+	// ---- 运行时（无缓存字段——按需经 GetOwner 现取；全局规范"高配缓存/低频现取"） ----
 
-	// ---- 运行时 ----
+	/** 宿主星球 Actor（GetOwner 的 Cast 封装；失败返回 nullptr） */
+	APlanetActor* GetPlanetActor() const;
 
-	UPROPERTY()
-	TWeakObjectPtr<APlanetActor> PlanetActor;
-
-	UPROPERTY()
-	TObjectPtr<UCellManagerComponent> CellManager;
-
-	UPROPERTY()
-	TObjectPtr<USatelliteManagerComponent> SatelliteManager;
+	/** 卫星管理器（经宿主现取；失败返回 nullptr） */
+	USatelliteManagerComponent* GetSatelliteManager() const;
 
 	/** 每轨道的可视化条目（环 = ISM 管理器实例组；圆柱 = 独立静态网格组件） */
 	struct FOrbitVisualEntry
@@ -150,9 +152,11 @@ private:
 	/** 当前覆盖格集合（坐标 → 归属轨道覆盖色；用于增删/颜色 diff） */
 	TMap<FIntPoint, FLinearColor> CurrentCoveredCells;
 
-	/** 待重建脏标记 + 节流计时 */
-	bool bPendingRebuild = false;
-	float TimeSinceRebuild = 0.f;
+	/** 每轨“服务范围（圆柱）”显示开关（缺省 = 显示；删轨清理；关可视化保留用户选择） */
+	TMap<FName, bool> ServiceRangeVisible;
+
+	/** 每轨“覆盖（覆盖格）”显示开关（缺省 = 显示；删轨清理；关可视化保留用户选择） */
+	TMap<FName, bool> CoverageVisible;
 
 	/** 可视化开关 */
 	bool bVisualizationEnabled = false;

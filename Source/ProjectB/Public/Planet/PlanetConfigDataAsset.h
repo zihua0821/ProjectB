@@ -1,10 +1,9 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
+// PlanetConfigDataAsset.h
+// 星球配置数据资产：星球几何参数（半径 / 经纬格数与范围）——格子与卫星链共用
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
-#include "OrbitManagerComponent.h"
 #include "PlanetConfigDataAsset.generated.h"
 
 /**
@@ -55,19 +54,5 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Planet|Grid",
 	meta = (DisplayName = "经度格点数量", ClampMin = "4", ClampMax = "1000"))
 	int32 NumLon = 36;
-
-	// ==================== 轨道配置 ====================
-
-	// 轨道定义列表（数据化：OrbitManager 启动时按此创建轨道）
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Planet|Orbit",
-	meta = (DisplayName = "轨道定义列表"))
-	TArray<FOrbitDefinition> OrbitDefinitions;
-
-	// ==================== 卫星作业配置 ====================
-
-	// 悬停高度（cm；离轨作业时悬停点距球面的固定距离）
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Planet|Work",
-	meta = (DisplayName = "悬停高度(cm)", ClampMin = "0.0"))
-	float HoverHeight = 1000.0f;
 
 };

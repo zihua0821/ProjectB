@@ -1,5 +1,5 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
+// PlanetActor.h
+// 星球 Actor：组件聚合与初始化接线（格子/卫星/智能对象/覆盖可视化）+ 星球接口实现（旋转/格心查询/星球信息）
 #pragma once
 
 #include "CoreMinimal.h"
@@ -12,7 +12,6 @@
 #include "PlanetActor.generated.h"
 
 class UCellManagerComponent;
-class UOrbitManagerComponent;
 class UCropManagerComponent;
 class UFarmlandConfigDataAsset;
 class UFarmlandComponent;
@@ -91,9 +90,6 @@ public:
 	// 更新旋转
 	virtual void UpdateRotation_Implementation(float NewAngle) override;
 
-	// 获取轨道定义
-	virtual FOrbitDefinition GetOrbitData_Implementation(FName OrbitName) const override;
-
 	// 获取单元格坐标Transform
 	virtual FTransform GetCellWorldTransform_Implementation(FIntPoint CellCoord) const override;
 
@@ -133,10 +129,6 @@ public:
 	// 农作物管理组件
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UCropManagerComponent> CropManagerComponent;
-
-	// 轨道管理组件
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	TObjectPtr<UOrbitManagerComponent> OrbitManagerComponent;
 
 	// 智能对象管理组件
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")

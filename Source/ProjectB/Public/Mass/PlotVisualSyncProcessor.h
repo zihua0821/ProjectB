@@ -1,4 +1,5 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// PlotVisualSyncProcessor.h
+// 地块视觉同步处理器：地块 CustomData（透明度/湿度/肥力）增量更新（GT 外框 + 并行收集 + GT 批提交）
 
 #pragma once
 

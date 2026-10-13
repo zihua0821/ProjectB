@@ -1,5 +1,5 @@
 // SatelliteStateTreeTasks.h
-// 卫星 StateTree 任务集：选点（评分）/ 移动等待 / 执行作业（状态机由 ST_Satellite 资产编排）
+// 卫星 StateTree 任务集：选点 / 离轨 / 待发 / 作业 / 待回 / 回轨 / 漂移 + 漂移请求评估器（状态机由 StateTree 资产编排）
 #pragma once
 
 #include "CoreMinimal.h"
@@ -10,7 +10,7 @@
 /**
  * 卫星 StateTree 任务说明（数据访问约定）：
  * - Task 通过 FMassStateTreeExecutionContext 访问卫星实体 fragment / ConstSharedFragment
- * - 状态编排（Cruise → MoveToTarget → Execute → Cruise）与转换条件在 StateTree 资产中配置
+ * - 状态编排（Cruise → Depart → Approach → Work → ReturnWait → Return → Cruise 等）与转换条件在 StateTree 资产中配置
  * - Task 只负责"一个状态内的职责"，跨任务数据经 FMassSatelliteTaskFragment 传递
  */
 
@@ -25,8 +25,8 @@ struct FSatelliteSelectTargetTaskInstanceData
 
 /**
  * 选点任务（Cruise 状态）
- * 巡航态节流选点：遍历活跃农田（轨道覆盖带几何过滤）→ 缺口评分（状态权重 + 距离）
- * → 最高分按操作所属域认领对应 Slot → 写入目标坐标/作业队列
+ * 巡航态节流选点：遍历轨道覆盖清单（覆盖带几何过滤）→ 缺口评分（状态权重 + 距离）
+ * → 最高分认领整格席位（单 Slot）→ 写入目标坐标/作业队列
  * @return Succeeded=已选目标（转往目标）；Running=无合适目标（继续巡航）
  */
 USTRUCT(meta = (DisplayName = "Satellite Select Target"))
@@ -148,13 +148,13 @@ struct FSatelliteExecuteActionTaskInstanceData
 	/** 当前项开始时间（秒） */
 	double ActionStartTime = 0.0;
 
-	/** 当前项作业时长（秒；按操作所属域取行为定义，缺省用默认值） */
+	/** 当前项作业时长（秒；按操作类查行为定义，缺省用默认值） */
 	float ActionDuration = 0.f;
 };
 
 /**
  * 悬停作业任务（Work 状态）
- * EnterState：写悬停点（位置覆盖）→ 开始首项（按操作所属域取句柄 → 读该类行为时长）
+ * EnterState：写悬停点（位置覆盖）→ 开始首项（按操作类读取行为时长）
  * Tick：倒计时 → 执行队首操作 → 出队 → 队列空：不释放认领（保留至回轨起飞统一释放）、清理并 Succeeded；
  *       否则所有权检查（失权 → Failed）后开始下一项
  */

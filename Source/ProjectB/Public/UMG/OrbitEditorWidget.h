@@ -6,7 +6,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/Widget.h"
-#include "Mass/SatelliteManagerComponent.h"   // FRuntimeOrbitData（WorkingData 值成员需完整类型）
+#include "Mass/OrbitTypes.h"                     // FOrbitDefinition（WorkingData 值成员需完整类型）
 #include "Widgets/SCompoundWidget.h"
 #include "OrbitEditorWidget.generated.h"
 
@@ -17,7 +17,7 @@ class SVerticalBox;
 /**
  * 轨道编辑面板（Slate）
  * - 轨道列表（新建/删除/选中）+ 参数编辑（实时预览）+ 应用（重建卫星）
- * - 数据经 ABasePlayerController 接口转发（SetOrbitData / CreateOrbit / CommitOrbitChanges...）
+ * - 数据经 ABasePlayerController 接口转发（UpdateOrbitData / CreateOrbit / RebuildOrbitEntities...）
  * - 颜色：调色板快选 + SColorPicker 微调（独立数值模式，非编辑器属性系统）
  */
 class SOrbitEditorPanel : public SCompoundWidget
@@ -48,10 +48,13 @@ private:
 	FName SelectedOrbitName = NAME_None;
 
 	/** 编辑副本（控件真值源；变更实时推送到运行时数据） */
-	FRuntimeOrbitData WorkingData;
+	FOrbitDefinition WorkingData;
 
-	/** 拖动节流重建：最近一次重建时刻（Slate 秒） */
-	double LastThrottledRebuildTime = 0.0;
+	/** 拖动统一节拍：最近一次更新时刻（Slate 秒） */
+	double LastThrottledUpdateTime = 0.0;
+
+	/** 颜色轻节拍：最近一次推送时刻（Slate 秒） */
+	double LastColorPushTime = 0.0;
 
 	/** 是否有有效选中 */
 	bool bHasSelection = false;
@@ -77,14 +80,19 @@ private:
 	/** 选中轨道（加载数据 + 反算倾角方位） */
 	void SelectOrbit(const FName Name);
 
-	/** 推送编辑副本到运行时数据（实时预览） */
+	/** 推送编辑副本到运行时数据（纯推送——频率由节拍器保证；事件驱动可视化直接刷新） */
 	void PushWorkingDataToManager();
 
-	/** 提交落定（参数控件的回车/失焦）：触发实时重建——所见即所得 */
-	void CommitOrbitChanges();
+	/** 提交编辑（参数控件的回车/失焦落定）：先推送数据（最终值必达）再重建该轨实体——所见即所得 */
+	void CommitEdit();
 
-	/** 拖动中"节流重建"请求（值变化时调用；最多 0.2s 一次；松手/回车的提交回调做最终落实） */
-	void RequestThrottledRebuild();
+	/** 拖动中统一节拍（值变化时调用；最多 0.2s 一次）：到点依次推送数据 + 提交重建
+	 *  （源头单节流——下游组件/管理器零节流）；松手/回车的提交回调做最终落实 */
+	void RequestThrottledUpdate();
+
+	/** 颜色轻节拍（拖动色轮高频；最多 0.2s 一次）：只推送数据（可视化直接刷新）
+	 *  ——颜色为可视化属性，不触发实体重建（防卫星相位/作业被重置） */
+	void RequestThrottledPush();
 
 	/** 由三自由度（绕 X / 绕 Y / 相位）构造轨道朝向四元数（与 SelectOrbit 反算互逆） */
 	FQuat MakeOrbitRotation() const;

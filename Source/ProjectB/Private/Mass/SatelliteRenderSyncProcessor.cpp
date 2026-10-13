@@ -3,7 +3,7 @@
 
 #include "MassExecutionContext.h"
 #include "Mass/SatelliteMassFragments.h"
-#include "Mass/SmartObjectManagerComponent.h"                // 槽位世界位置（卫星轨道锚点）
+#include "Mass/SatelliteManagerComponent.h"          // 槽位世界位置（卫星轨道锚点——自建槽池）
 #include "Planet/PlanetBlueprintFunctionLibrary.h"   // ComputeOrbitWorldPosition（轨道几何，Planet 域）
 #include "Subsystem/ISMManager.h"
 
@@ -31,14 +31,14 @@ void USatelliteRenderSyncProcessor::ConfigureQueries()
 void USatelliteRenderSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// ---- ① GT 预快照：槽世界位置（唯一 UObject 访问段——收敛至并行区之外）----
-	// 槽池数据属 SmartObjectManager（UObject）——不能进并行区；先串行取快照
+	// 槽池数据属 SatelliteManager（UObject）——不能进并行区；先串行取快照
 	// （按实体句柄索引，无遍历顺序依赖），并行段只读纯数据
 	TMap<FMassEntityHandle, FVector> SlotWorldSnapshot;
 	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&SlotWorldSnapshot](FMassExecutionContext& ChunkContext)
 	{
 		const TConstArrayView<FMassSatelliteOrbitFragment> OrbitFragments = ChunkContext.GetFragmentView<FMassSatelliteOrbitFragment>();
 		const FMassSatelliteSharedFragment& Shared = ChunkContext.GetConstSharedFragment<FMassSatelliteSharedFragment>();
-		if (!Shared.SmartObjectManager)
+		if (!Shared.SatelliteManager)
 		{
 			return;
 		}
@@ -51,7 +51,7 @@ void USatelliteRenderSyncProcessor::Execute(FMassEntityManager& EntityManager, F
 				continue;   // 覆盖位置优先，无需槽查询
 			}
 			FVector SlotWorld;
-			if (Shared.SmartObjectManager->GetOrbitSlotWorldPositionByClaim(Orbit.OrbitName, Orbit.SlotClaimHandle, SlotWorld))
+			if (Shared.SatelliteManager->GetOrbitSlotWorldPositionByClaim(Orbit.SlotClaimHandle, SlotWorld))
 			{
 				SlotWorldSnapshot.Add(ChunkContext.GetEntity(Index), SlotWorld);
 			}

@@ -4,7 +4,7 @@
 
 #include "Farm/CellManagerComponent.h"
 #include "Mass/CellMassFragments.h"            // FHighlightFragment（覆盖格高亮）
-#include "Mass/SatelliteManagerComponent.h"    // FRuntimeOrbitData / USatelliteManagerComponent
+#include "Mass/SatelliteManagerComponent.h"    // FOrbitDefinition / USatelliteManagerComponent
 #include "Mass/SatelliteMassFragments.h"       // 卫星 fragment/shared
 #include "Planet/PlanetBlueprintFunctionLibrary.h"   // IsPointInOrbitCoverage（判定唯一权威）
 #include "MassEntityManager.h"
@@ -30,30 +30,36 @@ namespace
 
 UOrbitCoverageVisualComponent::UOrbitCoverageVisualComponent()
 {
-	PrimaryComponentTick.bCanEverTick = true;
-	PrimaryComponentTick.bStartWithTickEnabled = false;
-	SetComponentTickEnabled(false);
+	// 无 Tick——事件驱动（无状态服务；调用端负责频率——见类头注释）
+	PrimaryComponentTick.bCanEverTick = false;
 
 	// 网格资源（RingSegmentMesh / CylinderMeshAsset）在细节面板配置；材质取自网格资产默认材质
 }
 
 void UOrbitCoverageVisualComponent::Initialize(APlanetActor* InPlanetActor)
 {
-	PlanetActor = InPlanetActor;
-	if (!PlanetActor.IsValid())
+	if (InPlanetActor == nullptr)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[OrbitVisual] Initialize failed: PlanetActor is null"));
 		return;
 	}
 
-	CellManager = PlanetActor->GetCellManagerComponent();
-	SatelliteManager = PlanetActor->GetSatelliteManagerComponent();
-
-	// 订阅轨道数据变化（编辑拖动 → 置脏 → Tick 节流重建）
-	if (SatelliteManager)
+	// 订阅轨道数据变化（编辑拖动 → 事件到达即重建——调用端统一节拍器节流）
+	if (USatelliteManagerComponent* SatelliteManager = InPlanetActor->GetSatelliteManagerComponent())
 	{
 		SatelliteManager->OnRuntimeOrbitChanged.AddDynamic(this, &UOrbitCoverageVisualComponent::HandleRuntimeOrbitChanged);
 	}
+}
+
+APlanetActor* UOrbitCoverageVisualComponent::GetPlanetActor() const
+{
+	return Cast<APlanetActor>(GetOwner());
+}
+
+USatelliteManagerComponent* UOrbitCoverageVisualComponent::GetSatelliteManager() const
+{
+	const APlanetActor* Planet = GetPlanetActor();
+	return Planet ? Planet->GetSatelliteManagerComponent() : nullptr;
 }
 
 void UOrbitCoverageVisualComponent::SetVisualizationEnabled(const bool bEnabled)
@@ -63,7 +69,6 @@ void UOrbitCoverageVisualComponent::SetVisualizationEnabled(const bool bEnabled)
 		return;
 	}
 	bVisualizationEnabled = bEnabled;
-	SetComponentTickEnabled(bEnabled);
 
 	if (bEnabled)
 	{
@@ -91,18 +96,19 @@ void UOrbitCoverageVisualComponent::SetVisualizationEnabled(const bool bEnabled)
 
 void UOrbitCoverageVisualComponent::RefreshVisualization()
 {
-	if (!SatelliteManager)
+	const USatelliteManagerComponent* Manager = GetSatelliteManager();
+	if (Manager == nullptr)
 	{
 		return;
 	}
 
-	const TArray<FRuntimeOrbitData>& Orbits = SatelliteManager->GetRuntimeOrbits();
+	const TArray<FOrbitDefinition>& Orbits = Manager->GetRuntimeOrbits();
 
 	// 1. 清理已不存在轨道的实例（ISM 管理器回收 + 条目移除）
 	{
 		TSet<FName> CurrentNames;
 		CurrentNames.Reserve(Orbits.Num());
-		for (const FRuntimeOrbitData& Orbit : Orbits)
+		for (const FOrbitDefinition& Orbit : Orbits)
 		{
 			CurrentNames.Add(Orbit.OrbitName);
 		}
@@ -112,29 +118,55 @@ void UOrbitCoverageVisualComponent::RefreshVisualization()
 			if (!CurrentNames.Contains(It.Key()))
 			{
 				RemoveOrbitVisualInstances(It.Key());
+				ServiceRangeVisible.Remove(It.Key());
+				CoverageVisible.Remove(It.Key());
 				It.RemoveCurrent();
 			}
 		}
 	}
 
 	// 2. 逐轨道重建（环段 + 圆柱；段数不变时仅做 ById 增量更新）
-	for (const FRuntimeOrbitData& Orbit : Orbits)
+	for (const FOrbitDefinition& Orbit : Orbits)
 	{
 		RebuildOrbitVisual(Orbit.OrbitName);
 	}
 
-	// 3. 覆盖格高亮（多轨道并集 → 增删/颜色 diff）——覆盖的权威表达
-	if (bEnableCellHighlight)
-	{
-		TMap<FIntPoint, FLinearColor> NewCoveredCells;
-		ComputeCoveredCells(Orbits, NewCoveredCells);
-		RebuildCellHighlight(NewCoveredCells);
-	}
+	// 3. 覆盖格高亮（多轨道并集 → 增删/颜色 diff）——覆盖的权威表达（见 RefreshCoverage）
+	RefreshCoverage();
 }
 
 void UOrbitCoverageVisualComponent::HandleRuntimeOrbitChanged(FName OrbitName)
 {
-	bPendingRebuild = true;
+	if (!bVisualizationEnabled)
+	{
+		return;
+	}
+
+	const USatelliteManagerComponent* Manager = GetSatelliteManager();
+	if (Manager == nullptr)
+	{
+		return;
+	}
+	const TArray<FOrbitDefinition>& Orbits = Manager->GetRuntimeOrbits();
+
+	// 事件驱动按需重建（无节流——调用端负责频率）：
+	// 存在于运行时轨道列表 → 单轨重建（环 + 圆柱）；不存在（被删）→ 回收实例 + 移除条目
+	const bool bExists = Orbits.ContainsByPredicate(
+		[OrbitName](const FOrbitDefinition& Data) { return Data.OrbitName == OrbitName; });
+	if (bExists)
+	{
+		RebuildOrbitVisual(OrbitName);
+	}
+	else
+	{
+		RemoveOrbitVisualInstances(OrbitName);
+		OrbitVisuals.Remove(OrbitName);
+		ServiceRangeVisible.Remove(OrbitName);
+		CoverageVisible.Remove(OrbitName);
+	}
+
+	// 覆盖刷新：全量重算 + diff（写最小由 diff 保证；见 RefreshCoverage）
+	RefreshCoverage();
 }
 
 void UOrbitCoverageVisualComponent::RemoveOrbitVisualInstances(const FName OrbitName)
@@ -177,13 +209,15 @@ void UOrbitCoverageVisualComponent::RemoveAllVisualInstances()
 
 void UOrbitCoverageVisualComponent::RebuildOrbitVisual(const FName OrbitName)
 {
-	if (!SatelliteManager || !PlanetActor.IsValid() || !PlanetActor->PlanetConfig)
+	const APlanetActor* Planet = GetPlanetActor();
+	const USatelliteManagerComponent* Manager = GetSatelliteManager();
+	if (Planet == nullptr || Manager == nullptr || Planet->PlanetConfig == nullptr)
 	{
 		return;
 	}
 
-	const FRuntimeOrbitData* Orbit = SatelliteManager->GetRuntimeOrbits().FindByPredicate(
-		[OrbitName](const FRuntimeOrbitData& Data) { return Data.OrbitName == OrbitName; });
+	const FOrbitDefinition* Orbit = Manager->GetRuntimeOrbits().FindByPredicate(
+		[OrbitName](const FOrbitDefinition& Data) { return Data.OrbitName == OrbitName; });
 	if (Orbit == nullptr)
 	{
 		return;
@@ -198,7 +232,7 @@ void UOrbitCoverageVisualComponent::RebuildOrbitVisual(const FName OrbitName)
 
 	const FVector OrbitCenter = Orbit->Transform.GetLocation();
 	const FVector OrbitNormal = Orbit->Transform.GetRotation().GetAxisZ();
-	const float PlanetRadius = PlanetActor->PlanetConfig->Radius;
+	const float PlanetRadius = Planet->PlanetConfig->Radius;
 
 	// 单桶路径（可视化对象实例少；与格子的球面分桶隔离）
 	FISMComponentParams ISMParams;
@@ -321,7 +355,7 @@ void UOrbitCoverageVisualComponent::RebuildOrbitVisual(const FName OrbitName)
 			Entry.CylinderMesh->SetRelativeLocation(CylinderTransform.GetLocation());
 			Entry.CylinderMesh->SetRelativeRotation(CylinderTransform.GetRotation());
 			Entry.CylinderMesh->SetRelativeScale3D(CylinderTransform.GetScale3D());
-			Entry.CylinderMesh->SetVisibility(bVisualizationEnabled);
+			Entry.CylinderMesh->SetVisibility(bVisualizationEnabled && IsOrbitServiceRangeVisible(OrbitName));
 
 			// 每轨道独立材质实例（按轨道色——圆柱可分色）
 			if (Entry.CylinderMID == nullptr)
@@ -343,70 +377,11 @@ void UOrbitCoverageVisualComponent::RebuildOrbitVisual(const FName OrbitName)
 	}
 }
 
-void UOrbitCoverageVisualComponent::ComputeCoveredCells(const TArray<FRuntimeOrbitData>& Orbits, TMap<FIntPoint, FLinearColor>& OutCells) const
-{
-	OutCells.Reset();
-
-	if (!CellManager || !PlanetActor.IsValid() || !PlanetActor->PlanetConfig || Orbits.Num() == 0)
-	{
-		return;
-	}
-
-	const UPlanetConfigDataAsset& Config = *PlanetActor->PlanetConfig;
-
-	// 预提取轨道几何（避免内层循环重复计算）
-	struct FOrbitGeo
-	{
-		FVector Center;
-		FVector Normal;
-		float ServiceDistance = 0.f;
-		FLinearColor CoverageColor;
-	};
-	TArray<FOrbitGeo> OrbitGeos;
-	OrbitGeos.Reserve(Orbits.Num());
-	for (const FRuntimeOrbitData& Orbit : Orbits)
-	{
-		FOrbitGeo Geo;
-		Geo.Center = Orbit.Transform.GetLocation();
-		Geo.Normal = Orbit.Transform.GetRotation().GetAxisZ();
-		Geo.ServiceDistance = Orbit.ServiceDistance;
-		Geo.CoverageColor = Orbit.CoverageColor;
-		OrbitGeos.Add(Geo);
-	}
-
-	// 单次遍历全部格子：任一轨道覆盖即计入（与选点判定同源：平面带）
-	// 多轨道覆盖冲突：列表序靠前者优先（颜色归属前者）
-	const int32 NumLatCells = Config.NumLat - 1;
-	const int32 NumLon = Config.NumLon;
-	for (int32 LatIdx = 0; LatIdx < NumLatCells; ++LatIdx)
-	{
-		for (int32 LonIdx = 0; LonIdx < NumLon; ++LonIdx)
-		{
-			const FIntPoint Coord(LatIdx, LonIdx);
-
-			FTransform CellTransform;
-			if (!CellManager->GetCellWorldTransform(Coord, CellTransform))
-			{
-				continue;
-			}
-			// 与选点一致：格子中心投影回球面点后判定
-			const FVector CellCenter = CellTransform.GetLocation().GetSafeNormal() * Config.Radius;
-
-			for (const FOrbitGeo& Geo : OrbitGeos)
-			{
-				if (UPlanetBlueprintFunctionLibrary::IsPointInOrbitCoverage(CellCenter, Geo.Center, Geo.Normal, Geo.ServiceDistance))
-				{
-					OutCells.Add(Coord, Geo.CoverageColor);
-					break;
-				}
-			}
-		}
-	}
-}
-
 void UOrbitCoverageVisualComponent::RebuildCellHighlight(const TMap<FIntPoint, FLinearColor>& NewCoveredCells)
 {
-	if (!CellManager)
+	const APlanetActor* Planet = GetPlanetActor();
+	UCellManagerComponent* CellManager = Planet ? Planet->GetCellManagerComponent() : nullptr;
+	if (CellManager == nullptr)
 	{
 		return;
 	}
@@ -457,20 +432,74 @@ void UOrbitCoverageVisualComponent::RebuildCellHighlight(const TMap<FIntPoint, F
 	UE_LOG(LogTemp, Verbose, TEXT("[OrbitVisual] Covered cells: %d"), CurrentCoveredCells.Num());
 }
 
-void UOrbitCoverageVisualComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UOrbitCoverageVisualComponent::RefreshCoverage()
 {
-	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-	if (!bVisualizationEnabled || !bPendingRebuild)
+	if (!bEnableCellHighlight)
+	{
+		return;
+	}
+	const USatelliteManagerComponent* Manager = GetSatelliteManager();
+	const APlanetActor* Planet = GetPlanetActor();
+	if (Manager == nullptr || Planet == nullptr || Planet->PlanetConfig == nullptr)
 	{
 		return;
 	}
 
-	TimeSinceRebuild += DeltaTime;
-	if (TimeSinceRebuild >= RebuildInterval)
+	// 覆盖重算（按“覆盖”开关过滤）→ diff（写最小由 diff 保证）
+	TArray<FOrbitDefinition> CoverageOrbits;
+	CollectCoverageOrbits(Manager->GetRuntimeOrbits(), CoverageOrbits);
+	TMap<FIntPoint, FLinearColor> NewCoveredCells;
+	UPlanetBlueprintFunctionLibrary::ComputeCoveredCells(
+		Planet->GetCellManagerComponent(), *Planet->PlanetConfig, CoverageOrbits, NewCoveredCells);
+	RebuildCellHighlight(NewCoveredCells);
+}
+
+void UOrbitCoverageVisualComponent::SetOrbitServiceRangeVisible(const FName OrbitName, const bool bShow)
+{
+	ServiceRangeVisible.FindOrAdd(OrbitName) = bShow;
+
+	// 立即生效（轻路径）：只切圆柱可见性（不重算覆盖）
+	if (FOrbitVisualEntry* Entry = OrbitVisuals.Find(OrbitName))
 	{
-		TimeSinceRebuild = 0.f;
-		bPendingRebuild = false;
-		RefreshVisualization();
+		if (Entry->CylinderMesh)
+		{
+			Entry->CylinderMesh->SetVisibility(bVisualizationEnabled && bShow);
+		}
+	}
+}
+
+bool UOrbitCoverageVisualComponent::IsOrbitServiceRangeVisible(const FName OrbitName) const
+{
+	const bool* bFound = ServiceRangeVisible.Find(OrbitName);
+	return bFound ? *bFound : true;   // 缺省显示
+}
+
+void UOrbitCoverageVisualComponent::SetOrbitCoverageVisible(const FName OrbitName, const bool bShow)
+{
+	CoverageVisible.FindOrAdd(OrbitName) = bShow;
+
+	// 立即生效：覆盖重算 diff（仅可视化开启时——与事件处理同门卫）
+	if (bVisualizationEnabled)
+	{
+		RefreshCoverage();
+	}
+}
+
+bool UOrbitCoverageVisualComponent::IsOrbitCoverageVisible(const FName OrbitName) const
+{
+	const bool* bFound = CoverageVisible.Find(OrbitName);
+	return bFound ? *bFound : true;   // 缺省显示
+}
+
+void UOrbitCoverageVisualComponent::CollectCoverageOrbits(const TArray<FOrbitDefinition>& Orbits, TArray<FOrbitDefinition>& OutOrbits) const
+{
+	OutOrbits.Reset();
+	OutOrbits.Reserve(Orbits.Num());
+	for (const FOrbitDefinition& Orbit : Orbits)
+	{
+		if (IsOrbitCoverageVisible(Orbit.OrbitName))
+		{
+			OutOrbits.Add(Orbit);
+		}
 	}
 }

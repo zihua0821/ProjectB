@@ -1,5 +1,5 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
+// CellVisualSyncProcessor.cpp
+// 实现：格子高亮轮廓的视觉同步（类头与线程说明见 .h）
 
 #include "Mass/CellVisualSyncProcessor.h"
 
@@ -37,17 +37,36 @@ void UCellVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 	const UFarmlandConfigDataAsset* FarmlandConfig = ConfigSub->GetFarmlandConfig();
 	const UPlanetConfigDataAsset* PlanetConfig = ConfigSub->GetPlanetConfig();
 
-	// 收集待移除的实例
+	// 轮廓计算参数快照（GT 预提取——worker 段不访问 UObject；样板纪律）
+	FCellOutlineCalcParams CalcParams;
+	if (PlanetConfig)
+	{
+		CalcParams.Radius = PlanetConfig->Radius;
+		CalcParams.MinLat = PlanetConfig->MinLat;
+		CalcParams.MaxLat = PlanetConfig->MaxLat;
+		CalcParams.NumLat = PlanetConfig->NumLat;
+		CalcParams.NumLon = PlanetConfig->NumLon;
+	}
+	if (FarmlandConfig && FarmlandConfig->OutlineMesh)
+	{
+		CalcParams.OutlineExtent = FarmlandConfig->OutlineMesh->GetBounds().BoxExtent;
+		CalcParams.OutlineOffsetZ = FarmlandConfig->OutlineOffsetZ;
+	}
+
+	// ---- 并行收集：chunk 在 worker 并行处理，局部缓冲锁合并（样板：CropVisualSyncProcessor）----
+	// （GT 强制保留：批量提交段需游戏线程调 ISMManager；收集段由 ParallelForEach 分发 worker）
 	TArray<FGlobalInstanceId> PendingRemoves;
-
-	// 收集待添加的实例
 	TArray<TPair<TArray<float>, TPair<FTransform, FMassEntityHandle>>> PendingAdds;
-
-	// 收集待批量更新的实例
 	TArray<TPair<FGlobalInstanceId, TArray<float>>> PendingUpdates;
+	FCriticalSection CollectLock;
 	
-	EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& InContext)
+	EntityQuery.ParallelForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& InContext)
     {
+        // 当前 chunk 的局部收集缓冲（worker 并行——无竞争）
+        TArray<FGlobalInstanceId> LocalRemoves;
+        TArray<TPair<TArray<float>, TPair<FTransform, FMassEntityHandle>>> LocalAdds;
+        TArray<TPair<FGlobalInstanceId, TArray<float>>> LocalUpdates;
+
         const TConstArrayView<FCellStaticFragment> StaticList = InContext.GetFragmentView<FCellStaticFragment>();
         const TArrayView<FHighlightFragment> StateList = InContext.GetMutableFragmentView<FHighlightFragment>();
         const int32 NumEntities = InContext.GetNumEntities();
@@ -64,7 +83,7 @@ void UCellVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
         	{
         		// 计算CellCustomData
 		        TArray<FVector> LocalVertexPositions = CalculateCellVertexPositions(
-			        PlanetConfig,
+			        CalcParams,
 			        CellStaticFragment.Coords.X,
 			        CellStaticFragment.Coords.Y
 		        );
@@ -93,17 +112,17 @@ void UCellVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 		        {
 					if (HighlightFragment.bHighlighted)
 					{
-						PendingAdds.Emplace(
+						LocalAdds.Emplace(
 							CellCustomData,
 							TPair<FTransform, FMassEntityHandle>(
-								CalculateOutlineInstanceTransform(PlanetConfig, FarmlandConfig, CellStaticFragment.Transform, CellStaticFragment.Coords.X),
+								CalculateOutlineInstanceTransform(CalcParams, CellStaticFragment.Transform, CellStaticFragment.Coords.X),
 								InContext.GetEntity(i)
 								)
 							);
 					}
 					else
 					{
-						PendingRemoves.Add(HighlightFragment.InstanceId);
+						LocalRemoves.Add(HighlightFragment.InstanceId);
 					}
 		        	HighlightFragment.LastHighlightedState = HighlightFragment.bHighlighted;
 		        	HighlightFragment.LastHighlightColor = HighlightFragment.HighlightColor;
@@ -112,10 +131,19 @@ void UCellVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
         		// 颜色变化时
 		        else if (bColorChanged)
 		        {
-		        	PendingUpdates.Emplace(HighlightFragment.InstanceId, CellCustomData);
+		        	LocalUpdates.Emplace(HighlightFragment.InstanceId, CellCustomData);
 		        	HighlightFragment.LastHighlightColor = HighlightFragment.HighlightColor;
 		        }
         	}
+        }
+
+        // 本 chunk 局部缓冲合并到共享缓冲（锁保护跨 worker 并发写）
+        if (LocalRemoves.Num() > 0 || LocalAdds.Num() > 0 || LocalUpdates.Num() > 0)
+        {
+        	FScopeLock Lock(&CollectLock);
+        	PendingRemoves.Append(MoveTemp(LocalRemoves));
+        	PendingAdds.Append(MoveTemp(LocalAdds));
+        	PendingUpdates.Append(MoveTemp(LocalUpdates));
         }
     });
 
@@ -184,14 +212,14 @@ void UCellVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 	}
 }
 
-TArray<FVector> UCellVisualSyncProcessor::CalculateCellVertexPositions(const UPlanetConfigDataAsset* PlanetConfig, const int32 LatIdx, const int32 LonIdx)
+TArray<FVector> UCellVisualSyncProcessor::CalculateCellVertexPositions(const FCellOutlineCalcParams& Params, const int32 LatIdx, const int32 LonIdx)
 {
 	// 自动计算经纬度步长
-	const float LatStep = (PlanetConfig->MaxLat - PlanetConfig->MinLat) / (PlanetConfig->NumLat - 1);
-	const float LonStep = 360.0f / PlanetConfig->NumLon;
+	const float LatStep = (Params.MaxLat - Params.MinLat) / (Params.NumLat - 1);
+	const float LonStep = 360.0f / Params.NumLon;
 	
 	// 当前地块的经纬度边界
-	const float MinLat = PlanetConfig->MinLat + LatIdx * LatStep;
+	const float MinLat = Params.MinLat + LatIdx * LatStep;
 	const float MaxLat = MinLat + LatStep;
 	const float MinLon = LonIdx * LonStep;
 	const float MaxLon = MinLon + LonStep;
@@ -213,33 +241,32 @@ TArray<FVector> UCellVisualSyncProcessor::CalculateCellVertexPositions(const UPl
 		const float SinLon = FMath::Sin(LonRad);
 
 		VertexPositions[i] = FVector(
-			PlanetConfig->Radius * CosLat * CosLon,
-			PlanetConfig->Radius * CosLat * SinLon,
-			PlanetConfig->Radius * SinLat
+			Params.Radius * CosLat * CosLon,
+			Params.Radius * CosLat * SinLon,
+			Params.Radius * SinLat
 		);
 	}
 	return TArray<FVector>(VertexPositions, 4);
 }
 
-FTransform UCellVisualSyncProcessor::CalculateOutlineInstanceTransform(const UPlanetConfigDataAsset* PlanetConfig,
-	const UFarmlandConfigDataAsset* FarmlandConfig, const FTransform& CellTransform, const float LatIdx)
+FTransform UCellVisualSyncProcessor::CalculateOutlineInstanceTransform(const FCellOutlineCalcParams& Params,
+	const FTransform& CellTransform, const float LatIdx)
 {
 	// 计算轮廓缩放
-	const float LatStep = (PlanetConfig->MaxLat - PlanetConfig->MinLat) / (PlanetConfig->NumLat - 1);
-	const float LonStep = 360.0f / PlanetConfig->NumLon;
+	const float LatStep = (Params.MaxLat - Params.MinLat) / (Params.NumLat - 1);
+	const float LonStep = 360.0f / Params.NumLon;
 	const float LatStepRad = FMath::DegreesToRadians(LatStep);
 	const float LonStepRad = FMath::DegreesToRadians(LonStep);
-	const float CurrentLatDeg = PlanetConfig->MinLat + (LatIdx + 0.5f) * LatStep;
+	const float CurrentLatDeg = Params.MinLat + (LatIdx + 0.5f) * LatStep;
 	// 当前地块中心纬度（用于计算经度方向宽度）
 	const float CurrentLatRad = FMath::DegreesToRadians(CurrentLatDeg);
 
 	// 计算单元格实际尺寸（球面几何）
-	const float CellHeight = PlanetConfig->Radius * LatStepRad; // 南北向
-	const float CellWidth = PlanetConfig->Radius * FMath::Cos(CurrentLatRad) * LonStepRad; // 东西向
+	const float CellHeight = Params.Radius * LatStepRad; // 南北向
+	const float CellWidth = Params.Radius * FMath::Cos(CurrentLatRad) * LonStepRad; // 东西向
 
-	// 获取轮廓网格体自身尺寸
-	const FBoxSphereBounds OutlineBounds = FarmlandConfig->OutlineMesh->GetBounds();
-	const FVector OutlineExtent = OutlineBounds.BoxExtent;
+	// 获取轮廓网格体自身尺寸（GT 段预提取快照）
+	const FVector OutlineExtent = Params.OutlineExtent;
 
 	// 计算轮廓缩放（匹配单元格实际大小）
 	const float OutlineScaleX = CellWidth / (OutlineExtent.X * 2.f);
@@ -248,7 +275,7 @@ FTransform UCellVisualSyncProcessor::CalculateOutlineInstanceTransform(const UPl
 
 	// 创建轮廓实例（使用独立计算的缩放）
 	FTransform OutlineInstanceTransform = CellTransform;
-	OutlineInstanceTransform.AddToTranslation(FVector(0.f, 0.f, FarmlandConfig->OutlineOffsetZ));
+	OutlineInstanceTransform.AddToTranslation(FVector(0.f, 0.f, Params.OutlineOffsetZ));
 	OutlineInstanceTransform.SetScale3D(FVector(OutlineScaleX, OutlineScaleY, OutlineScaleZ));
 	
 	return OutlineInstanceTransform;

@@ -1,4 +1,5 @@
-// UCropVisualSyncProcessor.cpp
+// CropVisualSyncProcessor.cpp
+// 实现：作物阶段视觉同步（阶段变化 → Mesh 增删切换——GT 外框 + 并行收集 + GT 批提交）
 #include "Mass/CropVisualSyncProcessor.h"
 #include "MassEntityManager.h"
 #include "MassExecutionContext.h"

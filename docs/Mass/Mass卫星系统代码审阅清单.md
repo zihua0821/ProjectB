@@ -193,28 +193,28 @@ SatelliteAIController / AutomationSatellite / OrbitMovementComponent / FarmProto
 > （3 处赋值；Approach 的 OverrideLocation 初值改用局部变量 DisplayLocation）/ SatelliteManagerComponent.h -7 行。
 > 执行后行号以新基线为准（前导发现条目中的行号仍为 071993a 口径）。
 
-### 5.3 B 组：注释失准（待统一修订阶段处理）
+### 5.3 B 组：注释失准（✅ 已统一修订——10-13，处置见 §七 池）
 
 | # | 位置 | 问题 | 现状 vs 注释 | 裁决 |
 |---|---|---|---|---|
-| B1 | `OrbitManagerComponent.h` L3-4 | 文件引用错误 | 注释称覆盖判定在"SatelliteMassFragments.h 的 IsPointInOrbitCoverage"；实际在 `PlanetBlueprintFunctionLibrary.h` | 待裁决 |
-| B2 | `OrbitManagerComponent.h` L27-29 | 模型描述过时 | 注释称"覆盖区 = 管（中线=轨道圆、半高=服务距离）∩ 球面"；现行实现为平面带（BPFL L68-74 注释已写明"与轨道半径无关"）——同项目两处注释互相矛盾 | 待裁决 |
-| B3 | `SatelliteMassFragments.h` L164-166 | 生命周期描述过时 | ClaimHandle 注释称"选点任务写入，执行任务释放"；实际释放点在回轨起飞瞬间（Return::EnterState，唯一释放点）；字段本体已降级为"兼容字段/首项句柄"（Tasks.cpp L484） | 待裁决 |
-| B4 | `SatelliteMassFragments.h` L80-82 | 措辞含糊 | OverrideLocation 注释"世界/星球本地坐标"——两词并列无法区分；实际=世界坐标（星球中心=原点约定下二者等价，建议统一表述） | 待裁决 |
-| B5 | `SatelliteMassFragments.h` L188 | 旧术语残留 | PhaseStartLocation 注释"（Fly 开始瞬间的位置）"——"Fly"是旧任务名；现行任务名为 Approach/Return/Drift | 待裁决 |
-| B6 | `SatelliteManagerComponent.h` L244-246 | 误导性配置注释 | "贝塞尔控制点比例 k（d = k × 起终点距离）"描述已废除的算法（与 A9 联动处理） | 待裁决 |
-| B7 | `PlanetBPFL.h` L56 | 历史引用 | "与旧 UOrbitMovementComponent::CalculateOrbitPosition 同源"——旧组件已从代码库删除；建议改为明确的历史注记措辞 | 待裁决 |
-| B8 | `PlanetBPFL.cpp` L47-57 | 注释编号断档 | "// 1." 之后跳到 "// 3."，缺 "// 2."——顺手修 | 待裁决 |
-| B9 | `PlanetBPFL.h` L1 | 模板残留 | "Fill out your copyright notice..."——UE 模板注释；且全文件无职责头（其余核心文件均有"// 文件名 // 职责"格式） | 待裁决 |
+| B1 | `OrbitManagerComponent.h` L3-4 | 文件引用错误 | 注释称覆盖判定在"SatelliteMassFragments.h 的 IsPointInOrbitCoverage"；实际在 `PlanetBlueprintFunctionLibrary.h` | ✅ 已处置（10-13·Phase 3） |
+| B2 | `OrbitManagerComponent.h` L27-29 | 模型描述过时 | 注释称"覆盖区 = 管（中线=轨道圆、半高=服务距离）∩ 球面"；现行实现为平面带（BPFL L68-74 注释已写明"与轨道半径无关"）——同项目两处注释互相矛盾 | ✅ 已处置（10-13·Phase 3） |
+| B3 | `SatelliteMassFragments.h` L164-166 | 生命周期描述过时 | ClaimHandle 注释称"选点任务写入，执行任务释放"；实际释放点在回轨起飞瞬间（Return::EnterState，唯一释放点）；字段本体已降级为"兼容字段/首项句柄"（Tasks.cpp L484） | ✅ 已处置（10-13·Phase 3） |
+| B4 | `SatelliteMassFragments.h` L80-82 | 措辞含糊 | OverrideLocation 注释"世界/星球本地坐标"——两词并列无法区分；实际=世界坐标（星球中心=原点约定下二者等价，建议统一表述） | ✅ 已处置（10-13·Phase 3） |
+| B5 | `SatelliteMassFragments.h` L188 | 旧术语残留 | PhaseStartLocation 注释"（Fly 开始瞬间的位置）"——"Fly"是旧任务名；现行任务名为 Approach/Return/Drift | ✅ 已处置（10-13·Phase 3） |
+| B6 | `SatelliteManagerComponent.h` L244-246 | 误导性配置注释 | "贝塞尔控制点比例 k（d = k × 起终点距离）"描述已废除的算法（与 A9 联动处理） | ✅ 已处置（10-13·Phase 3） |
+| B7 | `PlanetBPFL.h` L56 | 历史引用 | "与旧 UOrbitMovementComponent::CalculateOrbitPosition 同源"——旧组件已从代码库删除；建议改为明确的历史注记措辞 | ✅ 已处置（10-13·Phase 3） |
+| B8 | `PlanetBPFL.cpp` L47-57 | 注释编号断档 | "// 1." 之后跳到 "// 3."，缺 "// 2."——顺手修 | ✅ 已处置（10-13·Phase 3） |
+| B9 | `PlanetBPFL.h` L1 | 模板残留 | "Fill out your copyright notice..."——UE 模板注释；且全文件无职责头（其余核心文件均有"// 文件名 // 职责"格式） | ✅ 已处置（10-13·Phase 3） |
 
-### 5.4 C 组：逻辑/边界观察（均低风险，请判断）
+### 5.4 C 组：逻辑/边界观察（✅ 已处置——10-13）
 
 | # | 位置 | 观察 | 评估 | 裁决 |
 |---|---|---|---|---|
-| C1 | `PlanetBPFL.cpp` L13 | 失败时 `return 0.0f`——0° 是合法角度，调用者无法区分"失败"与"恰好在 0°" | 当前无调用方；若按 A6 删除则自然消解 | 待裁决 |
-| C2 | `PlanetBPFL.cpp` L29 | `Projected.Normalize()` 对"目标在轨道轴向（投影≈零）"退化情形无显式处理，atan2(0,0)=0 静默返回 0° | 实际格子不可能恰在轨道轴上，影响可忽略；如需严谨可加零向量早退 | 待裁决 |
-| C3 | `PlanetBPFL.cpp` L23 | `GetRotation().GetUpVector()` 与全套其余代码的 `GetAxisZ()` 风格不一 | UE 中二者等价（FQuat::GetUpVector()=GetAxisZ()），纯风格统一候选 | 待裁决 |
-| C4 | `ComputeOrbitHoverPoint`（L102-107）+ 选点 L307 + CellManager L228 | 几何计算一致地把格子投影到理想球面 R（忽略 CellOffsetZ 抬升）：选点 L307 重新乘回 PlanetRadius、悬停点函数取方向乘 R+H——CellOffsetZ 仅影响渲染不影响作业几何 | 系统自洽、无 bug；但此"约定"未在任何注释声明。**需确认**：① 资产 CellOffsetZ 实际值；② 设计意图是否"几何以理想球面为准"。确认后注释补充声明 | 待裁决 |
+| C1 | `PlanetBPFL.cpp` L13 | 失败时 `return 0.0f`——0° 是合法角度，调用者无法区分"失败"与"恰好在 0°" | 当前无调用方；若按 A6 删除则自然消解 | ✅ 已处置（10-13·Phase 3） |
+| C2 | `PlanetBPFL.cpp` L29 | `Projected.Normalize()` 对"目标在轨道轴向（投影≈零）"退化情形无显式处理，atan2(0,0)=0 静默返回 0° | 实际格子不可能恰在轨道轴上，影响可忽略；如需严谨可加零向量早退 | ✅ 已处置（10-13·Phase 3） |
+| C3 | `PlanetBPFL.cpp` L23 | `GetRotation().GetUpVector()` 与全套其余代码的 `GetAxisZ()` 风格不一 | UE 中二者等价（FQuat::GetUpVector()=GetAxisZ()），纯风格统一候选 | ✅ 已处置（10-13·Phase 3） |
+| C4 | `ComputeOrbitHoverPoint`（L102-107）+ 选点 L307 + CellManager L228 | 几何计算一致地把格子投影到理想球面 R（忽略 CellOffsetZ 抬升）：选点 L307 重新乘回 PlanetRadius、悬停点函数取方向乘 R+H——CellOffsetZ 仅影响渲染不影响作业几何 | 系统自洽、无 bug；但此"约定"未在任何注释声明。**需确认**：① 资产 CellOffsetZ 实际值；② 设计意图是否"几何以理想球面为准"。确认后注释补充声明 | ✅ 已处置（10-13·Phase 3） |
 
 ### 5.5 D 组：已核对无误项（无需处理，供抽查）
 
@@ -255,11 +255,18 @@ SatelliteAIController / AutomationSatellite / OrbitMovementComponent / FarmProto
 
 | 来源 | 条目 | 目标文件 | 修订动作 | 状态 |
 |---|---|---|---|---|
-| 前导发现 | B1~B9（待裁决） | 见 5.3 | 逐条改 | 待裁决 |
+| 前导发现 | B1~B9 | 见 5.3 | 逐条改 | **✅ 已处置（10-13·Phase 3）**：B1/B2/B3/B5/B6 随 N 系列重构自然消解（文件删除/注释重写）；B4/B7/B8/B9 实修 |
 | 前导发现 | A1~A9（已裁决·清理） | 见 5.2 | 删除（含头文件声明与相关注释） | **已执行（10-02）** |
-| P4 报告 | O1 深化（10-03）：UpdateBounds 调用点注释材料——引擎机制（写 API 不内联/帧末补偿四条件/重建分支吞补偿）+ 双重失效（误剔除/过度提交）+ Nanite 例外 | ISMManager.cpp L267-274/L309-316 | 修订阶段按材料补注释 | 待实施 |
-| P5 报告 | B10（候选）：OrbitCoverageVisualComponent.h 头注释引用文件错（写"SatelliteMassFragments.h"，应为 PlanetBlueprintFunctionLibrary.h） | 见 P5 报告 ⑥ | 逐条改 | 待核对 |
-| 模块审阅 M-2 | S3 发现（10-06）：注释“引擎智能对象实例位置不开放运行时修改”**不准确**——UE5.5 有公开 API `USmartObjectSubsystem::UpdateSmartObjectTransform`（SmartObjectSubsystem.h L487-493；槽位位置=实例 Transform×槽偏移，GetSlotLocation 可读）。现状自算缓存的真实理由 = 消费模式（高频/批量/跨线程）+ 线程约束（worker 读）+ 成本（每帧空间分区更新），而非“引擎不支持” | SmartObjectManagerComponent.cpp L457-459 | 修订为准确表述（含未来触发点：引擎级空间查询需求时评估“单实例多槽+每帧同步”轻量版） | 待实施 |
+| P4 报告 | O1 深化（10-03）：UpdateBounds 调用点注释材料——引擎机制（写 API 不内联/帧末补偿四条件/重建分支吞补偿）+ 双重失效（误剔除/过度提交）+ Nanite 例外 | ISMManager.cpp | 修订阶段按材料补注释 | **✅ 已实施（10-13·Phase 3）**：两处（单桶/分桶路径）扩写——双重失效/Nanite 例外/引擎机制齐备 |
+| P5 报告 | B10（候选）：OrbitCoverageVisualComponent.h 头注释引用文件错（写"SatelliteMassFragments.h"，应为 PlanetBlueprintFunctionLibrary.h） | OrbitCoverageVisualComponent.h | 逐条改 | **✅ 已修正（10-13·Phase 3）** |
+| 模块审阅 M-2 | S3 发现（10-06）：注释“引擎智能对象实例位置不开放运行时修改”**不准确**——UE5.5 有公开 API `USmartObjectSubsystem::UpdateSmartObjectTransform`（SmartObjectSubsystem.h L487-493；槽位位置=实例 Transform×槽偏移，GetSlotLocation 可读）。现状自算缓存的真实理由 = 消费模式（高频/批量/跨线程）+ 线程约束（worker 读）+ 成本（每帧空间分区更新），而非“引擎不支持” | SmartObjectManagerComponent.cpp | 修订为准确表述 | **✅ 已消解（随 N10 重构）**：原注释随单 Slot 重写消失；“消费模式+线程约束+成本”选型理由已体现于 N8 槽池注释 |
+
+> **Phase 3 实施记录（10-13）**：范围 = 9 月中~9 月底变更涉及的全部文件（16 提交 git 清单筛后 40 文件），
+> 按模块五批"挨个修订注释"（规范：7 种格式 + @param 不省略 + 禁模糊代号直述设计 + 文件头统一）。本池全部条目闭环：
+> B/C 组——B1/B2/B3/B5/B6/C1 自然消解，B4/B7/B8/B9/B10/C2/C3/C4 实修（含 C3 GetUpVector→GetAxisZ 等价替换、C4 理想球面约定声明）；
+> O1/D3/S3——O1 扩写、D3 死注释块删除、S3 随 N10 消解；另清 9 处批次号（N8~N11）+ 6 处"方案 A/方案 B/乙案"代号 + 1 处不可见字符（Manager.cpp）；
+> 收尾终扫：全库 N8~N11 零残留；观察项：10 处老文件 UTF-8 BOM（范围外·编译正常，未来可统一）。
+> 【✅ 编译+运行验证通过（10-13）】含收尾裁定（UOrbitSlotBehavior 删除 / PlotOffsetZ 改名）+ 分组抖动缺头修复（ProjectBGameInstance.cpp）。明细见交接文档 §11.8。
 
 ---
 
@@ -285,6 +292,7 @@ SatelliteAIController / AutomationSatellite / OrbitMovementComponent / FarmProto
 | P7 核对 | 10-03 | **E1~E8 全部无异议**（8/0/0/0）；观察项认同 | 防撞修正议题（实测仍有碰撞→盲区复核成立）→ 入 N6；群体决策流程图需求登记（交接文档待办） |
 | P8 核对 | 10-03 | **E1~E7 全部无异议**（7/0/0/0）；观察项认同 | **全八阶段核对收官**（P1~P8 与 HEAD 合龙）——审阅核对阶段完成；下一步=攒批代码修改执行 |
 | D1~D4 归属 | 10-03 | **归属建议全部认可**（D1→N2 / D2→N1 / D3→注释修订 / D4→未来项） | 锁定；随对应议题/阶段执行 |
+| 收尾综述 | 10-13 | **Phase 3 注释统一修订完成+验证通过**（40 文件五批——B/C 组/O1/D3/S3 全闭环） | 收尾裁定 2 项（UOrbitSlotBehavior 删除 / PlotOffsetZ 改名）+ 分组抖动缺头修复；明细见 §七 池 |
 
 ### 讨论记录：信号驱动范式（P2 追问，10-02；10-02 二次修订——ue-codegraph 重检）
 
@@ -592,10 +600,13 @@ VFS 刷新延迟，刚编辑文件需用 findstr/Grep 兜底）；ByClaim 版 7 
 
 ---
 
-## 十一、评估议题登记（10-02~03 · 已裁决/待审议）
+## 十一、后续改进议题（N 系列）登记（10-02 起 · 已裁决/待审议）
 
-> 【10-09 状态】模块审阅已全部收官（M-8 完成；M-4 挂起待 N8/N10）——N 系列排期窗口已开启：
-> N8（自建槽池）/ N9（配置重整·草案待审 D1~D7）/ N10（单 Slot 化·草案待审 D1~D6）与 N2 等结构级重构同批（注释修订前）。
+> 【系列定名（10-09）】本登记集正式命名：**“后续改进议题（N 系列）”**——审阅/讨论衍生的改进·重构·专题·流程总集。
+> 【10-11 状态】重构批次四份方案全部定稿（N8 全裁·D6=方案 A / N9 ✅ / N10 ✅ / N11 ✅）——【排期锁定·方案 A】：
+> ① 重构批次：N10 → N8 → N9 → N11（每项：实施→编译→浅测门禁→修补；计划 AI ~9~12 轮 + 测试 ~3.5 窗）
+> ② 批次总验证（门禁）：三链全回归 + R1/R2 耐力复跑　③ 注释统一修订　④ N3 EQS 回归
+> ⑤ 后续独立项：N6+N7 → N1（按发起）；N2 条件触发。详细节拍见交接文档 §11.7。
 
 ### N1 操作体系统一化：Action 资产化 + 重播重设计 + AI/玩家路径统一【用户发起·待评估】
 
@@ -644,6 +655,9 @@ VFS 刷新延迟，刚编辑文件需用 findstr/Grep 兜底）；ByClaim 版 7 
 （与 D1 修复绑定；排期可与 N1/EQS 一并梳理）
 【口径补充（10-07，M-3 S4）】用户：“意图委托这些现在就看看，之后尽量迁移 Mass Observer”——
 维持已立项；方向明确为“尽量迁移 Mass Observer 形态”（观察者驱动实体列表，替代意图委托+双源 TSet）。
+【口径重述（10-09·受 N10 深化裁定影响）】原“活跃农田集合”已被 N10 删除（选点改全格直扫）——本议题
+  重定义为【选点扫描性能优化·条件触发】：仅当全格扫描实测不达标时，引入 Observer 实体列表缓存；
+  D1（FCropTag）随之降级为可选配套。
 ```
 
 ### N3 EQS 回归排期【已定】
@@ -783,6 +797,14 @@ GetOrbitSlotPhase/Count（规划承重）与认领/ByClaim 面不动。入 M4（
 启动方式：用户发起；【排期裁定（10-06）：实施放最后 = 模块审阅全部收口后、注释统一修订之前】
 （理由：穿透性重构会撕碎后续模块导读/断点地图；与 N2 等结构级重构统一批次；必须在注释修订前完成）
 ——方案草案可任意时点先行（纯文档）；详细讨论见 M-2 导读 S4。
+【执行方案已审定（10-11·D1~D6 全部）：docs/Mass/轨道槽位去智能对象化_执行方案.md
+  （独立 UObject 类与 Manager 同文件 / FName 句柄 / 全池代际++ / 删 Priority / 槽位球 CVar；
+  D6 = 方案 A：N10 → N8 → N9 → N11 锁定）；穿透面已核实：~25 调用点 / 7 文件】
+【✅ 已实施（10-11·一次性单批·7 文件）】——待编译验证；
+  交付形态：Step 1+2+3 合流（同 N10 纪律）；关键细化：每轨单代际（简化等价）/句柄自带 OrbitName
+  查询去首参/CVar ProjectB.OrbitSlotDebugDraw（项目首个）/销毁归还格子与轨道两路分离；
+  零残留：OrbitSlotDefinition 与 SmartObjectManager 轨道接口全库 0 匹配；
+  细节见执行方案文末“附：实施记录”（含用户验证清单）。
 ```
 
 ### N9 卫星配置体系重整（配置资产化 + FOrbitDefinition 统一）【用户发起·确认做（10-07）】
@@ -812,6 +834,15 @@ GetOrbitSlotPhase/Count（规划承重）与认领/ByClaim 面不动。入 M4（
   方案时评估与 N7 的先后依赖）。
 【范围并入（10-09 用户裁定）】M-8 收口批⑧“编辑语义合并”（删 SetOrbitData；CommitOrbitChanges 带数据
   一体化；Slate 回调适配）——与 FRuntimeOrbitData→FOrbitDefinition 改名同文件（PC/Widget）同批实施。
+【D 决策点裁定（10-09）】D1~D7 全部按推荐——GlobalConfigSubsystem 挂接 / Public/Mass/OrbitTypes.h
+  （唯一 FOrbitDefinition）/ 经组件 getter 读配置 / 删组件旧字段 / HoverHeight 迁入卫星配置 /
+  删 IPlanetInterface::GetOrbitData；方案即可实施（窗口：N 系列重构批次）。
+【✅ 编译+运行验证通过（10-12·一次性全批·16 改 + 2 新 + 2 删）】；
+  实施记录见执行方案文末（关键细化：StateTreeAsset 补入资产 / 任务 getter×8 兜底 / enum class 直用）；
+  零残留：FRuntimeOrbitData/OrbitManagerComponent/OrbitDefinitions 全库 0 匹配；reindex 21 文件。
+【⑧编辑语义合并——已裁定取消（10-12）】目标已由 N11 统一节拍器达成（数据推送与实体重建同拍编排）；
+  两接口语义分工明确化（10-12 命名改造）：数据层 UpdateOrbitData / 实体层 RebuildOrbitEntities（广义实体——
+  槽位/卫星/渲染实例/选点缓存，非 Mass Entity 单指）；合并会丢失"只改数据不重建实体"能力（颜色场景实证）。
 ```
 
 ### N10 格子智能对象单 Slot 化（双 Slot 合并）【用户发起·确认做（10-08）】
@@ -825,7 +856,16 @@ GetOrbitSlotPhase/Count（规划承重）与认领/ByClaim 面不动。入 M4（
 附带发现（待处置）：活跃农田集合口径与注释不符（只监听 Slot 1——“已耕地广播”被忽略；
 集合实际=“播种过格子”，注释写“已耕地+已播种”）——N10 D1 处置。
 方案草案已出（10-08）：docs/Mass/格子智能对象单Slot化_执行方案.md（草案 v0.1——含 D1~D6 待审）。
-排期：与 N8/N9 同批；【D5 推荐：N10 先于 N8（同文件顺序解耦）——待审确认】。
+【裁定（10-09）】D1 = 启用语义耕地状态 + 卫星任务侧判断播种状态（CollectCellGaps 前置门卫——
+无作物不产生缺口；现状核实：水肥/杂草缺口不依赖作物——空耕地会被选中的真隐患）；
+D2~D6 全部按推荐（D5：N10 先于 N8）；方案即可实施。
+【深化裁定（10-09）】Slot 恒启用——启停机制整体删除（Set/Is SlotEnabled + 委托 + 四广播 + 活跃集合
+ActiveFarmlandCoords）；选点改全格扫描（GetAllCoords）；PC 恒走认领；卫星全部按 fragment 状态判断。
+排期：与 N8/N9/N11 同批；【D5 已确认（10-09）：N10 先于 N8（同文件顺序解耦）】。
+【✅ 已实施·编译验证通过（10-11）——一次性单批交付·9 文件净删 ~280 行 + 认领判定内联微调】；
+  交付形态说明：Step 1~3 物理绑定（接口删参 → 调用点报错）——"每步可编译"不成立，单批交付；
+  命名裁定（D3②）：ShouldClaimForEditMode / GetCellSlotHandle；零残留核验全库 0 匹配；
+  细节见执行方案《格子智能对象单Slot化_执行方案.md》文末"附：实施记录"。
 关联：M-4 审阅【挂起——待 N8/N10 落定后重写导读再审】。
 ```
 
@@ -841,5 +881,16 @@ GetOrbitSlotPhase/Count（规划承重）与认领/ByClaim 面不动。入 M4（
   不存在→移除条目+实例）；整体移除 Tick 机制（三件套/TickComponent/bPendingRebuild/TimeSinceRebuild/RebuildInterval）
   + 约定注释“调用端负责频率”（S6 随之消除）
 排期：与 N8/N9/N10 同批（模块审阅已收官；注释修订前）。
+执行方案已审定（10-10）：docs/Mass/轨道覆盖可视化重构_执行方案.md（四项均裁 + 设计细节实施时定；
+  批内顺序：N9 先行——FOrbitDefinition 更名波及 BPFL 签名）。
+【补充项（10-12 性能体检查出·用户裁定暂缓）】ComputeCoveredCells 全量遍历（54000 格×逐轨判定——实际资产规模）
+  ——编辑拖动每次重算 ~10ms（0.1s 节流）；不影响游玩、编辑可感；
+  本卡实施时【评估顺带优化】：可复用 Manager 覆盖缓存（OrbitCoverageIndices/CellScanTable——与选点治本同源），
+  遍历清单合并 ~0.05ms；可与④ BPFL+混合色一并实施。
+【✅ 编译+运行验证通过（10-12·全批·3+1 文件）】；
+  实施细化（§九统一节拍器）：面板 RequestThrottledRebuild→RequestThrottledUpdate（到点 ①Push ②Commit）；
+  SetX×10/ApplyPickedColor 删内部 Push（推送职责上移）；颜色路径挂节拍器+关窗兜底；
+  补充项裁定：维持全量版迁 BPFL+混合色（节流配套后事件 ≤5Hz≈现状一半——缓存优化不做）；
+  零残留：bPendingRebuild/RebuildInterval/TimeSinceRebuild 等全库 0 匹配；reindex 6 文件；实施记录见执行方案文末。
 关联：M8 导读附一（S3~S8 讨论）+ 收口批清单；延后项（槽位球归拢 N8 后 / 通道分离更后 / 单轨显示增强）不在本卡。
 ```

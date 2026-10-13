@@ -1,4 +1,5 @@
 // PlotVisualSyncProcessor.cpp
+// 实现：地块视觉同步（透明度/湿度/肥力 CustomData 增量——GT 外框 + 并行收集 + GT 批提交）
 #include "Mass/PlotVisualSyncProcessor.h"
 #include "MassEntityManager.h"
 #include "MassExecutionContext.h"
@@ -14,9 +15,6 @@ UPlotVisualSyncProcessor::UPlotVisualSyncProcessor()
     bAutoRegisterWithProcessingPhases = true;
     // 渲染同步：Execute 内直接调用 ISMManager 写接口，必须在游戏线程运行（线程约定见 ISMManager 技术文档 §3.3）
     bRequiresGameThreadExecution = true;
-
-    // 如果需要确保在某个处理器之后执行，可以使用 ExecuteAfter
-    // ExecutionOrder.ExecuteAfter.Add(TEXT("PlotInitProcessor"));
 }
 
 void UPlotVisualSyncProcessor::ConfigureQueries()

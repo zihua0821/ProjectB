@@ -1,4 +1,6 @@
-﻿#pragma once
+// CropVisualSyncProcessor.h
+// 作物视觉同步处理器：作物阶段 Mesh 切换（GT 外框 + 并行收集 + GT 批提交）
+#pragma once
 
 #include "CoreMinimal.h"
 #include "MassProcessor.h"

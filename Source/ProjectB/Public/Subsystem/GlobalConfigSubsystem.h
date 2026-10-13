@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -7,6 +7,7 @@
 
 class UPlanetConfigDataAsset;
 class UFarmlandConfigDataAsset;
+class USatelliteConfigDataAsset;
 /**
  * 
  */
@@ -27,6 +28,12 @@ public:
 	/** 获取农场配置 */
 	UFarmlandConfigDataAsset* GetFarmlandConfig() const { return FarmlandConfig; }
 
+	/** 设置卫星配置（由 USatelliteManagerComponent 初始化时注入） */
+	void SetSatelliteConfig(USatelliteConfigDataAsset* InConfig) { SatelliteConfig = InConfig; }
+
+	/** 获取卫星配置（可能为空——消费方自行兜底默认） */
+	USatelliteConfigDataAsset* GetSatelliteConfig() const { return SatelliteConfig; }
+
 	/** 获取星球配置 */
 	UPlanetConfigDataAsset* GetPlanetConfig() const { return PlanetConfig; }
 
@@ -45,6 +52,9 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UPlanetConfigDataAsset> PlanetConfig;
+
+	UPROPERTY()
+	TObjectPtr<USatelliteConfigDataAsset> SatelliteConfig;
 
 	UPROPERTY()
 	TObjectPtr<UDataTable> CropDataTable;

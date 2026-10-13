@@ -1,5 +1,5 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
+// BasePlayerController.cpp
+// 实现：玩家控制器（编辑模式接线与轨道编辑桥；职责见 .h）
 
 #include "ProjectB/Public/Player/BasePlayerController.h"
 
@@ -10,6 +10,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Mass/CellMassFragments.h"           // FHighlightFragment（悬停高亮同步清除）
 #include "Mass/OrbitCoverageVisualComponent.h"
+#include "Mass/SatelliteManagerComponent.h"
 #include "Mass/SmartObjectManagerComponent.h"
 #include "MassEntitySubsystem.h"
 #include "Planet/PlanetActor.h"
@@ -75,25 +76,18 @@ void ABasePlayerController::ExecuteEditModeWithClaim(APlanetActor* Planet, const
 	}
 
 	USmartObjectManagerComponent* SmartObjectManager = Planet->GetSmartObjectManagerComponent();
-	const int32 SlotIndex = USmartObjectManagerComponent::GetSlotIndexForEditMode(EditMode);
 
-	// 无智能对象系统 / 操作不适用认领（None/Count）：直接执行
-	if (!SmartObjectManager || SlotIndex < 0)
+	// 无智能对象系统 / 不适用认领的操作（None/Count）：直接执行
+	// （拦截 None 防误抢占：空点击若恒走认领会抢占卫星服务中的格子——卫星被判失权、任务误取消）
+	if (!SmartObjectManager || EditMode == EEditMode::None || EditMode == EEditMode::Count)
 	{
 		Planet->HandleLeftMouseClicked(EditMode, CellCoords);
 		return;
 	}
 
-	// 目标 Slot 未启用（对象不存在，如未耕地/未播种）：无竞争对象，直接执行创建类操作
-	if (!SmartObjectManager->IsSlotEnabled(CellCoords, SlotIndex))
-	{
-		Planet->HandleLeftMouseClicked(EditMode, CellCoords);
-		return;
-	}
-
-	// 已启用：走认领协议（与卫星共享认领/占用；High 优先级可抢占卫星的 Claimed）
+	// 恒走认领协议（与卫星共享整格席位；High 优先级可抢占卫星的 Claimed）
 	const FSmartObjectClaimHandle ClaimHandle = SmartObjectManager->TryClaimSlot(
-		CellCoords, SlotIndex, ESmartObjectClaimPriority::High);
+		CellCoords, ESmartObjectClaimPriority::High);
 	if (!ClaimHandle.IsValid())
 	{
 		// 被同级或更高优先级占用：拒绝本次操作
@@ -302,7 +296,7 @@ TArray<FName> ABasePlayerController::GetOrbitNames() const
 	TArray<FName> Names;
 	if (const USatelliteManagerComponent* Manager = ResolveSatelliteManager())
 	{
-		for (const FRuntimeOrbitData& Orbit : Manager->GetRuntimeOrbits())
+		for (const FOrbitDefinition& Orbit : Manager->GetRuntimeOrbits())
 		{
 			Names.Add(Orbit.OrbitName);
 		}
@@ -310,11 +304,11 @@ TArray<FName> ABasePlayerController::GetOrbitNames() const
 	return Names;
 }
 
-bool ABasePlayerController::GetOrbitData(const FName OrbitName, FRuntimeOrbitData& OutData) const
+bool ABasePlayerController::GetOrbitData(const FName OrbitName, FOrbitDefinition& OutData) const
 {
 	if (const USatelliteManagerComponent* Manager = ResolveSatelliteManager())
 	{
-		for (const FRuntimeOrbitData& Orbit : Manager->GetRuntimeOrbits())
+		for (const FOrbitDefinition& Orbit : Manager->GetRuntimeOrbits())
 		{
 			if (Orbit.OrbitName == OrbitName)
 			{
@@ -326,7 +320,7 @@ bool ABasePlayerController::GetOrbitData(const FName OrbitName, FRuntimeOrbitDat
 	return false;
 }
 
-bool ABasePlayerController::SetOrbitData(const FRuntimeOrbitData& NewData) const
+bool ABasePlayerController::UpdateOrbitData(const FOrbitDefinition& NewData) const
 {
 	if (USatelliteManagerComponent* Manager = ResolveSatelliteManager())
 	{
@@ -335,7 +329,7 @@ bool ABasePlayerController::SetOrbitData(const FRuntimeOrbitData& NewData) const
 	return false;
 }
 
-bool ABasePlayerController::CreateOrbit(const FRuntimeOrbitData& NewData) const
+bool ABasePlayerController::CreateOrbit(const FOrbitDefinition& NewData) const
 {
 	if (USatelliteManagerComponent* Manager = ResolveSatelliteManager())
 	{
@@ -352,12 +346,93 @@ void ABasePlayerController::DeleteOrbit(const FName OrbitName) const
 	}
 }
 
-void ABasePlayerController::CommitOrbitChanges(const FName OrbitName) const
+void ABasePlayerController::RebuildOrbitEntities(const FName OrbitName) const
 {
 	if (USatelliteManagerComponent* Manager = ResolveSatelliteManager())
 	{
-		Manager->ApplyOrbitChangesForOrbit(OrbitName);   // 只重建该轨（选定暂停中执行，安全）
+		Manager->RebuildOrbitEntities(OrbitName);   // 只重建该轨实体（选定暂停中执行，安全）
 	}
+}
+
+void ABasePlayerController::SetOrbitSlotMarkersVisible(const FName OrbitName, const bool bVisible) const
+{
+	if (USatelliteManagerComponent* Manager = ResolveSatelliteManager())
+	{
+		Manager->SetOrbitSlotMarkersVisible(OrbitName, bVisible);
+	}
+}
+
+bool ABasePlayerController::IsOrbitSlotMarkersVisible(const FName OrbitName) const
+{
+	if (const USatelliteManagerComponent* Manager = ResolveSatelliteManager())
+	{
+		return Manager->IsOrbitSlotMarkersVisible(OrbitName);
+	}
+	return false;
+}
+
+void ABasePlayerController::SetOrbitTrajectoryVisible(const FName OrbitName, const bool bVisible) const
+{
+	if (USatelliteManagerComponent* Manager = ResolveSatelliteManager())
+	{
+		Manager->SetOrbitTrajectoryVisible(OrbitName, bVisible);
+	}
+}
+
+bool ABasePlayerController::IsOrbitTrajectoryVisible(const FName OrbitName) const
+{
+	if (const USatelliteManagerComponent* Manager = ResolveSatelliteManager())
+	{
+		return Manager->IsOrbitTrajectoryVisible(OrbitName);
+	}
+	return false;
+}
+
+void ABasePlayerController::SetOrbitServiceRangeVisible(const FName OrbitName, const bool bVisible) const
+{
+	// 可视化组件经星球 Actor 解析（服务范围/覆盖属可视化——非 Manager 职责）
+	if (APlanetActor* Planet = Cast<APlanetActor>(UGameplayStatics::GetActorOfClass(GetWorld(), APlanetActor::StaticClass())))
+	{
+		if (UOrbitCoverageVisualComponent* Visual = Planet->GetOrbitCoverageVisualComponent())
+		{
+			Visual->SetOrbitServiceRangeVisible(OrbitName, bVisible);
+		}
+	}
+}
+
+bool ABasePlayerController::IsOrbitServiceRangeVisible(const FName OrbitName) const
+{
+	if (const APlanetActor* Planet = Cast<APlanetActor>(UGameplayStatics::GetActorOfClass(GetWorld(), APlanetActor::StaticClass())))
+	{
+		if (const UOrbitCoverageVisualComponent* Visual = Planet->GetOrbitCoverageVisualComponent())
+		{
+			return Visual->IsOrbitServiceRangeVisible(OrbitName);
+		}
+	}
+	return true;   // 缺省显示（与组件一致）
+}
+
+void ABasePlayerController::SetOrbitCoverageVisible(const FName OrbitName, const bool bVisible) const
+{
+	if (APlanetActor* Planet = Cast<APlanetActor>(UGameplayStatics::GetActorOfClass(GetWorld(), APlanetActor::StaticClass())))
+	{
+		if (UOrbitCoverageVisualComponent* Visual = Planet->GetOrbitCoverageVisualComponent())
+		{
+			Visual->SetOrbitCoverageVisible(OrbitName, bVisible);
+		}
+	}
+}
+
+bool ABasePlayerController::IsOrbitCoverageVisible(const FName OrbitName) const
+{
+	if (const APlanetActor* Planet = Cast<APlanetActor>(UGameplayStatics::GetActorOfClass(GetWorld(), APlanetActor::StaticClass())))
+	{
+		if (const UOrbitCoverageVisualComponent* Visual = Planet->GetOrbitCoverageVisualComponent())
+		{
+			return Visual->IsOrbitCoverageVisible(OrbitName);
+		}
+	}
+	return true;   // 缺省显示（与组件一致）
 }
 
 // 切换到下一个编辑模式（正向循环）

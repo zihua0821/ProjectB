@@ -786,7 +786,7 @@ void UFarmlandComponent::CreateDefaultLandCells()
 
         	// 计算地块朝向：让 Z 轴指向球心外（径向）
         	const FVector NormalDirection = PlotLocation.GetSafeNormal();
-        	PlotLocation += NormalDirection * FarmlandConfig->CellOffsetZ;
+        	PlotLocation += NormalDirection * FarmlandConfig->PlotOffsetZ;
         	const FRotator PlotRotation = FRotationMatrix::MakeFromZ(NormalDirection).Rotator();
 
         	// 计算纬度缩放系数（基于纬度角，Z 轴是上下方向）

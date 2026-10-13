@@ -1,5 +1,5 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
+// FarmlandConfigDataAsset.h
+// 农场配置数据资产：格子网格与地块网格偏移 / 地块状态 / 作物与杂草虫害 / 生长与售价 / 操作与扩散 / 选中与调试
 #pragma once
 
 #include "CoreMinimal.h"
@@ -84,10 +84,10 @@ public:
 			  meta = (DisplayName = "边缘最小缩放系数", ClampMin = "0.1", ClampMax = "1.0", UIMin = "0.1", UIMax = "1.0"))
 	float MinLatitudeScale = 0.5f;
 	
-	// z偏移
+	// 地块网格 z 偏移（装饰性——不影响作业几何：选点/悬停/覆盖均以理想球面 R 为基准）
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Cell",
-			  meta = (DisplayName = "单元格z偏移"))
-	float CellOffsetZ;
+			  meta = (DisplayName = "地块z偏移"))
+	float PlotOffsetZ;
 
 	// 单元格高度
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid Configuration|Cell",

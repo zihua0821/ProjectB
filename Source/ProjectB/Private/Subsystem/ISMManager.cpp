@@ -178,7 +178,7 @@ void UISMManager::ConfigureSphereBuckets(const FISMSphereBucketConfig& Config)
         }
     }
 
-    // 角跨度约束（方案 B）：限制桶最大角跨度，压缩球面弧高（∝α²）与 AABB 尺寸；
+    // 角跨度约束：限制桶最大角跨度，压缩球面弧高（∝α²）与 AABB 尺寸；
     // 经度恒按 360° 计（经度方向是膨胀主源）；min 在面积校验之后只会缩小块，永不超面积上限；
     // ≤ 0 跳过（平面测试台不传字段，行为不变）。
     if (Config.TotalLatSpanDeg > 0.f && Config.MaxBucketAngularSpanDeg > 0.f)
@@ -276,7 +276,9 @@ TArray<FGlobalInstanceId> UISMManager::BatchAddInstances(
         const bool bWasEmpty = (Group.BucketInstanceCounts[0] == 0);
         Group.TotalInstanceCount += AddCount;
         Group.BucketInstanceCounts[0] += AddCount;
-        // 空桶 → 非空：显式重算 Bounds（增量 API 不会自动更新——否则视锥剔除失效）
+        // 空桶 → 非空：显式重算 Bounds——引擎增量 API 不会内联刷新 Bounds（帧末补偿存在但有多重条件，
+        // 重建分支可能吞掉）；陈旧 Bounds 双重失效：①位置错位 → 视锥误剔除（该显示的消失）
+        // ②膨胀残留 → 过度提交（性能浪费）。注：此机制仅对非 Nanite 组件生效（Nanite 不依赖组件 Bounds 剔除）
         if (bWasEmpty)
         {
             ISMComp->UpdateBounds();
@@ -318,7 +320,9 @@ TArray<FGlobalInstanceId> UISMManager::BatchAddInstances(
         const bool bWasEmpty = (Group.BucketInstanceCounts[BucketIdx] == 0);
         Group.TotalInstanceCount += Indices.Num();
         Group.BucketInstanceCounts[BucketIdx] += Indices.Num();
-        // 空桶 → 非空：显式重算 Bounds（增量 API 不会自动更新——否则视锥剔除失效）
+        // 空桶 → 非空：显式重算 Bounds——引擎增量 API 不会内联刷新 Bounds（帧末补偿存在但有多重条件，
+        // 重建分支可能吞掉）；陈旧 Bounds 双重失效：①位置错位 → 视锥误剔除（该显示的消失）
+        // ②膨胀残留 → 过度提交（性能浪费）。注：此机制仅对非 Nanite 组件生效（Nanite 不依赖组件 Bounds 剔除）
         if (bWasEmpty)
         {
             Bucket->UpdateBounds();
@@ -591,7 +595,7 @@ void UISMManager::DebugPrintBucketStats()
 }
 
 // ============================================================================
-// 调试：桶包围盒可视化（方案 A：线框 + 桶索引配色 + 内缩 1cm 防共面重合）
+// 调试：桶包围盒可视化（线框 + 桶索引配色 + 内缩 1cm 防共面重合）
 // ============================================================================
 
 void UISMManager::DrawBucketBounds(UStaticMesh* Mesh, float LineThickness)
@@ -643,7 +647,7 @@ void UISMManager::DrawBucketBoundsByPath(const FString& MeshPath, float LineThic
             }
 
             const FBoxSphereBounds& B = Bucket->Bounds;
-            // 内缩 1cm：相邻桶共面边界线不重合（方案 A 防重叠核心）
+            // 内缩 1cm：相邻桶共面边界线不重合（防重叠核心）
             const FVector Extent = B.BoxExtent - FVector(1.0f);
             DrawDebugBox(World, B.Origin, Extent, FQuat::Identity, Color,
                 /*bPersistentLines=*/bPersistent, /*LifeTime=*/bPersistent ? -1.0f : 0.0f,

@@ -1,5 +1,5 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
+// PlanetInterface.cpp
+// 实现：星球接口默认实现（业务覆写见 APlanetActor）
 
 #include "Planet/PlanetInterface.h"
 
@@ -28,11 +28,6 @@ void IPlanetInterface::CallPlanetInfoChanged_Implementation()
 
 void IPlanetInterface::UpdateRotation_Implementation(float NewAngle)
 {
-}
-
-FOrbitDefinition IPlanetInterface::GetOrbitData_Implementation(FName OrbitName) const
-{
-	return FOrbitDefinition();
 }
 
 FTransform IPlanetInterface::GetCellWorldTransform_Implementation(FIntPoint CellCoord) const

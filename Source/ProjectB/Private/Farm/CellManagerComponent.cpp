@@ -139,7 +139,7 @@ void UCellManagerComponent::Initialize(UPlanetConfigDataAsset* InPlanetConfig, U
 		BucketCfg.LatCells = PlanetConfig->NumLat - 1;        // 与 CreateMassCell 同源
 		BucketCfg.LonCells = PlanetConfig->NumLon;
 		BucketCfg.InstancesPerBucket = INSTANCES_PER_BUCKET;  // 唯一参数（FR-7/C-5）
-		BucketCfg.TotalLatSpanDeg = PlanetConfig->MaxLat - PlanetConfig->MinLat; // 角跨度约束（方案 B）：纬度总跨度
+		BucketCfg.TotalLatSpanDeg = PlanetConfig->MaxLat - PlanetConfig->MinLat; // 角跨度约束：纬度总跨度
 		BucketCfg.MaxBucketAngularSpanDeg = 30.0f;                             // 桶最大角跨度上限（30° 档）
 		ISMManager->ConfigureSphereBuckets(BucketCfg);
 	}
@@ -225,7 +225,7 @@ void UCellManagerComponent::CreateMassCell()
 
         	// 计算地块朝向：让 Z 轴指向球心外（径向）
         	const FVector NormalDirection = PlotLocation.GetSafeNormal();
-        	PlotLocation += NormalDirection * FarmlandConfig->CellOffsetZ;
+        	PlotLocation += NormalDirection * FarmlandConfig->PlotOffsetZ;   // 地块网格 Z 偏移（装饰性——不影响作业几何：选点/悬停/覆盖均以理想球面 R 为基准）
         	const FRotator PlotRotation = FRotationMatrix::MakeFromZ(NormalDirection).Rotator();
 
         	// 计算纬度缩放系数（基于纬度角，Z 轴是上下方向）
@@ -676,9 +676,6 @@ void UCellManagerComponent::PlowLand(FIntPoint Coords)
 		   }
 	   }
    );
-
-	// 意图委托：Plot Slot（0）启用（耕地成功，Defer 命令帧末落盘不影响意图传达）
-	OnCellSlotStateChanged.Broadcast(Coords, 0, true);
 }
 
 void UCellManagerComponent::RemoveLand(FIntPoint Coords)
@@ -704,9 +701,6 @@ void UCellManagerComponent::RemoveLand(FIntPoint Coords)
 
 	// 恢复单元格类型为空地
 	EntityManager.GetFragmentDataChecked<FCellStaticFragment>(Entity).CellType = ECellType::Empty;
-
-	// 意图委托：Plot Slot（0）禁用（移除耕地成功）
-	OnCellSlotStateChanged.Broadcast(Coords, 0, false);
 }
 
 void UCellManagerComponent::WetLand(FIntPoint Coords)
@@ -921,32 +915,7 @@ void UCellManagerComponent::PlantCrop(FIntPoint Coords, const FString& CropName)
             if (PlotState->StateData.HasState(EPlotState::PestInfested))
                 CropState.CropStateData.AddState(ECropState::PestInfested);
 
-        	//-----------------
-            // 生长计算随机初始生长时间
-            // FCropGrowthTimerFragment& Timer = EM.GetFragmentDataChecked<FCropGrowthTimerFragment>(Entity);
-            // Timer.TotalGrowthTime = FMath::RandRange(0.f, Row->GrowthSeedTime + Row->GrowthSeedlingTime);
-            // const float SeedlingStart = CropStaticConfig.GrowthSeedTime;
-            // const float MatureStart = CropStaticConfig.GrowthSeedTime + CropStaticConfig.GrowthSeedlingTime;
-            // if (Timer.TotalGrowthTime < SeedlingStart)
-            // {
-	           //  CropState.CropGrowthStage = ECropGrowthStage::Seed;
-	           //  Timer.CurrentStageGrowthTime = Timer.TotalGrowthTime;
-            // }
-            // else if (Timer.TotalGrowthTime < MatureStart)
-            // {
-	           //  CropState.CropGrowthStage = ECropGrowthStage::Seedling;
-	           //  Timer.CurrentStageGrowthTime = Timer.TotalGrowthTime - SeedlingStart;
-            // }
-            // else
-            // {
-	           //  CropState.CropGrowthStage = ECropGrowthStage::Mature;
-	           //  Timer.CurrentStageGrowthTime = Timer.TotalGrowthTime - MatureStart;
-            // }
-            //-----------------
         });
-
-	// 意图委托：Crop Slot（1）启用（播种成功，Defer 命令帧末落盘不影响意图传达）
-	OnCellSlotStateChanged.Broadcast(Coords, 1, true);
 }
 
 bool UCellManagerComponent::HarvestCrop(FIntPoint Coords)
@@ -1011,9 +980,6 @@ void UCellManagerComponent::RemoveCrop(FIntPoint Coords)
 
 	// 将作物状态改为已收获（渲染处理器会自动处理 Mesh 切换）
 	CropState->CropGrowthStage = ECropGrowthStage::None;
-
-	// 意图委托：Crop Slot（1）禁用（移除作物成功）
-	OnCellSlotStateChanged.Broadcast(Coords, 1, false);
 }
 
 void UCellManagerComponent::CropDried(FIntPoint Coords)

@@ -1,4 +1,6 @@
-﻿#pragma once
+// CropGrowthProcessor.h
+// 作物生长推进处理器：阶段计时/转换 + 品质累加（Harvested 阶段为重播延迟计时段）
+#pragma once
 
 #include "CoreMinimal.h"
 #include "MassProcessor.h"

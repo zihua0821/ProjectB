@@ -4,8 +4,10 @@
 #include "Game/ProjectBGameInstance.h"
 
 #include "Farm/FarmlandActor.h"
+#include "Farm/FarmlandConfigDataAsset.h"      // TSoftObjectPtr 赋值 / LoadSynchronous 需完整类型
 #include "Kismet/GameplayStatics.h"
 #include "Planet/PlanetActor.h"
+#include "Planet/PlanetConfigDataAsset.h"       // 同上（完整类型）
 #include "Tools/FarmSaveGame.h"
 
 void UProjectBGameInstance::SaveGame(FString SlotName)

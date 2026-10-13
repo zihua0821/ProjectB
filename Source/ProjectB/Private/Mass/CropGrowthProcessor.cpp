@@ -1,3 +1,5 @@
+// CropGrowthProcessor.cpp
+// 实现：作物生长推进（阶段计时/阶段转换/品质累加；Harvested 阶段为重播延迟计时段）
 #include "Mass/CropGrowthProcessor.h"
 #include "MassEntityManager.h"
 #include "MassExecutionContext.h"
@@ -76,13 +78,13 @@ void UCropGrowthProcessor::Execute(FMassEntityManager& EntityManager, FMassExecu
                 continue;
             }
 
-            // 3. 种子阶段特殊处理：同时缺水缺肥 → 不更新、不生长
+            // 2. 种子阶段特殊处理：同时缺水缺肥 → 不更新、不生长
             const bool bNeedsWater = !PlotState.StateData.HasState(EPlotState::Watered);
             const bool bNeedsFertilizer = !PlotState.StateData.HasState(EPlotState::Fertilized);
             if (CropState.CropGrowthStage == ECropGrowthStage::Seed && bNeedsWater && bNeedsFertilizer)
                 continue;
 
-            // 4. 更新品质累加时间（所有未收获阶段）
+            // 3. 更新品质累加时间（所有未收获阶段）
             {
                 FCropQualityData& Q = Quality.QualityData;
                 if (CropState.CropStateData.HasState(ECropState::NeedsWater))         Q.AddWaterDeficitTime(DeltaTime);
@@ -100,14 +102,14 @@ void UCropGrowthProcessor::Execute(FMassEntityManager& EntityManager, FMassExecu
                 else                                                                   Q.AddNoPestTime(DeltaTime);
             }
 
-            // 5. 成熟阶段：只更新品质，不生长、不消耗
+            // 4. 成熟阶段：只更新品质，不生长、不消耗
             if (CropState.CropGrowthStage == ECropGrowthStage::Mature)
             {
                 Quality.QualityData.GetQuality(Timer.TotalGrowthTime); // 刷新评分
                 continue;
             }
 
-            // 6. 计算生长速率
+            // 5. 计算生长速率
             float GrowthRate = 1.0f;
             if (bNeedsWater || bNeedsFertilizer)
             {
@@ -121,7 +123,7 @@ void UCropGrowthProcessor::Execute(FMassEntityManager& EntityManager, FMassExecu
                 if (CropState.CropStateData.HasState(ECropState::PestInfested))   GrowthRate *= FarmConfig->GrowthRate_PestInfested;
             }
 
-            // 7. 生长计时
+            // 6. 生长计时
             if (GrowthRate > 0.0f)
             {
                 Timer.TotalGrowthTime += DeltaTime * GrowthRate;
@@ -136,7 +138,7 @@ void UCropGrowthProcessor::Execute(FMassEntityManager& EntityManager, FMassExecu
                 default: break;
                 }
 
-                // 8. 阶段转换
+                // 7. 阶段转换
                 if (CropState.CropGrowthStage == ECropGrowthStage::Seed && Timer.TotalGrowthTime >= CropStaticConfig.GrowthSeedTime)
                 {
                     CropState.CropGrowthStage = ECropGrowthStage::Seedling;
@@ -163,7 +165,7 @@ void UCropGrowthProcessor::Execute(FMassEntityManager& EntityManager, FMassExecu
                         });
                 }
 
-                // 9. 消耗地块资源
+                // 8. 消耗地块资源（历史实现已停用——地块资源消耗由自然流失统一处理）
                 // PlotState.MoisturePercentage = FMath::Clamp(PlotState.MoisturePercentage - CropStaticConfig.MoistureConsumePerSecond * DeltaTime, 0.0f, 1.0f);
                 // PlotState.FertilityPercentage = FMath::Clamp(PlotState.FertilityPercentage - CropStaticConfig.FertilityConsumePerSecond * DeltaTime, 0.0f, 1.0f);
 

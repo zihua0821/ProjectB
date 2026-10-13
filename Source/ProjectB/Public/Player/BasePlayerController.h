@@ -1,12 +1,12 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
+// BasePlayerController.h
+// 玩家控制器：编辑模式进/出（选定暂停接线）+ 轨道编辑桥（数据层 UpdateOrbitData / 实体层 RebuildOrbitEntities + 可视化开关）+ 编辑操作认领守卫
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Crops/CropData.h"
 #include "GameFramework/PlayerController.h"
 #include "Game/ProjectBGameInstance.h"
-#include "Mass/SatelliteManagerComponent.h"   // FRuntimeOrbitData（轨道调试命令参数）
+#include "Mass/OrbitTypes.h"                     // FOrbitDefinition（轨道编辑接口参数）
 #include "BasePlayerController.generated.h"
 
 class APlanetActor;
@@ -80,19 +80,38 @@ protected:
 	TArray<FName> GetOrbitNames() const;
 
 	/** 读取指定轨道数据（面板初始化/切换选中） */
-	bool GetOrbitData(FName OrbitName, FRuntimeOrbitData& OutData) const;
+	bool GetOrbitData(FName OrbitName, FOrbitDefinition& OutData) const;
 
-	/** 写入轨道数据（面板拖动实时预览；不重建卫星） */
-	bool SetOrbitData(const FRuntimeOrbitData& NewData) const;
+	/** 【数据层】更新轨道数据（面板拖动实时预览；不触碰实体——实体重建见 RebuildOrbitEntities） */
+	bool UpdateOrbitData(const FOrbitDefinition& NewData) const;
 
 	/** 新建轨道（成功后重建全部卫星） */
-	bool CreateOrbit(const FRuntimeOrbitData& NewData) const;
+	bool CreateOrbit(const FOrbitDefinition& NewData) const;
 
 	/** 删除轨道（成功后重建剩余轨道的卫星） */
 	void DeleteOrbit(FName OrbitName) const;
 
-	/** 提交编辑变更（参数控件的回车/失焦落定）：只重建指定轨道——所见即所得 */
-	void CommitOrbitChanges(FName OrbitName) const;
+	/** 【实体层】重建轨道实体（该轨下的全部运行时对象：槽位/卫星/渲染实例/选点缓存）
+	 *  注：“实体”为广义所指，非 Mass Entity 单指；提交落定（回车/失焦/节拍）调用——所见即所得 */
+	void RebuildOrbitEntities(FName OrbitName) const;
+
+	// ---- 轨道调试可视化开关（面板勾选——每轨：槽位球 / 卫星轨迹） ----
+
+	/** 槽位球显示开关（写/读——面板行勾选态） */
+	void SetOrbitSlotMarkersVisible(FName OrbitName, bool bVisible) const;
+	bool IsOrbitSlotMarkersVisible(FName OrbitName) const;
+
+	/** 卫星轨迹路径点显示开关（写/读） */
+	void SetOrbitTrajectoryVisible(FName OrbitName, bool bVisible) const;
+	bool IsOrbitTrajectoryVisible(FName OrbitName) const;
+
+	/** 服务范围（圆柱）显示开关（写/读——每轨；缺省显示） */
+	void SetOrbitServiceRangeVisible(FName OrbitName, bool bVisible) const;
+	bool IsOrbitServiceRangeVisible(FName OrbitName) const;
+
+	/** 覆盖（覆盖格）显示开关（写/读——每轨；缺省显示） */
+	void SetOrbitCoverageVisible(FName OrbitName, bool bVisible) const;
+	bool IsOrbitCoverageVisible(FName OrbitName) const;
 
 	UFUNCTION(BlueprintCallable, Category = "OrbitEdit")
 	bool IsOrbitEditMode() const { return bOrbitEditMode; }
