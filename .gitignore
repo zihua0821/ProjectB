@@ -83,3 +83,7 @@ Packed/
 
 # 占位mesh文件
 Content/Mesh/PlaceholderMeshes/
+
+# 私有文档（仅本地保留，不公开）
+# 路径锚定：仅忽略仓库根目录下的 docs/Private/（不影响 Source/ProjectB/Private 等代码目录）
+/docs/Private/
